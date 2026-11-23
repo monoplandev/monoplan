@@ -394,14 +394,77 @@ final class SettingsModel: ObservableObject {
 
 /// The device preferences the app owns. Appearance drives
 /// `NSApp.appearance`; the launch toggle is the tray's
-/// (`LaunchPreference`).
+/// (`LaunchPreference`); the reminders are this Mac's two settings
+/// (spec/reminders.md), applied by `ReminderScheduler`.
 struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     /// Read by the window's sidebar (`MainWindowView`).
     @AppStorage(listCountsKey) private var showListCounts = false
+    @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
+    @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
+    /// Notifications are turned off for the app in System Settings: no
+    /// reminder can be shown whatever is picked here.
+    @State private var notificationsDenied = false
 
     var body: some View {
         Form {
+            general
+            reminders
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
+        .onChange(of: eventReminder) { remindersChanged() }
+        .onChange(of: taskReminder) { remindersChanged() }
+        .onAppear { readDenied() }
+        // Read again on the way back from System Settings.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            readDenied()
+        }
+    }
+
+    private func readDenied() {
+        ReminderScheduler.shared.readDenied { notificationsDenied = $0 }
+    }
+
+    /// Schedule by the new setting. The first one turned on is when
+    /// the system asks whether to allow notifications; a refusal is
+    /// read back the next time the app comes forward.
+    private func remindersChanged() {
+        ReminderScheduler.shared.reschedule(settingsChanged: true)
+        readDenied()
+    }
+
+    private var reminders: some View {
+        Section {
+            Picker("Events", selection: $eventReminder) {
+                Text("10 minutes before").tag(EventReminder.tenMinutes)
+                Text("Off").tag(EventReminder.off)
+            }
+            Picker("Scheduled tasks", selection: $taskReminder) {
+                Text("At the time").tag(TaskReminder.atTime)
+                Text("10 minutes before").tag(TaskReminder.tenMinutes)
+                Text("Off").tag(TaskReminder.off)
+            }
+            if notificationsDenied {
+                Button("Open Notification Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            if notificationsDenied {
+                Text("Notifications are turned off for Monoplan, so no reminders are shown.")
+            } else {
+                Text("For items with a time, on this Mac only.")
+            }
+        }
+    }
+
+    private var general: some View {
+        Section {
             Picker("Appearance", selection: Binding(
                 get: { model.appearance },
                 set: { model.setAppearance($0) }
@@ -417,8 +480,6 @@ struct GeneralPane: View {
                 set: { model.setOpenWindowAtLaunch($0) }
             ))
         }
-        .formStyle(.grouped)
-        .frame(width: 460)
     }
 }
 

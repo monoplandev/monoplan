@@ -165,7 +165,10 @@ final class AppModel: ObservableObject {
         hasAccount = location.hasAccount
         engineController.onState = { [weak self] state in self?.stateChanged(state) }
         engineController.onChanged = { [weak self] in self?.docChanged() }
-        reminders.onOpen = { [weak self] ref in self?.openReminder(ref) }
+        reminders.leadText = { String(localized: "In \($0) minutes") }
+        reminders.onOpen = { [weak self] tap in
+            self?.openReminder(ItemRef(docId: tap.docId, itemId: tap.itemId, title: tap.title))
+        }
         engineController.start()
     }
 
@@ -1133,7 +1136,12 @@ final class AppModel: ObservableObject {
     /// (spec/reminders.md).
     func refreshReminders() {
         read({ try $0.reminders() }) { [weak self] rows, _ in
-            if let rows { self?.reminders.update(rows) }
+            guard let rows else { return }
+            self?.reminders.update(rows.map {
+                ReminderSource(
+                    docId: $0.docId, itemId: $0.id, listId: $0.listId, title: $0.text, when: $0.when,
+                    event: $0.event)
+            })
         }
     }
 
@@ -1302,10 +1310,7 @@ final class AppModel: ObservableObject {
             busy = nil
             hasAccount = location.hasAccount
             if let error { lastError = error.localizedDescription }
-            if !hasAccount {
-                Self.clearWidgetSnapshot()
-                reminders.clear()
-            }
+            if !hasAccount { Self.clearWidgetSnapshot() }
         }
     }
 
@@ -1324,10 +1329,7 @@ final class AppModel: ObservableObject {
             busy = nil
             hasAccount = location.hasAccount
             deleteAccountError = error?.localizedDescription
-            if !hasAccount {
-                Self.clearWidgetSnapshot()
-                reminders.clear()
-            }
+            if !hasAccount { Self.clearWidgetSnapshot() }
             completion(error == nil)
         }
     }

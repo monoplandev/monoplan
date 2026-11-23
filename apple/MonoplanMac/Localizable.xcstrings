@@ -77,6 +77,16 @@
         }
       }
     },
+    "10 minutes before" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 minutos antes"
+          }
+        }
+      }
+    },
     "<1m" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -252,6 +262,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Responsable"
+          }
+        }
+      }
+    },
+    "At the time" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A la hora"
           }
         }
       }
@@ -799,6 +819,26 @@
         }
       }
     },
+    "Events" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eventos"
+          }
+        }
+      }
+    },
+    "For items with a time, on this Mac only." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Para los elementos con hora, solo en este Mac."
+          }
+        }
+      }
+    },
     "Hide Empty Days" : {
       "localizations" : {
         "es" : {
@@ -1161,6 +1201,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "en %@"
+          }
+        }
+      }
+    },
+    "In %lld minutes" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En %lld minutos"
           }
         }
       }
@@ -1777,6 +1827,16 @@
         }
       }
     },
+    "Notifications are turned off for Monoplan, so no reminders are shown." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las notificaciones de Monoplan están desactivadas, así que no se muestra ningún recordatorio."
+          }
+        }
+      }
+    },
     "now" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1784,6 +1844,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ahora"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desactivado"
           }
         }
       }
@@ -1870,6 +1940,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Abrir Monoplan"
+          }
+        }
+      }
+    },
+    "Open Notification Settings…" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir ajustes de notificaciones…"
           }
         }
       }
@@ -2023,6 +2103,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Actualizar"
+          }
+        }
+      }
+    },
+    "Reminders" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recordatorios"
           }
         }
       }
@@ -2251,6 +2341,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Guardar"
+          }
+        }
+      }
+    },
+    "Scheduled tasks" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tareas programadas"
           }
         }
       }

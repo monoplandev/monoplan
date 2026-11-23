@@ -9,6 +9,7 @@
 // Build and run on the simulator with `bun run ios` from the repo
 // root, after `bun run build:apple` has produced the XCFramework.
 
+import MonoplanMacKit
 import SwiftUI
 
 @main

@@ -13,6 +13,9 @@ use super::{Ctx, doc_tag};
 pub struct Reminder {
     pub id: String,
     pub text: String,
+    /// The list the item is in, for a client that opens the item
+    /// where its row is.
+    pub list_id: String,
     /// `YYYY-MM-DDTHH:MM`, floating: always timed.
     pub when: String,
     /// An event (`spec/events-plan.md`); otherwise a scheduled task.
@@ -53,6 +56,7 @@ pub fn reminders(cx: &Ctx, now: Option<&str>) -> anyhow::Result<Vec<Reminder>> {
                     Some(Reminder {
                         id: i.id,
                         text: i.text,
+                        list_id: i.list_id,
                         when,
                         event: i.event,
                         doc_id: doc_id.clone(),

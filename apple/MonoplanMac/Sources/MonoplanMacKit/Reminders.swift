@@ -1,6 +1,6 @@
 // Reminders (spec/reminders.md): which notifications a device has
 // pending, from the items that have a time ahead and the device's two
-// settings. Pure data here; the app target hands the plan to the
+// settings. Pure data here; `ReminderScheduler` hands the plan to the
 // system's notification centre.
 
 import Foundation
@@ -66,14 +66,17 @@ public struct ReminderSettings: Equatable, Sendable {
 public struct ReminderSource: Equatable, Sendable {
     public let docId: String?
     public let itemId: String
+    /// The item's list: where its row is, for the app that opens it.
+    public let listId: String
     public let title: String
     /// `YYYY-MM-DDTHH:MM`, floating.
     public let when: String
     public let event: Bool
 
-    public init(docId: String?, itemId: String, title: String, when: String, event: Bool) {
+    public init(docId: String?, itemId: String, listId: String, title: String, when: String, event: Bool) {
         self.docId = docId
         self.itemId = itemId
+        self.listId = listId
         self.title = title
         self.when = when
         self.event = event
@@ -84,6 +87,7 @@ public struct ReminderSource: Equatable, Sendable {
 public struct PlannedReminder: Equatable, Sendable {
     public let docId: String?
     public let itemId: String
+    public let listId: String
     public let title: String
     /// Minutes ahead of the item's start that it fires.
     public let lead: Int
@@ -120,7 +124,8 @@ public enum Reminders {
             planned.append((
                 at,
                 PlannedReminder(
-                    docId: source.docId, itemId: source.itemId, title: source.title, lead: lead,
+                    docId: source.docId, itemId: source.itemId, listId: source.listId, title: source.title,
+                    lead: lead,
                     fire: calendar.dateComponents(fields, from: at)
                 )
             ))

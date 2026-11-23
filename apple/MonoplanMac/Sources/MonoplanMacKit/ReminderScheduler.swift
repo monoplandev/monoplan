@@ -1,30 +1,38 @@
 // Reminders (spec/reminders.md): local notifications for the items
-// that have a time ahead, scheduled from what this iPhone last synced.
-// The plan (which items, when each fires) is `Reminders.plan` in the
-// Kit, over `Engine.reminders` and this device's two settings; this is
-// the half that talks to the system. Every change replaces the whole
-// pending set: at most `Reminders.limit` requests, and nothing else in
-// the app schedules a notification.
+// that have a time ahead, scheduled from what this device last synced.
+// The plan (which items, when each fires) is `Reminders.plan`, over
+// `Engine.reminders` and the device's two settings; this is the half
+// that talks to the system, shared by the iOS and the Mac app. Every
+// change replaces the whole pending set: at most `Reminders.limit`
+// requests, and nothing else in either app schedules a notification.
 //
 // Both settings start off, so nothing is scheduled and nothing is
 // asked until one is turned on in Settings; permission is asked for
-// then. A tap on a notification opens the item's
-// page.
+// then. A click on a notification is handed to the app (`onOpen`).
+//
+// The one file of the Kit that is not Foundation alone: it uses
+// UserNotifications, which every target that links the Kit has.
 
 import Foundation
-import MonoplanCore
-import MonoplanMacKit
 import UserNotifications
 
-final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
-    /// One for the process: the centre's delegate has to be in place
-    /// by the end of launch for a tap that started the app to arrive
-    /// (`MonoplanApp.init` touches this).
-    static let shared = ReminderScheduler()
+/// The item a clicked reminder was for.
+public struct ReminderTap: Equatable, Sendable {
+    public let docId: String?
+    public let itemId: String
+    public let listId: String
+    public let title: String
+}
 
-    /// A notification was tapped. Set by the model; a tap from before
-    /// it was set is handed over as it is.
-    var onOpen: ((ItemRef) -> Void)? {
+public final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
+    /// One for the process: the centre's delegate has to be in place
+    /// by the end of launch for a click that started the app to
+    /// arrive, so the app touches this as it launches.
+    public static let shared = ReminderScheduler()
+
+    /// A notification was clicked. Set by the app; a click from before
+    /// it was set is handed over as it is. Main queue.
+    public var onOpen: ((ReminderTap) -> Void)? {
         didSet {
             guard let onOpen, let tapped else { return }
             self.tapped = nil
@@ -32,11 +40,16 @@ final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// The body of a reminder that fires ahead of its item, given the
+    /// minutes ("In 10 minutes"): the app's, since the words are in
+    /// its catalog and not the Kit's.
+    public var leadText: (Int) -> String = { "\($0) min" }
+
     private let center = UNUserNotificationCenter.current()
-    private var tapped: ItemRef?
+    private var tapped: ReminderTap?
     private var sources: [ReminderSource] = []
     /// What the centre was last given; nil when that is not known (at
-    /// launch, and after the settings changed under us).
+    /// launch, and while permission is denied).
     private var pending: [PlannedReminder]?
     /// A permission prompt is up.
     private var asking = false
@@ -46,26 +59,17 @@ final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
     }
 
-    /// The items a reminder may be for, as just read.
-    func update(_ rows: [Reminder]) {
-        sources = rows.map {
-            ReminderSource(docId: $0.docId, itemId: $0.id, title: $0.text, when: $0.when, event: $0.event)
-        }
+    /// The items a reminder may be for, as just read. Main queue.
+    public func update(_ sources: [ReminderSource]) {
+        self.sources = sources
         reschedule()
     }
 
-    /// Signed out: nothing is pending for an account that is gone.
-    func clear() {
-        sources = []
-        pending = []
-        center.removeAllPendingNotificationRequests()
-    }
-
     /// Bring the pending set in line with the items, the settings and
-    /// the clock. Main thread. `settingsChanged`: the person just
+    /// the clock. Main queue. `settingsChanged`: the person just
     /// picked a setting, the moment to ask for permission when one is
     /// on, whether or not anything is timed yet.
-    func reschedule(settingsChanged: Bool = false) {
+    public func reschedule(settingsChanged: Bool = false) {
         let settings = ReminderSettings.load()
         let plan = Reminders.plan(sources, settings: settings)
         let wanted = settingsChanged && (settings.event != .off || settings.task != .off)
@@ -73,6 +77,16 @@ final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
         center.getNotificationSettings { [weak self] system in
             let status = system.authorizationStatus
             DispatchQueue.main.async { self?.apply(plan, status: status, ask: wanted || !plan.isEmpty) }
+        }
+    }
+
+    /// Whether notifications are turned off for the app in the
+    /// system's settings, for the app's own Settings to say so.
+    /// Answers on the main queue.
+    public func readDenied(_ done: @escaping (Bool) -> Void) {
+        center.getNotificationSettings { system in
+            let denied = system.authorizationStatus == .denied
+            DispatchQueue.main.async { done(denied) }
         }
     }
 
@@ -94,22 +108,21 @@ final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
         default:
             pending = plan
             center.removeAllPendingNotificationRequests()
-            for reminder in plan { center.add(Self.request(reminder)) }
+            for reminder in plan { center.add(request(reminder)) }
         }
     }
 
     private static let docKey = "doc"
     private static let itemKey = "item"
+    private static let listKey = "list"
 
-    private static func request(_ reminder: PlannedReminder) -> UNNotificationRequest {
+    private func request(_ reminder: PlannedReminder) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = reminder.title
-        if reminder.lead > 0 {
-            content.body = String(localized: "In \(reminder.lead) minutes")
-        }
+        if reminder.lead > 0 { content.body = leadText(reminder.lead) }
         content.sound = .default
-        var info: [String: String] = [itemKey: reminder.itemId]
-        if let docId = reminder.docId { info[docKey] = docId }
+        var info: [String: String] = [Self.itemKey: reminder.itemId, Self.listKey: reminder.listId]
+        if let docId = reminder.docId { info[Self.docKey] = docId }
         content.userInfo = info
         // No time zone in the fields: a floating time, read in the
         // zone the device is in when it comes round.
@@ -119,26 +132,29 @@ final class ReminderScheduler: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: UNUserNotificationCenterDelegate
 
-    /// A reminder that comes round while the app is open is still
-    /// shown: the page on screen is rarely the item's.
-    func userNotificationCenter(
+    /// A reminder that comes round while the app is in front is still
+    /// shown: what is on screen is rarely the item.
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .list, .sound])
     }
 
-    func userNotificationCenter(
+    public func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let content = response.notification.request.content
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-           let itemId = content.userInfo[Self.itemKey] as? String {
-            let ref = ItemRef(docId: content.userInfo[Self.docKey] as? String, itemId: itemId, title: content.title)
+           let itemId = content.userInfo[Self.itemKey] as? String,
+           let listId = content.userInfo[Self.listKey] as? String {
+            let tap = ReminderTap(
+                docId: content.userInfo[Self.docKey] as? String, itemId: itemId, listId: listId,
+                title: content.title)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if let onOpen { onOpen(ref) } else { tapped = ref }
+                if let onOpen { onOpen(tap) } else { tapped = tap }
             }
         }
         completionHandler()

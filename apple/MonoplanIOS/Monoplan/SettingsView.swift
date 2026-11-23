@@ -12,7 +12,6 @@
 import MonoplanCore
 import MonoplanMacKit
 import SwiftUI
-import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -64,10 +63,7 @@ struct SettingsView: View {
         // Read again on the way back from the system's Settings.
         .onChange(of: scenePhase, initial: true) {
             guard scenePhase == .active else { return }
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
-                let denied = settings.authorizationStatus == .denied
-                DispatchQueue.main.async { notificationsDenied = denied }
-            }
+            ReminderScheduler.shared.readDenied { notificationsDenied = $0 }
         }
         .sheet(isPresented: $showSignIn) {
             SignInView()

@@ -11,7 +11,7 @@ final class RemindersTests: XCTestCase {
     private func at(_ when: String) -> Date { Agenda.start(of: when, calendar: calendar)! }
 
     private func source(_ id: String, _ when: String, event: Bool = false) -> ReminderSource {
-        ReminderSource(docId: "d", itemId: id, title: id, when: when, event: event)
+        ReminderSource(docId: "d", itemId: id, listId: "inbox", title: id, when: when, event: event)
     }
 
     private func clock(_ reminder: PlannedReminder) -> String {

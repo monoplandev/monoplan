@@ -9,7 +9,9 @@
 // the typed calls (spec/swift-bindings-plan.md; never the socket) and
 // reads the agenda and Starred again when the engine says something
 // changed, once a minute (the relative times move), and when the menu
-// opens. "Open Monoplan" and the item rows open the window.
+// opens. "Open Monoplan" and the item rows open the window. The same
+// read keeps this Mac's reminders scheduled (spec/reminders.md), and a
+// click on one opens the window on its item as a row does.
 
 import AppKit
 import MonoplanCore
@@ -44,6 +46,9 @@ final class TrayController: NSObject, NSMenuDelegate {
     private var starred: [MenuLine] = []
     private var fetchError: String?
     private var refreshQueued = false
+    /// This Mac's reminders: notifications for the items with a time
+    /// ahead, by Settings › General's two pickers.
+    private let reminders = ReminderScheduler.shared
     private var minuteTimer: Timer?
     /// The network as the system sees it. The engine's own liveness ping
     /// takes up to a minute to notice a dead socket after a Wi-Fi
@@ -66,6 +71,13 @@ final class TrayController: NSObject, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
         rebuildMenu()
+
+        reminders.leadText = { String(localized: "In \($0) minutes") }
+        reminders.onOpen = { [weak self] tap in
+            self?.mainWindow.show(
+                list: tap.listId, workspace: tap.docId, item: tap.itemId,
+                onCalendar: tap.listId == MainWindowModel.inbox)
+        }
 
         engineController.onState = { [weak self] state in
             guard let self else { return }
@@ -151,15 +163,23 @@ final class TrayController: NSObject, NSMenuDelegate {
         guard let calls = engineController.calls else { return }
         calls.run({ engine in
             // Today is the headline; a failed Starred read just leaves
-            // the section empty rather than replacing it.
-            (try engine.agenda(days: 0, pastDays: 0), (try? engine.starred()) ?? [])
+            // the section empty rather than replacing it. A failed
+            // reminders read leaves what is scheduled as it is.
+            (try engine.agenda(days: 0, pastDays: 0), (try? engine.starred()) ?? [], try? engine.reminders())
         }) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success((let groups, let starred)):
+            case .success((let groups, let starred, let reminders)):
                 self.lines = TodayMenu.lines(from: groups, now: Date())
                 self.starred = StarredMenu.lines(from: starred)
                 self.fetchError = nil
+                if let reminders {
+                    self.reminders.update(reminders.map {
+                        ReminderSource(
+                            docId: $0.docId, itemId: $0.id, listId: $0.listId, title: $0.text,
+                            when: $0.when, event: $0.event)
+                    })
+                }
             case .failure(EngineError.Stopped):
                 // An engine that has just stopped: the state line says
                 // so and the next engine's refresh fills the rows.
