@@ -419,6 +419,17 @@ for the month grid). `groupByDeadline` becomes
   autoscroll. The drop writes `dropOnDay` (`dayGroups.ts`) for each
   carried item in one action batch, so one undo step; the rules are
   "Reschedule" under "Deferred" below. Escape cancels. Not built: touch, ⌘↑ / ⌘↓ nudging by a day, the month grid.
+  **macOS** (built 2026-11-23, `AgendaTable.swift`; not yet run in the
+  app): the same gesture on the Calendar's table, one row at a time (the
+  table's selection is one row; no multi-select there yet). The table
+  only lays out: the press is read by the table itself (4 pt of travel
+  starts the drag), the stack is the dnd package's `DndDragOverlay`, the
+  edge scroll its `DndAutoscroll`, and the day under the pointer (header,
+  rows or empty line; not Overdue) has the tint. No `NSDraggingSession`.
+  The drop rule is `AgendaDrop` in `MonoplanMacKit`, a port of
+  `dropOnDay`, written through `Engine.setWhen` (duration kept) or
+  `Engine.setDeadline`: one call, one undo step. The Mac agenda places a
+  span on its start day only, so there are no span tails to exclude.
 - **Empty days** (web, 2026-11-22): by default every day from today on
   has a section, to the later of the last placed day and two weeks ahead
   (`fillEmptyDays`); a past day never shows empty, only when something

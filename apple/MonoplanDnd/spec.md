@@ -125,6 +125,14 @@ The drag rules are the web's, unchanged:
   the trailer, and as the list grows above it. Revealing the last row
   scrolls to the end, so the trailer comes with it.
 
+## Outside the list
+
+`DndDragOverlay` and `DndAutoscroll` are public on their own, for a
+view that drags its rows without being a `DndListView`: the Mac
+Calendar's table (`AgendaTable.swift`, drag a row to another day), as
+the web's agenda takes `dom/drag-overlay.ts` and `dom/autoscroll.ts`
+without the list.
+
 ## Not ported
 
 Expansion, the native (`draggable`) drag type, touch,

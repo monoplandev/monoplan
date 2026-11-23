@@ -21,17 +21,32 @@
 // preference) leaves out every empty day but Today.
 //
 // The rows are the window's SwiftUI rows, hosted in the cells and
-// rewritten in place; a day's header is a group row. No drag, no
-// multiple selection: a click selects an item, which opens its panel,
-// as in the SwiftUI lists. A right-click anywhere on an item's row
+// rewritten in place; a day's header is a group row. No multiple
+// selection: a click selects an item, which opens its panel, as in the
+// SwiftUI lists. A right-click anywhere on an item's row
 // selects it too and opens its menu: the menu is the table's, not the
 // hosted content's, which would only take a click on what it draws.
 // The selected row has a soft ground, not
 // the accent colour: the web's, a pale blue in the key window and a
 // grey in any other (`PaneColor.rowSelected`, `RowView`).
+//
+// Drag to reschedule (`spec/calendar-plan.md` "Reschedule"; the web's
+// `Upcoming.tsx`): a press on an item's row that travels 4 pt picks the
+// row up, the day section under the pointer is tinted, the pane's top
+// and bottom edges scroll it, and letting go writes the row's date onto
+// that day (`AgendaDrop`). Escape cancels. As on the web the agenda is
+// not the dnd list, and takes its parts: the stack that follows the
+// pointer is `DndDragOverlay` and the edge scroll `DndAutoscroll`
+// (`apple/MonoplanDnd`). Nothing of the table's own drag is used
+// (`spec/mac-dnd-plan.md` "Phase 2 attempt"): no `NSDraggingSession`,
+// no pasteboard, no drop feedback of AppKit's. One row at a time, the
+// table's selection being one row.
 
 import AppKit
 import MonoplanCore
+import MonoplanDnd
+import MonoplanDndCore
+import MonoplanMacKit
 import SwiftUI
 
 struct AgendaTable: NSViewRepresentable {
@@ -53,6 +68,10 @@ struct AgendaTable: NSViewRepresentable {
     let select: (AgendaEntry?) -> Void
     /// A row's right-click menu, top to bottom; nil is a separator.
     let menu: (AgendaEntry) -> [RowAction?]
+    /// A row was dragged onto a day (`YYYY-MM-DD`, never Overdue).
+    /// True when that writes something: the row is then on its way to
+    /// another day, and is not shown where it was in the meantime.
+    var reschedule: (AgendaEntry, String) -> Bool = { _, _ in false }
 
     /// One line of a row's menu.
     struct RowAction {
@@ -82,6 +101,7 @@ struct AgendaTable: NSViewRepresentable {
         table.dataSource = coordinator
         table.delegate = coordinator
         table.rowMenu = { [weak coordinator] in coordinator?.menu(forRow: $0) }
+        table.press = { [weak coordinator] in coordinator?.pressed($0) ?? false }
 
         let scroll = coordinator.scroll
         scroll.documentView = table
@@ -120,6 +140,16 @@ struct AgendaTable: NSViewRepresentable {
         override func menu(for event: NSEvent) -> NSMenu? {
             let row = row(at: convert(event.locationInWindow, from: nil))
             return row >= 0 ? rowMenu?(row) : nil
+        }
+
+        /// A press the table is given; true when it was taken (and
+        /// followed to the button's release), so the table's own
+        /// tracking is not run for it.
+        var press: ((NSEvent) -> Bool)?
+
+        override func mouseDown(with event: NSEvent) {
+            if press?(event) == true { return }
+            super.mouseDown(with: event)
         }
     }
 
@@ -170,6 +200,13 @@ struct AgendaTable: NSViewRepresentable {
         var entry: AgendaEntry? {
             if case .item(let row, _, _, _) = self { return row }
             return nil
+        }
+
+        /// The section the line is in: a day, or Overdue's.
+        var day: String {
+            switch self {
+            case .header(let day, _, _), .item(_, let day, _, _), .nothing(let day, _): return day
+            }
         }
     }
 
@@ -307,8 +344,9 @@ struct AgendaTable: NSViewRepresentable {
                 }
             } else {
                 let held = anchoring ? nil : topRow()
-                self.lines = lines
-                table.reloadData()
+                // The dropped row has landed (or the rows are others).
+                landing = nil
+                change(to: lines)
                 if let held { restore(held) }
             }
             syncSelection()
@@ -323,6 +361,58 @@ struct AgendaTable: NSViewRepresentable {
                 anchoring = false
                 putTodayAtTop(animated: true)
             }
+        }
+
+        /// Put `next` in the table by taking out the lines that left
+        /// and putting in the ones that came, the rest staying as they
+        /// are. `reloadData` builds every hosted row in view again,
+        /// near 2 ms each (45 ms for a pane of 25, measured
+        /// 2026-11-23): a row moved to another day was that long in
+        /// arriving. Here only the lines that came are built.
+        private func change(to next: [Line]) {
+            let old = lines
+            let difference = next.map(\.key).difference(from: old.map(\.key))
+            // Nothing to keep (the first rows, another account's): a
+            // reload is the same work.
+            guard !old.isEmpty, difference.count < old.count else {
+                lines = next
+                table.reloadData()
+                return
+            }
+            var removed = IndexSet(), inserted = IndexSet()
+            for step in difference {
+                switch step {
+                case .remove(let offset, _, _): removed.insert(offset)
+                case .insert(let offset, _, _): inserted.insert(offset)
+                }
+            }
+            // A selected line that leaves takes the table's selection
+            // with it; that is not the user's doing, and `show` puts
+            // the selection back by id.
+            syncing = true
+            table.beginUpdates()
+            lines = next
+            // Removals count in the old lines, insertions in the new.
+            table.removeRows(at: removed, withAnimation: [])
+            table.insertRows(at: inserted, withAnimation: [])
+            table.endUpdates()
+            syncing = false
+
+            // A line that stayed may be another height now (a row that
+            // gained its second line of small print).
+            var heights: [String: CGFloat] = [:]
+            for line in old { heights[line.key] = line.height }
+            var resized = IndexSet()
+            for (index, line) in next.enumerated() where !inserted.contains(index) {
+                if let was = heights[line.key], was != line.height { resized.insert(index) }
+            }
+            if !resized.isEmpty { table.noteHeightOfRows(withIndexesChanged: resized) }
+            for index in visibleRows() {
+                if let cell = table.view(atColumn: 0, row: index, makeIfNecessary: false) {
+                    fill(cell, lines[index], selected: index == table.selectedRow)
+                }
+            }
+            markRows()
         }
 
         private func visibleRows() -> Range<Int> {
@@ -353,6 +443,12 @@ struct AgendaTable: NSViewRepresentable {
 
         func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
             tableView.makeView(withIdentifier: RowView.identifier, owner: nil) as? RowView ?? RowView()
+        }
+
+        /// A row view came into use (scrolled into view, a reload): it
+        /// may be a recycled one, so its drag marks are set every time.
+        func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+            mark(rowView, row: row)
         }
 
         /// `selected`: the row is the selected one, which has no line
@@ -418,6 +514,231 @@ struct AgendaTable: NSViewRepresentable {
                 table.deselectAll(nil)
             }
             syncing = false
+        }
+
+        // MARK: Drag
+
+        /// The travel that turns a press into a drag: the web's
+        /// `DRAG_START_PX`.
+        private static let dragStart: CGFloat = 4
+
+        /// A row in the air.
+        private struct Drag {
+            let entry: AgendaEntry
+            /// The dragged line's key: its row is faint while it is up.
+            let key: String
+            let overlay: DndDragOverlay?
+            /// The pointer, in the window's coordinates.
+            var pointer: NSPoint
+            /// The day the row would land on.
+            var day: String?
+        }
+
+        private var drag: Drag?
+        /// The key of a line dropped on another day whose write has
+        /// not come back as rows yet. It is hidden until then: the
+        /// write is off the main thread, and the row shown again where
+        /// it was reads as the drop undone for a frame or two.
+        private var landing: String?
+        private var autoscroll = DndAutoscroll(buffer: 48)
+        private var link: CADisplayLink?
+        private var lastTick: CFTimeInterval = 0
+
+        /// A press on the table. One on an item's row with no modifier
+        /// is taken here: the row is selected at once, as a click
+        /// does, and the pointer is followed until the button comes up,
+        /// as a drag once it has travelled `dragStart`. The events are
+        /// read here, not left to `mouseDragged` / `mouseUp`: a press
+        /// can reach the table through a hosted SwiftUI row, and where
+        /// the rest of it would be delivered then is not the table's
+        /// to say.
+        fileprivate func pressed(_ event: NSEvent) -> Bool {
+            guard event.clickCount == 1,
+                  event.modifierFlags.intersection([.shift, .command, .control, .option]).isEmpty,
+                  let window = table.window else { return false }
+            let row = table.row(at: table.convert(event.locationInWindow, from: nil))
+            guard row >= 0, row < lines.count, let entry = lines[row].entry else { return false }
+            let key = lines[row].key
+            window.makeFirstResponder(table)
+            if table.selectedRow != row {
+                table.selectRowIndexes([row], byExtendingSelection: false)
+            }
+
+            let start = event.locationInWindow
+            var cancelled = false
+            while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp, .keyDown]) {
+                switch next.type {
+                case .leftMouseDragged:
+                    let point = next.locationInWindow
+                    if drag == nil {
+                        guard !cancelled, hypot(point.x - start.x, point.y - start.y) >= Self.dragStart else { continue }
+                        beginDrag(entry, key: key, from: start, in: window)
+                    }
+                    moveDrag(to: point)
+                case .leftMouseUp:
+                    endDrag(commit: true)
+                    return true
+                case .keyDown:
+                    // Escape puts the row back; the button is still
+                    // down, so the press is followed to its release.
+                    // Any other key is not for a row in the air.
+                    if next.keyCode == 53, drag != nil {
+                        cancelled = true
+                        endDrag(commit: false)
+                    }
+                default:
+                    break
+                }
+            }
+            endDrag(commit: false)
+            return true
+        }
+
+        private func beginDrag(_ entry: AgendaEntry, key: String, from start: NSPoint, in window: NSWindow) {
+            var overlay: DndDragOverlay?
+            if let index = lines.firstIndex(where: { $0.key == key }),
+               let rowView = table.rowView(atRow: index, makeIfNecessary: false) {
+                // The part of the row the selection covers.
+                let rect = rowView.bounds.insetBy(dx: RowView.inset, dy: 0)
+                var snapshots: [CGImage] = []
+                if rect.width > 0, rect.height > 0, let rep = rowView.bitmapImageRepForCachingDisplay(in: rect) {
+                    rowView.cacheDisplay(in: rect, to: rep)
+                    if let image = rep.cgImage { snapshots.append(image) }
+                }
+                var background = NSColor.windowBackgroundColor.cgColor
+                var accent = NSColor.controlAccentColor.cgColor
+                table.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    background = PaneColor.list.cgColor
+                    accent = NSColor.controlAccentColor.cgColor
+                }
+                overlay = DndDragOverlay(
+                    parent: window,
+                    snapshots: snapshots,
+                    itemSize: rect.size,
+                    totalCount: 1,
+                    cursor: window.convertPoint(toScreen: start),
+                    grabRect: window.convertToScreen(rowView.convert(rect, to: nil)),
+                    radius: RowView.radius,
+                    background: background,
+                    badgeColor: accent,
+                    badgeText: nil)
+            }
+            drag = Drag(entry: entry, key: key, overlay: overlay, pointer: start, day: nil)
+            // The table is the user's now, not the opening scroll's.
+            anchoring = false
+            markRows()
+            lastTick = 0
+            let link = table.displayLink(target: self, selector: #selector(tick(_:)))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+        }
+
+        private func moveDrag(to point: NSPoint) {
+            guard drag != nil, let window = table.window else { return }
+            drag?.pointer = point
+            drag?.overlay?.update(cursor: window.convertPoint(toScreen: point))
+            autoscroll.update(pointer: viewportPoint(point), viewport: viewport())
+            retarget()
+        }
+
+        /// The drag is over: let go on a day (`commit`), or put back.
+        private func endDrag(commit: Bool) {
+            guard let drag else { return }
+            self.drag = nil
+            drag.overlay?.stop()
+            autoscroll.stop()
+            link?.invalidate()
+            link = nil
+            if commit, let day = drag.day, parent.reschedule(drag.entry, day) {
+                let key = drag.key
+                landing = key
+                // A write that failed lands nothing: the row comes back.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, landing == key else { return }
+                    landing = nil
+                    markRows()
+                }
+            }
+            markRows()
+        }
+
+        /// One frame of a drag: the edge scroll, the stack closing on
+        /// the pointer, and the day under a pointer that may not have
+        /// moved while the days did.
+        @objc private func tick(_ link: CADisplayLink) {
+            let dt = lastTick == 0 ? 1.0 / 60 : link.timestamp - lastTick
+            lastTick = link.timestamp
+            let step = min(max(dt, 0), 0.05)
+            let delta = autoscroll.step(dt: step)
+            if delta != 0 {
+                scrollTo(y: scroll.contentView.bounds.origin.y + delta, animated: false)
+            }
+            drag?.overlay?.step(dt: step)
+            retarget()
+        }
+
+        /// `point` (the window's) as the dnd parts take one: from the
+        /// pane's top left, y down, not scrolled.
+        private func viewportPoint(_ point: NSPoint) -> CGPoint {
+            let p = scroll.convert(point, from: nil)
+            return CGPoint(x: p.x, y: scroll.isFlipped ? p.y : scroll.bounds.height - p.y)
+        }
+
+        private func viewport() -> DndViewport {
+            DndViewport(
+                scrollTop: scroll.contentView.bounds.origin.y,
+                width: scroll.bounds.width, height: scroll.bounds.height,
+                topInset: scroll.contentInsets.top)
+        }
+
+        /// The day whose section is under `point` (the window's): its
+        /// header, its rows or its empty line. Any day takes a drop,
+        /// one gone by included; Overdue is not a day. Nil off the
+        /// pane, under the toolbar and past the last row.
+        private func day(at point: NSPoint) -> String? {
+            let p = viewportPoint(point)
+            guard p.x >= 0, p.x <= scroll.bounds.width,
+                  p.y >= scroll.contentInsets.top, p.y <= scroll.bounds.height else { return nil }
+            let row = table.row(at: table.convert(point, from: nil))
+            guard row >= 0, row < lines.count else { return nil }
+            let day = lines[row].day
+            return day == Self.overdueDay ? nil : day
+        }
+
+        private func retarget() {
+            guard let drag else { return }
+            let day = self.day(at: drag.pointer)
+            guard day != drag.day else { return }
+            self.drag?.day = day
+            markRows()
+        }
+
+        /// Every row view in use takes its drag marks.
+        private func markRows() {
+            table.enumerateAvailableRowViews { rowView, row in self.mark(rowView, row: row) }
+        }
+
+        /// The row's part in the drag: faint when it is the one in the
+        /// air, tinted when its day is where the drop would land (the
+        /// tint's corners are the section's, so the day reads as one
+        /// block).
+        private func mark(_ rowView: NSTableRowView, row: Int) {
+            guard let rowView = rowView as? RowView else { return }
+            guard let drag, row >= 0, row < lines.count else {
+                let hidden = landing != nil && row >= 0 && row < lines.count && lines[row].key == landing
+                rowView.alphaValue = hidden ? 0 : 1
+                rowView.drop = nil
+                return
+            }
+            let line = lines[row]
+            rowView.alphaValue = line.key == drag.key ? 0.4 : 1
+            if line.day == drag.day {
+                let first = row == 0 || lines[row - 1].day != line.day
+                let last = row == lines.count - 1 || lines[row + 1].day != line.day
+                rowView.drop = RowView.Drop(first: first, last: last)
+            } else {
+                rowView.drop = nil
+            }
         }
 
         // MARK: Scroll
@@ -554,6 +875,22 @@ struct AgendaTable: NSViewRepresentable {
     /// colour.
     private final class RowView: NSTableRowView {
         static let identifier = NSUserInterfaceItemIdentifier("AgendaRowView")
+        /// The selection's margin either side, and its corners.
+        static let inset: CGFloat = 10
+        static let radius: CGFloat = 6
+
+        /// The row's place in the day a dragged row would land on.
+        struct Drop: Equatable {
+            /// The section's first line (its header), and its last.
+            let first: Bool
+            let last: Bool
+        }
+
+        /// Set while a drag is over the row's day: the row has the
+        /// day's tint (the web's `.upcoming-day[data-drop-target]`).
+        var drop: Drop? {
+            didSet { if drop != oldValue { needsDisplay = true } }
+        }
 
         init() {
             super.init(frame: .zero)
@@ -571,7 +908,41 @@ struct AgendaTable: NSViewRepresentable {
         override func drawSelection(in dirtyRect: NSRect) {
             let key = window?.isKeyWindow ?? false
             (key ? PaneColor.rowSelected : PaneColor.rowSelectedInactive).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 0), xRadius: 6, yRadius: 6).fill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: Self.inset, dy: 0), xRadius: Self.radius, yRadius: Self.radius
+            ).fill()
+        }
+
+        /// The drop day's tint, under the selection: square where the
+        /// row meets the next of its day, round at the section's ends.
+        override func drawBackground(in dirtyRect: NSRect) {
+            super.drawBackground(in: dirtyRect)
+            guard let drop else { return }
+            let rect = bounds.insetBy(dx: Self.inset, dy: 0)
+            let r = min(Self.radius, rect.height / 2)
+            // `top` is the radius at `minY`: the row's top edge in a
+            // flipped view, its bottom edge otherwise.
+            let top = (isFlipped ? drop.first : drop.last) ? r : 0
+            let bottom = (isFlipped ? drop.last : drop.first) ? r : 0
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: rect.minX + top, y: rect.minY))
+            path.line(to: NSPoint(x: rect.maxX - top, y: rect.minY))
+            path.appendArc(
+                from: NSPoint(x: rect.maxX, y: rect.minY), to: NSPoint(x: rect.maxX, y: rect.minY + top), radius: top)
+            path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - bottom))
+            path.appendArc(
+                from: NSPoint(x: rect.maxX, y: rect.maxY), to: NSPoint(x: rect.maxX - bottom, y: rect.maxY),
+                radius: bottom)
+            path.line(to: NSPoint(x: rect.minX + bottom, y: rect.maxY))
+            path.appendArc(
+                from: NSPoint(x: rect.minX, y: rect.maxY), to: NSPoint(x: rect.minX, y: rect.maxY - bottom),
+                radius: bottom)
+            path.line(to: NSPoint(x: rect.minX, y: rect.minY + top))
+            path.appendArc(
+                from: NSPoint(x: rect.minX, y: rect.minY), to: NSPoint(x: rect.minX + top, y: rect.minY), radius: top)
+            path.close()
+            PaneColor.dropDay.setFill()
+            path.fill()
         }
 
         /// The selection is drawn again when the window gains or

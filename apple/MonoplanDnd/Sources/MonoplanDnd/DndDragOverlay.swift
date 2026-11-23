@@ -10,7 +10,11 @@ import MonoplanDndCore
 /// transparent, click-through child window over every screen, so the
 /// stack can leave the list and the app's window. Its rows are layers
 /// moved once per frame.
-final class DndDragOverlay {
+///
+/// Public for a view that is not a `DndListView` and drags its own rows
+/// (the Mac Calendar's table, `AgendaTable.swift`), as the web's agenda
+/// uses `DndDragOverlay` without the list.
+public final class DndDragOverlay {
     private let window: NSWindow
     private let root = CALayer()
     private var items: [CALayer] = []
@@ -26,7 +30,7 @@ final class DndDragOverlay {
     ///   - cursor: the pointer, screen coordinates.
     ///   - grabRect: the grabbed row's rect on screen. The stack keeps
     ///     the pointer where it took hold of that row.
-    init(
+    public init(
         parent: NSWindow?,
         snapshots: [CGImage],
         itemSize: CGSize,
@@ -125,13 +129,13 @@ final class DndDragOverlay {
         }
     }
 
-    func update(cursor: CGPoint) {
+    public func update(cursor: CGPoint) {
         self.cursor = cursor
     }
 
     /// One frame: the lead item closes most of the distance to the
     /// pointer, each deeper one chases the item above it more slowly.
-    func step(dt: TimeInterval) {
+    public func step(dt: TimeInterval) {
         let target = CGPoint(x: cursor.x + grabOffset.x, y: cursor.y + grabOffset.y)
         for i in positions.indices {
             let goal = i == 0 ? target : positions[i - 1]
@@ -159,7 +163,7 @@ final class DndDragOverlay {
         badge?.position = CGPoint(x: cursor.x - origin.x, y: cursor.y - origin.y + 12)
     }
 
-    func stop() {
+    public func stop() {
         window.parent?.removeChildWindow(window)
         window.orderOut(nil)
     }

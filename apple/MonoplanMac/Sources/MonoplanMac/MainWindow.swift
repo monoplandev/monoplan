@@ -890,8 +890,20 @@ final class MainWindowModel: ObservableObject {
             error = engineErrorMessage(EngineError.Stopped)
             return
         }
-        calls.run(body) { [weak self] result in
+        let asked = Date()
+        var began = asked, ended = asked
+        calls.run({ engine in
+            began = Date()
+            defer { ended = Date() }
+            try body(engine)
+        }) { [weak self] result in
             guard let self else { return }
+            if Self.timing {
+                let ms = { (a: Date, b: Date) -> String in String(format: "%.1f", b.timeIntervalSince(a) * 1000) }
+                let line = "write: queued " + ms(asked, began) + " ms, write " + ms(began, ended)
+                    + " ms, to main " + ms(ended, Date()) + " ms\n"
+                FileHandle.standardError.write(Data(line.utf8))
+            }
             if case .failure(let error) = result {
                 self.error = engineErrorMessage(error)
             } else {
@@ -1018,6 +1030,30 @@ final class MainWindowModel: ObservableObject {
     /// same call (`Engine.setWhen`).
     func setWhen(workspace: String?, id: String, when: String?, duration: DurationChange) {
         write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
+    }
+
+    /// Set or clear an item's deadline (`Engine.setDeadline`).
+    func setDeadline(workspace: String?, id: String, deadline: String?) {
+        write { try $0.setDeadline(workspace: workspace, id: id, deadline: deadline) }
+    }
+
+    /// A Calendar row let go on `day` (`YYYY-MM-DD`): the item's `when`
+    /// moves there with its clock time and length kept, or its deadline
+    /// when that is its only date (`AgendaDrop`, the web's `dropOnDay`).
+    /// One write, so one undo step. A closed task stays where it is.
+    /// False when the drop writes nothing.
+    @discardableResult
+    func reschedule(_ row: AgendaEntry, to day: String) -> Bool {
+        let closedTask = row.state.isClosed && !(row.event && row.when != nil)
+        switch AgendaDrop.write(when: row.when, deadline: row.deadline, closedTask: closedTask, day: day) {
+        case .when(let when):
+            setWhen(workspace: row.docId, id: row.id, when: when, duration: .keep)
+        case .deadline(let deadline):
+            setDeadline(workspace: row.docId, id: row.id, deadline: deadline)
+        case nil:
+            return false
+        }
+        return true
     }
 
     /// Assign an item to one member of its workspace by account id, or
@@ -2364,7 +2400,8 @@ struct MainWindowView: View {
                         model.bin(workspace: row.docId, id: row.id)
                     },
                 ]
-            })
+            },
+            reschedule: { row, day in model.reschedule(row, to: day) })
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()

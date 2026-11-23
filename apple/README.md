@@ -146,7 +146,9 @@ every workspace: the days gone by a year back, Today, then each
 non-empty day, rows with a tick; it opens on Today's header and the
 toolbar's "Today" comes back to it, in an AppKit table,
 `AgendaTable.swift`, 2026-11-17, because a SwiftUI `List` cannot be
-opened part-way down reliably; a tray row for an event opens it), Starred
+opened part-way down reliably; a row drags onto another day to
+reschedule it, 2026-11-23, `spec/calendar-plan.md` "Drag to
+reschedule"; a tray row for an event opens it), Starred
 (`Engine.starred`, with a tick and a star that takes the row out), Done
 (`Engine.doneEverywhere`, every workspace's closed items, Done and
 Cancelled as on the web, merged newest first in Rust,

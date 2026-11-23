@@ -117,6 +117,13 @@ enum PaneColor {
     /// `--dnd-placeholder-color`, #cbd5e1 in light and #475569 in dark.
     static let dropSlot = rgb(dark: 0x475569, light: 0xcbd5e1)
 
+    /// The day a dragged Calendar row would land on: the web's
+    /// `--bg-hover`, black at 4% in light and white at 5% in dark.
+    static let dropDay = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.05) : NSColor(white: 0, alpha: 0.04)
+    }
+
     /// `0xRRGGBB` for each appearance.
     private static func rgb(dark: Int, light: Int) -> NSColor {
         NSColor(name: nil) { appearance in
