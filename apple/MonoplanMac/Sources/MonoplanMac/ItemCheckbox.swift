@@ -92,9 +92,27 @@ struct ItemCheckButton: View {
         } label: {
             ItemCheckbox(state: state).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CheckPressStyle())
         .accessibilityLabel(
             state == .cancelled ? Text("Reopen") : state.isClosed ? Text("Mark as not done") : Text("Mark as done"))
+    }
+}
+
+/// A checkbox button's press, as the web's (`input.task-check[data-pressed]`
+/// in `styles.css`, and `RowCheck` in `ItemList.swift`): held down, the
+/// box swells to 1.15 in 0.08 s; let go, it springs back over 0.22 s
+/// with a little overshoot. In place of `.plain`'s dimming.
+struct CheckPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 1.15 : 1)
+            .animation(
+                configuration.isPressed
+                    ? .easeOut(duration: 0.08)
+                    : .timingCurve(0.34, 1.56, 0.64, 1, duration: 0.22),
+                value: configuration.isPressed)
     }
 }
 

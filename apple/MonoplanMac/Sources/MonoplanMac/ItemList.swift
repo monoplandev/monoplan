@@ -335,24 +335,74 @@ private final class ClosureMenuItem: NSMenuItem {
     @objc private func fire(_ sender: Any?) { run() }
 }
 
-/// The checkbox, hosted: the one part of a row that takes its own
-/// clicks.
 /// A row's checkbox: the box `ItemCheckbox` draws, as a plain view that
 /// takes its own clicks. Not a hosted SwiftUI button, which costs a
 /// couple of milliseconds a row each time the list recycles one.
+/// Held down, the box swells a touch and springs back on release, as
+/// the web's does (`input.task-check[data-pressed]` in `styles.css`).
 private final class RowCheck: NSView, DndInteractiveView {
     var state: ItemState = .todo {
-        didSet { if state != oldValue { needsDisplay = true } }
+        didSet { if state != oldValue { box.state = state } }
     }
     var toggle: (Bool) -> Void = { _ in }
+    private let box = RowCheckBox()
     private var pressed = false {
-        didSet { if pressed != oldValue { needsDisplay = true } }
+        didSet { if pressed != oldValue { swell(pressed) } }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.setAlpha(pressed ? 0.5 : 1)
-        ItemCheckArt.drawRowBox(state, in: bounds)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        box.wantsLayer = true
+        addSubview(box)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not built from a nib") }
+
+    override func layout() {
+        super.layout()
+        box.frame = bounds
+    }
+
+    /// The box is drawing only: every click is the control's.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
+
+    /// The web's timings: out quickly while held (0.08 s ease-out), back
+    /// over 0.22 s on a curve that overshoots a little before settling.
+    private func swell(_ on: Bool) {
+        guard let layer = box.layer else { return }
+        let target = on ? Self.swollen(layer.bounds) : CATransform3DIdentity
+        let from = layer.presentation()?.transform ?? layer.transform
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = target
+        CATransaction.commit()
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            layer.removeAnimation(forKey: "swell")
+            layer.transform = CATransform3DIdentity
+            return
+        }
+        let animation = CABasicAnimation(keyPath: "transform")
+        animation.fromValue = NSValue(caTransform3D: from)
+        animation.toValue = NSValue(caTransform3D: target)
+        animation.duration = on ? 0.08 : 0.22
+        animation.timingFunction =
+            on
+            ? CAMediaTimingFunction(name: .easeOut)
+            : CAMediaTimingFunction(controlPoints: 0.34, 1.56, 0.64, 1)
+        layer.add(animation, forKey: "swell")
+    }
+
+    /// 1.15 about the middle: AppKit pins a view's layer at its corner,
+    /// so the scale is wrapped in a move to the centre and back.
+    private static func swollen(_ bounds: CGRect) -> CATransform3D {
+        let scale: CGFloat = 1.15
+        var t = CATransform3DMakeTranslation(bounds.midX, bounds.midY, 0)
+        t = CATransform3DScale(t, scale, scale, 1)
+        return CATransform3DTranslate(t, -bounds.midX, -bounds.midY, 0)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -379,6 +429,18 @@ private final class RowCheck: NSView, DndInteractiveView {
     override func accessibilityPerformPress() -> Bool {
         toggle(!state.isClosed)
         return true
+    }
+}
+
+/// The drawing half of `RowCheck`, on its own layer so the swell can
+/// scale it without the control's frame moving.
+private final class RowCheckBox: NSView {
+    var state: ItemState = .todo {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        ItemCheckArt.drawRowBox(state, in: bounds)
     }
 }
 

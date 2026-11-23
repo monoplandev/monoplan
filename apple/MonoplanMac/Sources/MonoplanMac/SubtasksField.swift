@@ -339,7 +339,7 @@ private struct SubtaskRow: View {
                 } label: {
                     ItemCheckbox(state: sub.done ? .done : .backlog).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(CheckPressStyle())
                 .frame(width: 20, height: SubtasksField.rowHeight)
                 .accessibilityLabel(sub.done ? Text("Mark as not done") : Text("Mark as done"))
                 field
