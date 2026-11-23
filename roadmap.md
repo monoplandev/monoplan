@@ -139,3 +139,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - jepsen for testing?
 - apple push gateway to cut out alarm on iphone immediately
 - web notifications?
+- low power catchup route
