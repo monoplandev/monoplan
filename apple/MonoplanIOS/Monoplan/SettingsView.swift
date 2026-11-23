@@ -1,6 +1,7 @@
 // The Settings page, pushed from Home's gear: what a person acts on.
 // General (the device's list-counts preference, as the web's Settings
 // has it), reminders (this iPhone's two settings, spec/reminders.md),
+// place alerts (its one, spec/place-alerts.md),
 // the account (who is signed in and where, sign in / sign out,
 // delete account), sync
 // (the status line and when it last synced), About (links to the
@@ -24,6 +25,7 @@ struct SettingsView: View {
     /// Notifications are turned off for the app in the system's
     /// Settings: no reminder can be delivered whatever is picked here.
     @State private var notificationsDenied = false
+    @AppStorage(PlaceAlertSettings.key) private var placeAlerts = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
@@ -33,6 +35,8 @@ struct SettingsView: View {
                 Toggle("Show list counts in Home", isOn: $showListCounts)
             }
             remindersSection
+            PlaceAlertsSection(
+                isOn: $placeAlerts, location: model.placeLocation, notificationsDenied: notificationsDenied)
             accountSection
             syncSection
             Section("About") {
@@ -60,6 +64,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .onChange(of: eventReminder) { model.remindersSettingsChanged() }
         .onChange(of: taskReminder) { model.remindersSettingsChanged() }
+        .onChange(of: placeAlerts) { model.placeAlertsSettingChanged() }
         // Read again on the way back from the system's Settings.
         .onChange(of: scenePhase, initial: true) {
             guard scenePhase == .active else { return }
@@ -148,6 +153,49 @@ struct SettingsView: View {
         guard let millis else { return String(localized: "never") }
         return Date(timeIntervalSince1970: Double(millis) / 1000)
             .formatted(date: .abbreviated, time: .standard)
+    }
+}
+
+/// A notification on arriving at a place with open tasks. A setting of
+/// this iPhone alone. While it is on and something in the system's
+/// Settings stops the alerts, the footer says what, and a button goes
+/// there.
+private struct PlaceAlertsSection: View {
+    @Binding var isOn: Bool
+    @ObservedObject var location: PlaceAlertLocation
+    let notificationsDenied: Bool
+    @Environment(\.openURL) private var openURL
+
+    /// What stops the alerts, if something does.
+    private var blocked: String? {
+        guard isOn else { return nil }
+        switch location.access {
+        case .denied: return String(localized: "Location is turned off for Monoplan, so no alerts are shown.")
+        case .approximate:
+            return String(localized: "Monoplan has only your approximate location, so no alerts are shown. Turn on Precise Location for it in Settings.")
+        case .unknown, .allowed:
+            return notificationsDenied
+                ? String(localized: "Notifications are turned off for Monoplan, so no alerts are shown.") : nil
+        }
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Alert on arrival", isOn: $isOn)
+            if blocked != nil {
+                Button("Open Settings…") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                }
+            }
+        } header: {
+            Text("Places")
+        } footer: {
+            if let blocked {
+                Text(blocked)
+            } else {
+                Text("When you arrive somewhere you have open tasks, on this iPhone only. Your location never leaves it.")
+            }
+        }
     }
 }
 

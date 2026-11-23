@@ -43,8 +43,11 @@ Companion to `calendar-plan.md` (the `when` register) and
 ## The scheduler
 
 `ReminderScheduler` in `MonoplanMacKit` (`ReminderScheduler.swift`), one
-per process, shared by both apps. Every change replaces the whole
-pending set; nothing else in either app schedules a notification.
+per process, shared by both apps. Every change brings the pending set
+in line, touching only the requests that differ; nothing else in either
+app schedules a notification. On iOS the set also holds the place
+alerts (`place-alerts.md`), which take their share of the 60 first (20
+at most).
 
 - **Permission:** asked when a setting is turned on in Settings, never
   at launch (both start Off, so nothing is scheduled before that).

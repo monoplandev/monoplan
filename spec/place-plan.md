@@ -22,7 +22,7 @@ notifications are deliberately out of scope here; see "Deferred".
 | A registry of saved places? | **No** (matches the flat-tags call in `tags-not-projects`). Reuse comes from the places already on items, deduped by label and rounded coordinates and ranked by recency. The value is self-contained, so an item never dangles. Built 2026-10-08; see "Reuse". |
 | Where do coordinates come from? | **A geocoder, search-as-you-type.** Tier order per client: a platform geocoder where one exists (MapKit on Apple, keyless), else a server-configured provider, else none (label only, pasted coordinates). The web client's first cut uses Komoot's public Photon instance directly from the browser; see "Geocoding". Mapbox was considered and dropped 2026-10-07: its default geocoding forbids storing results, permanent mode has no free tier, and a browser token is the wrong shape for a self-hosted tool. |
 | Is the lookup E2EE? | **No, and the spec says so.** The query text goes to whoever runs the geocoder. The stored value is encrypted like every register. Nothing else about the item leaves the device. |
-| Notifications | **Out of scope** (decided 2026-10-07). A later `trigger` register (arrive / leave) and on-device geofencing on mobile; the server never learns a location. The place value carries nothing notification-specific (no radius) until then. |
+| Notifications | **Out of scope here** (decided 2026-10-07; arrival alerts built 2026-11-23 without a register, `place-alerts.md`). A later `trigger` register (arrive / leave) and on-device geofencing on mobile; the server never learns a location. The place value carries nothing notification-specific (no radius) until then. |
 | Schema | **Additive within v4.** A new optional key on the item map; no new container, no version bump, no import step. |
 
 ## Field: `place`
@@ -282,10 +282,10 @@ list, a tasks / events filter.
   completer; `ref` would carry an `apple:` hint.
 - **Current location** via `navigator.geolocation` / Core Location: a
   label-only place gains coordinates with no third party.
-- **Notifications.** A `trigger` register beside `place` (arrive /
-  leave), geofences armed on-device from the synced doc, deduped by
-  coordinates (iOS caps regions at 20). A `radius_m` field is additive
-  when that lands.
+- **Notifications.** Built on iOS 2026-11-23 as a device setting with
+  no register: `place-alerts.md`. Still deferred: a `trigger` register
+  beside `place` (arrive / leave, per item) and a `radius_m` field,
+  both additive.
 - **Calendar placement by place** (a "where" grouping) is not planned.
 
 ## Testing

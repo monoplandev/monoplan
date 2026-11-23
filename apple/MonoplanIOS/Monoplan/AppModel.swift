@@ -151,6 +151,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var tappedReminder: ItemRef?
     private var awaitedReminder: ItemRef?
     private let reminders = ReminderScheduler.shared
+    /// A place alert for several tasks was tapped, for Home to show
+    /// the Map page, which then calls `showedPlaces`.
+    @Published private(set) var tappedPlaces = false
+    /// The phone's location, as far as the place alerts need it
+    /// (spec/place-alerts.md); idle while they are off.
+    let placeLocation = PlaceAlertLocation()
 
     let location: ProfileLocation
     private let engineController: EngineController
@@ -169,6 +175,10 @@ final class AppModel: ObservableObject {
         reminders.onOpen = { [weak self] tap in
             self?.openReminder(ItemRef(docId: tap.docId, itemId: tap.itemId, title: tap.title))
         }
+        reminders.moreText = { String(localized: "and \($0) more") }
+        reminders.onOpenPlaces = { [weak self] in self?.tappedPlaces = true }
+        placeLocation.onChange = { [weak self] in self?.refreshPlaceAlerts() }
+        if PlaceAlertSettings.isOn() { placeLocation.locate() }
         engineController.start()
     }
 
@@ -1143,10 +1153,45 @@ final class AppModel: ObservableObject {
                     event: $0.event)
             })
         }
+        refreshPlaceAlerts()
+    }
+
+    /// The open tasks with a place on the map (`Engine.placedItems`,
+    /// events left out), handed to the scheduler with where the phone
+    /// last was: the regions this iPhone alerts on arriving in follow
+    /// every change to them (spec/place-alerts.md). None while the
+    /// alerts are off or the app may not use precise location: a
+    /// region is watched only with it.
+    private func refreshPlaceAlerts() {
+        guard PlaceAlertSettings.isOn(), placeLocation.access == .allowed else {
+            reminders.updatePlaces([], origin: nil)
+            return
+        }
+        read({ try $0.placedItems(closed: false) }) { [weak self] rows, _ in
+            guard let self, let rows else { return }
+            let sources = rows.compactMap { row -> PlaceAlertSource? in
+                guard !row.item.event, let place = row.item.place, let lat = place.lat, let lon = place.lon
+                else { return nil }
+                return PlaceAlertSource(
+                    docId: row.docId, itemId: row.item.id, listId: row.item.listId, title: row.item.text,
+                    label: place.label, at: GeoPoint(lat: lat, lon: lon), createdAt: row.item.createdAt)
+            }
+            reminders.updatePlaces(sources, origin: placeLocation.origin)
+        }
     }
 
     /// A reminder setting changed (Settings).
     func remindersSettingsChanged() { reminders.reschedule(settingsChanged: true) }
+
+    /// The place alerts were turned on or off (Settings): on, the
+    /// moment to ask for the phone's location and for notifications.
+    func placeAlertsSettingChanged() {
+        if PlaceAlertSettings.isOn() { placeLocation.locate() }
+        refreshPlaceAlerts()
+        reminders.reschedule(settingsChanged: true)
+    }
+
+    func showedPlaces() { tappedPlaces = false }
 
     private func openReminder(_ ref: ItemRef) {
         if session == nil { awaitedReminder = ref } else { tappedReminder = ref }
@@ -1338,7 +1383,9 @@ final class AppModel: ObservableObject {
     /// of any length. A local-only workspace has nothing to dial.
     func didBecomeActive() {
         // Time has passed: reminders fired, and the furthest ones the
-        // pending set had no room for may now fit.
+        // pending set had no room for may now fit. The phone may have
+        // moved too: which regions are nearest is asked again.
+        if PlaceAlertSettings.isOn() { placeLocation.locate() }
         refreshReminders()
         guard let sync, !sync.localOnly else { return }
         reconnect()

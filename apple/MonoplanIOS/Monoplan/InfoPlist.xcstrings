@@ -31,13 +31,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Monoplan uses your location to show the tasks nearest to you on the map. It never leaves this device."
+            "value" : "Monoplan uses your location to show the tasks nearest to you on the map, and to alert you when you arrive at a place with tasks. It never leaves this device."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Monoplan usa tu ubicación para mostrar en el mapa las tareas más cercanas a ti. Nunca sale de este dispositivo."
+            "value" : "Monoplan usa tu ubicación para mostrar en el mapa las tareas más cercanas a ti y para avisarte cuando llegas a un lugar con tareas. Nunca sale de este dispositivo."
           }
         }
       }

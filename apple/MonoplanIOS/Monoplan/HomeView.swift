@@ -605,6 +605,13 @@ struct HomeView: View {
             searching = false
             path.append(captured.list)
         }
+        // A tapped place alert for several tasks has no one item to
+        // open: the Map page, where they are listed nearest first.
+        .onChange(of: model.tappedPlaces, initial: true) {
+            guard model.tappedPlaces else { return }
+            model.showedPlaces()
+            if !mapShown { path.append(HomePage.map) }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !mapShown && !selectingItems {
                 BottomBar(query: $query, searching: $searching, captureList: shownList)

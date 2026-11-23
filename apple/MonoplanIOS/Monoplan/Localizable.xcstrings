@@ -238,6 +238,17 @@
         }
       }
     },
+    "Alert on arrival" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avisar al llegar"
+          }
+        }
+      }
+    },
     "All day" : {
       "localizations" : {
         "es" : {
@@ -254,6 +265,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Se cierra la sesión en todos tus dispositivos y se borra la copia local de este iPhone."
+          }
+        }
+      }
+    },
+    "and %lld more" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "y %lld más"
           }
         }
       }
@@ -1773,6 +1795,17 @@
         }
       }
     },
+    "Location is turned off for Monoplan, so no alerts are shown." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La localización está desactivada para Monoplan, así que no se muestran avisos."
+          }
+        }
+      }
+    },
     "Map" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1849,6 +1882,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Miembros (%lld)"
+          }
+        }
+      }
+    },
+    "Monoplan has only your approximate location, so no alerts are shown. Turn on Precise Location for it in Settings." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monoplan solo tiene tu ubicación aproximada, así que no se muestran avisos. Activa Ubicación exacta para Monoplan en Ajustes."
           }
         }
       }
@@ -2221,6 +2265,17 @@
         }
       }
     },
+    "Notifications are turned off for Monoplan, so no alerts are shown." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las notificaciones están desactivadas para Monoplan, así que no se muestran avisos."
+          }
+        }
+      }
+    },
     "Notifications are turned off for Monoplan, so no reminders are shown." : {
       "localizations" : {
         "es" : {
@@ -2360,6 +2415,17 @@
         }
       }
     },
+    "Open Settings…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abrir Ajustes…"
+          }
+        }
+      }
+    },
     "Opens in Maps" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2466,6 +2532,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lugar"
+          }
+        }
+      }
+    },
+    "Places" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lugares"
           }
         }
       }
@@ -3497,6 +3573,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sitio web"
+          }
+        }
+      }
+    },
+    "When you arrive somewhere you have open tasks, on this iPhone only. Your location never leaves it." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuando llegas a un lugar donde tienes tareas abiertas, solo en este iPhone. Tu ubicación nunca sale de él."
           }
         }
       }
