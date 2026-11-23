@@ -928,6 +928,14 @@ final class MainWindowModel: ObservableObject {
         closes = Array((closes + [ItemListClose(serial: serial, id: id, closed: closed)]).suffix(16))
     }
 
+    /// Untick a row Starred still shows from its tick: reopened and
+    /// starred again directly above `before` (`Engine.reopenIntoStarred`,
+    /// one Undo step), so it is back where it was.
+    func reopenIntoStarred(workspace: String?, id: String, before: String?) {
+        noteClose(id, closed: false)
+        write { try $0.reopenIntoStarred(item: ItemRef(workspace: workspace, id: id), before: before) }
+    }
+
     /// Tick or untick a lens's row, in its own workspace.
     func setDone(workspace: String?, id: String, done: Bool) {
         noteClose(id, closed: done)
@@ -2574,7 +2582,10 @@ struct MainWindowView: View {
             menu: itemListMenu,
             drop: sidebarDrop,
             lingers: true,
-            closes: model.closes)
+            closes: model.closes,
+            reopenLingering: { row, before in
+                model.reopenIntoStarred(workspace: row.workspace, id: row.id, before: before)
+            })
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 if model.starred.isEmpty { emptyNote(Text("Nothing starred")) }

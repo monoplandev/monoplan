@@ -127,6 +127,10 @@ struct ItemList: NSViewRepresentable {
     /// state menu. Those new since the last update start or join the
     /// linger.
     var closes: [ItemListClose] = []
+    /// An untick of a lingering row, with the row now below it that
+    /// is not lingering (nil: none), in place of `toggle`: Starred's,
+    /// whose entry went when the row was ticked and comes back there.
+    var reopenLingering: ((ItemListRow, _ before: String?) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -277,7 +281,11 @@ struct ItemList: NSViewRepresentable {
             guard let content = content as? ItemRowContent, let row = rows[key] else { return }
             content.show(row, selected: state.selected) { [weak self] done in
                 guard let self, let row = self.rows[key] else { return }
-                self.parent.toggle(row, done)
+                if !done, let reopen = self.parent.reopenLingering, self.linger.has(row.id) {
+                    reopen(row, self.linger.below(row.id, in: self.shown))
+                } else {
+                    self.parent.toggle(row, done)
+                }
             }
         }
 
@@ -430,6 +438,15 @@ struct Linger {
         var ticked = row
         ticked.state = .done
         entries.append(Entry(row: ticked, index: index))
+    }
+
+    /// `id` is lingering, ticked or reopened.
+    func has(_ id: String) -> Bool { entries.contains { $0.row.id == id } }
+
+    /// The first row under `id` in `shown` that is not lingering.
+    func below(_ id: String, in shown: [ItemListRow]) -> String? {
+        guard let at = shown.firstIndex(where: { $0.id == id }) else { return nil }
+        return shown[(at + 1)...].first { !has($0.id) }?.id
     }
 
     mutating func reopen(_ id: String) {

@@ -1259,6 +1259,19 @@ impl Engine {
             .call_blocking(None, move |cx| api::moves::star_items(cx, &items))?)
     }
 
+    /// Untick a row Starred still shows: reopen it and star it again
+    /// directly above `before`, a starred id (`None`: the end), as one
+    /// undo step.
+    pub fn reopen_into_starred(
+        &self,
+        item: ItemRef,
+        before: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(None, move |cx| {
+            api::moves::reopen_into_starred(cx, &item, before.as_deref())
+        })?)
+    }
+
     // The reads below span every open workspace: they take none, and
     // their rows carry the workspace each came from.
 

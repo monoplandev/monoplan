@@ -49,4 +49,17 @@ final class LingerTests: XCTestCase {
         // Back in the read, wherever it put it: the read's.
         XCTAssertEqual(ids(linger.overlay(rows("b", "a", "c"))), ["b", "a", "c"])
     }
+
+    func testTheRowBelowALingeringOneSkipsTheOthersLingering() {
+        var linger = Linger()
+        var shown = rows("a", "b", "c", "d")
+        linger.close(shown[1], in: shown)
+        shown = linger.overlay(rows("a", "c", "d"))
+        linger.close(shown[2], in: shown)
+        shown = linger.overlay(rows("a", "d"))
+        XCTAssertEqual(linger.below("b", in: shown), "d")
+        XCTAssertNil(linger.below("d", in: rows("a", "d")))
+        XCTAssertTrue(linger.has("c"))
+        XCTAssertFalse(linger.has("a"))
+    }
 }

@@ -17,6 +17,7 @@ use monoplan_core::{Doc, DocId, LIST_INBOX};
 use serde::Serialize;
 
 use super::Ctx;
+use super::items::ItemState;
 use crate::commands::focus::Lens;
 use crate::workspace::{self, Candidate};
 
@@ -292,6 +293,27 @@ pub fn star_items(cx: &Ctx, items: &[ItemRef]) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Untick a row Starred still shows (the done linger, a beat after its
+/// tick): reopen it and star it again directly above `before`, the
+/// starred item that now follows it on screen (`None`: the end), in one
+/// call and so one undo step. Closing a Home item drops its entry, so
+/// the reopen alone would leave it unstarred; a foreign entry outlives
+/// the close and keeps its place, the star being a no-op. The web's
+/// `undoneIntoFocus`.
+pub fn reopen_into_starred(cx: &Ctx, item: &ItemRef, before: Option<&str>) -> anyhow::Result<()> {
+    let (doc, doc_id) = resolve(cx, item.workspace.as_deref())?;
+    doc.set_item_lifecycle(&item.id, ItemState::Backlog.into())?;
+    let home = home_doc(cx)?;
+    let index = before
+        .and_then(|b| home.focus_entries().iter().position(|e| e.item_id == b))
+        .unwrap_or(usize::MAX);
+    match doc_id {
+        Some(doc_id) if Some(doc_id) != cx.home => Lens::foreign(home, doc_id).star(doc, &item.id, index),
+        Some(_) => Lens::home(doc).star(doc, &item.id, index),
+        None => cx.lens.star(doc, &item.id, index),
+    }
 }
 
 /// Move one item to `list` of the workspace `to` names (`None`: Home),
@@ -717,6 +739,34 @@ mod tests {
         assert_eq!(starred_texts(&doc), s(&["a", "b", "d"]));
         undo(&doc, &mut h);
         assert_eq!(starred_texts(&doc), s(&["b", "d"]));
+    }
+
+    #[test]
+    fn reopen_into_starred_puts_the_row_back_above_before_in_one_step() {
+        let doc = Doc::new().unwrap();
+        let ids = add(&doc, LIST_INBOX, &["a", "b", "c"]);
+        for id in ids.iter().rev() {
+            doc.add_to_focus(id, 0).unwrap();
+        }
+        doc.set_item_done(&ids[1], true).unwrap();
+        assert_eq!(starred_texts(&doc), s(&["a", "c"]));
+        let mut h = History::default();
+        let given = ItemRef {
+            workspace: None,
+            id: ids[1].clone(),
+        };
+        as_call(&doc, &mut h, |cx| {
+            reopen_into_starred(cx, &given, Some(&ids[2])).unwrap()
+        });
+        assert_eq!(starred_texts(&doc), s(&["a", "b", "c"]));
+        assert!(doc.get_item(&ids[1]).unwrap().is_open());
+        // One step back: closed and unstarred again.
+        undo(&doc, &mut h);
+        assert_eq!(starred_texts(&doc), s(&["a", "c"]));
+        assert!(!doc.get_item(&ids[1]).unwrap().is_open());
+        // No row after it: the end.
+        as_call(&doc, &mut h, |cx| reopen_into_starred(cx, &given, None).unwrap());
+        assert_eq!(starred_texts(&doc), s(&["a", "c", "b"]));
     }
 
     #[test]
