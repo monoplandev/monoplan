@@ -758,8 +758,10 @@ here.
   honest. No RRULE. This form covers tasks only: an event
   (`events-plan.md`) is never ticked, so recurring events are unsolved.
 - **Fixed instants.** Built 2026-11-23 in core, wasm, the CLI and the
-  web task surface (zone picker below; not browser-checked); iOS and
-  macOS have no picker yet. Decisions: a zone is attached only
+  web task surface (zone picker below; not browser-checked), and the
+  same day on the FFI, the macOS item panel and the iOS date editor
+  ("Apple pickers" below; compiled and unit-tested, not yet run in
+  either app). Decisions: a zone is attached only
   when the user picks one (everything else stays floating, nothing
   migrates), and a fixed item shows in the device's local time, on the
   local day it falls on.
@@ -820,12 +822,46 @@ here.
     buffers the zone beside its `when` on that zone's clock and writes
     both in one `setItemWhen`; duplicate and copy / paste carry
     `whenZone` beside the local `when` and write the stored form too. The store has `ItemView.whenZone`.
+  - **Apple pickers** (2026-11-23; the web picker's rules, on both
+    apps). FFI: `Engine.set_when_zone`, and `when_in_zone` /
+    `when_localized` as free functions, so every conversion is still
+    the core's. `WhenZone` in MonoplanCore is `zones.ts`'s `zoneWall` /
+    `fixedWhen` / `localWhen` / `storedWhen` over them; `Zones` in the
+    Kit (Foundation only, tested) is the list and the matching:
+    `TimeZone.knownTimeZoneIdentifiers` plus UTC and the device's
+    zone, city read out of the id, name from
+    `localizedName(for: .generic)`, offset on the item's day written
+    "GMT+1" / "GMT+5:30", the web's word-prefix matching and three
+    tiers, the device's zone first in the blank list.
+    - **macOS** (`ZoneField.swift`): a box under the time row of the
+      item panel, there only beside a time. `TimeField`'s way of
+      working: at rest "GMT+1 Paris" or a muted "Time zone", a ✕
+      under the pointer that makes the time floating, a click for a
+      text box and a list (city, name dim after it, offset at the
+      trailing edge), Return / click / arrows / Escape as the time
+      boxes. The date and time rows read `WhenZone.wall` and write
+      through `WhenZone.fixed`. A binned item shows the zone's clock
+      and its label, read-only. A capture holds the zone beside a
+      device-local `when` (`ItemCapture.zone`, `setWhen` / `setZone`
+      mirroring the engine's two rules) and is made with the stored
+      form in the one `capture_item` call.
+    - **iOS** (`ItemDateField.swift`): a zone box under the times in
+      the date editor, beside a time only; its half sheet
+      (`ZoneSheet`) is a text box over the list, a tapped row a draft
+      until the tick, as the editor's other sheets; the box's "x"
+      makes the time floating. The editor's boxes read and write the
+      zone's clock; its cross puts the zone back with the date. The
+      item page's own date row stays device-local, as every row does,
+      and names no zone.
   - **Not built**: the zone on rows and in the agenda (a fixed item
-    looks like any other outside the task surface); a picker and label
-    on iOS and macOS; `Engine.set_when_zone` on the FFI. The web
-    picker's "is this the stored zone" highlight compares ids as
-    strings, so an alias the browser lists under another name is not
-    marked. Not checked on a device: that
+    looks like any other outside the task surface, the iOS item
+    page's date row included). The pickers' "is this the stored zone"
+    mark compares ids as
+    strings, so an alias the platform lists under another name is not
+    marked. The Apple lists are Foundation's ids while writes are
+    checked against the tzdata `jiff` reads; the two are the system's
+    one database, but a zone only one of them knows would be listed
+    and then refused. Not checked on a device: that
     `jiff` finds the system zone and tzdata inside the iOS sandbox (it
     falls back to UTC if not). Views re-read the device zone on every
     projection, but nothing re-projects when the zone changes under a

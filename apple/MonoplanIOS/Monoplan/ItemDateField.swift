@@ -10,7 +10,10 @@
 // it means, or a time wheel; the sheet's tick writes what was picked
 // (`item set --when / --duration`). The editor's own tick gives the
 // sheet back to the item; its cross first undoes what the editor
-// changed. Dates are floating wall-clock strings, never instants.
+// changed. Dates are wall-clock strings, never instants: floating,
+// unless the time is fixed to a zone (the box under the times,
+// spec/calendar-plan.md "Fixed instants"), and then the editor's boxes
+// read and write that zone's clock, the one place the app does.
 
 import MonoplanCore
 import MonoplanMacKit
@@ -111,6 +114,14 @@ struct ItemDateField: View {
 /// end day's brings the span back onto the start day, the start
 /// time's makes the date all-day again. With no date the editor opens
 /// on the start day's picker.
+///
+/// Under the times, beside a time only, is the zone the time is fixed
+/// to: its offset on the item's day and its city ("GMT+1 Paris"), a
+/// muted "Time zone" while the time is floating. Its picker is a list
+/// of zones narrowed by what is typed (`ZoneSheet`). Picking one keeps
+/// the digits in the boxes over it, which from then on read and write
+/// that zone's clock; its "x" makes the time floating again, at the
+/// moment it had, so the boxes go back to the device's clock.
 struct ItemDateEditor: View {
     @EnvironmentObject private var model: AppModel
     let ref: ItemRef
@@ -124,16 +135,28 @@ struct ItemDateEditor: View {
     /// one while the sheet slides away.
     @State private var sheetBox = Box.start
 
-    enum Box { case start, end, startTime, endTime }
+    enum Box { case start, end, startTime, endTime, zone }
 
     struct Original: Equatable {
+        /// Wall time on this device, as the item carries it.
         let when: String?
+        let zone: String?
         let duration: Int?
         let event: Bool
     }
 
     private var current: Original {
-        Original(when: item.when, duration: item.duration, event: item.event)
+        Original(when: item.when, zone: item.whenZone, duration: item.duration, event: item.event)
+    }
+
+    /// The date as the boxes show and edit it: on the clock of the
+    /// zone the time is fixed to, the device's while it is floating.
+    private var when: String? { item.when.map { WhenZone.wall($0, zone: item.whenZone) } }
+
+    /// Write a date read on the boxes' clock, so in the item's zone
+    /// when it has one (an all-day value drops the zone).
+    private func write(_ value: String?, duration: DurationChange = .keep) {
+        model.setWhen(ref, when: value.map { WhenZone.fixed($0, zone: item.whenZone) }, duration: duration)
     }
 
     init(ref: ItemRef, item: ItemInfo, done: @escaping () -> Void) {
@@ -141,14 +164,20 @@ struct ItemDateEditor: View {
         self.item = item
         self.done = done
         _original = State(
-            initialValue: Original(when: item.when, duration: item.duration, event: item.event))
+            initialValue: Original(
+                when: item.when, zone: item.whenZone, duration: item.duration, event: item.event))
     }
 
     private func cancel() {
         active = nil
         if current != original {
+            // Floating first: a plain time written over a fixed one
+            // would be kept in its zone.
+            if original.when != nil, original.zone == nil, item.whenZone != nil {
+                model.setWhenZone(ref, zone: nil)
+            }
             model.setWhen(
-                ref, when: original.when,
+                ref, when: original.when.map { WhenZone.stored($0, zone: original.zone) },
                 duration: original.duration.map { .minutes(minutes: UInt32(clamping: $0)) } ?? .clear)
             // After the date: an event needs one, and clearing the
             // date took the flag with it.
@@ -176,7 +205,7 @@ struct ItemDateEditor: View {
             // Whatever changed it, here or on another device: a box
             // that is no longer there cannot be the selected one.
             guard let active, active != .start else { return }
-            if item.when == nil || (active == .endTime && !item.isTimed) { self.active = nil }
+            if item.when == nil || ((active == .endTime || active == .zone) && !item.isTimed) { self.active = nil }
         }
         .sheet(isPresented: Binding(get: { active != nil }, set: { if !$0 { active = nil } })) {
             NavigationStack {
@@ -184,17 +213,18 @@ struct ItemDateEditor: View {
             }
             // A box's picker starts from that box's value.
             .id(sheetBox)
-            .presentationDetents(Self.isDay(sheetBox) ? [.height(540), .large] : [.height(320)])
+            .presentationDetents(Self.isTall(sheetBox) ? [.height(540), .large] : [.height(320)])
             // The boxes over the sheet still take taps.
             .presentationBackgroundInteraction(.enabled)
         }
     }
 
-    private static func isDay(_ box: Box) -> Bool { box == .start || box == .end }
+    /// A day's month or the zones' list; a time's wheel is short.
+    private static func isTall(_ box: Box) -> Bool { box == .start || box == .end || box == .zone }
 
-    private var startDay: String? { item.when.map { String($0.prefix(10)) } }
+    private var startDay: String? { when.map { String($0.prefix(10)) } }
     /// Days past the start day the span ends on; 0 is the start day.
-    private var endOffset: Int { item.when.map { WhenSpan.endOffset(when: $0, duration: item.duration) } ?? 0 }
+    private var endOffset: Int { when.map { WhenSpan.endOffset(when: $0, duration: item.duration) } ?? 0 }
     private var endDay: String? {
         guard let startDay, let first = WhenText.date(startDay),
               let last = WhenText.calendar.date(byAdding: .day, value: endOffset, to: first)
@@ -211,7 +241,7 @@ struct ItemDateEditor: View {
                     dateBox(.start)
                     if item.when != nil { dateBox(.end) }
                 }
-                if let when = item.when {
+                if let when {
                     HStack(spacing: 8) {
                         startTimeBox(when)
                         if item.isTimed {
@@ -221,6 +251,9 @@ struct ItemDateEditor: View {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                         }
                     }
+                    // The zone a time is fixed to; an all-day date
+                    // has none.
+                    if item.isTimed { zoneBox(when) }
                 }
             }
             if item.when != nil {
@@ -318,6 +351,21 @@ struct ItemDateEditor: View {
         }
     }
 
+    /// The zone the time is fixed to: its offset on the item's day
+    /// and its city, a muted "Time zone" while the time is floating.
+    private func zoneBox(_ when: String) -> some View {
+        fieldBox(
+            .zone, "globe",
+            clear: item.whenZone != nil ? (String(localized: "Remove time zone"), removeZone) : nil
+        ) {
+            if let zone = item.whenZone {
+                Text(verbatim: Zones.option(zone, day: when).label)
+            } else {
+                Text("Time zone").foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     /// A tap on a box: it is the selected one and the sheet is its
     /// picker.
     private func select(_ box: Box) {
@@ -328,7 +376,7 @@ struct ItemDateEditor: View {
     private func clearDate() {
         active = nil
         // The engine clears the duration with it.
-        model.setWhen(ref, when: nil)
+        write(nil)
     }
 
     /// All-day again. The length is kept, so a time put back brings
@@ -336,12 +384,18 @@ struct ItemDateEditor: View {
     private func clearTime() {
         guard let startDay else { return }
         active = nil
-        model.setWhen(ref, when: startDay)
+        write(startDay)
+    }
+
+    /// The zone's "x": floating again, at the moment it had.
+    private func removeZone() {
+        active = nil
+        model.setWhenZone(ref, zone: nil)
     }
 
     /// The end day's "x": the span back onto the start day.
     private func removeEnd() {
-        guard let when = item.when else { return }
+        guard let when else { return }
         active = nil
         let length = WhenSpan.sameDayLength(when: when, duration: item.duration)
         model.setDuration(ref, minutes: length > 0 ? length : nil)
@@ -360,7 +414,7 @@ struct ItemDateEditor: View {
                 title: String(localized: "Date"), initial: startDay ?? WhenText.today(), range: nil,
                 offers: {
                     Self.offers(
-                        typed: $0, current: item.when, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
+                        typed: $0, current: when, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
                 },
                 cancel: close
             ) { when, offered in
@@ -371,7 +425,7 @@ struct ItemDateEditor: View {
             DaySheet(
                 title: String(localized: "End date"), initial: endDay ?? WhenText.today(), range: endRange,
                 offers: { typed in
-                    item.when.map { Self.endOffers(typed: typed, when: $0, duration: item.duration) } ?? []
+                    when.map { Self.endOffers(typed: typed, when: $0, duration: item.duration) } ?? []
                 },
                 cancel: close
             ) { when, _ in
@@ -386,6 +440,11 @@ struct ItemDateEditor: View {
         case .endTime:
             TimeSheet(title: String(localized: "End"), initial: endTime, cancel: close) {
                 setEndTime($0)
+                close()
+            }
+        case .zone:
+            ZoneSheet(zone: item.whenZone, day: when ?? WhenText.today(), cancel: close) {
+                if $0 != item.whenZone { model.setWhenZone(ref, zone: $0) }
                 close()
             }
         }
@@ -439,21 +498,19 @@ struct ItemDateEditor: View {
     /// day off the calendar keeps the time of day and the length, so
     /// the span moves whole.
     private func setStart(_ picked: String, offered: Bool) {
-        guard let when = item.when else { return model.setWhen(ref, when: picked) }
+        guard let when else { return write(picked) }
         if offered {
             let timed = picked.count >= 16
-            model.setWhen(
-                ref, when: picked,
-                duration: timed == item.isTimed ? .keep : (timed ? .minutes(minutes: 60) : .clear))
+            write(picked, duration: timed == item.isTimed ? .keep : (timed ? .minutes(minutes: 60) : .clear))
         } else if picked != startDay {
-            model.setWhen(ref, when: picked + when.dropFirst(10).prefix(6))
+            write(picked + when.dropFirst(10).prefix(6))
         }
     }
 
     /// The span ends on `day`, if it can; a day it cannot reach
     /// changes nothing.
     private func setEnd(_ day: String) {
-        guard let when = item.when, let startDay,
+        guard let when, let startDay,
               let offset = WhenSpan.days(from: startDay, to: day, calendar: WhenText.calendar),
               offset != endOffset,
               let length = WhenSpan.endLength(when: when, duration: item.duration, offset: offset)
@@ -465,7 +522,7 @@ struct ItemDateEditor: View {
     /// day after, while the end's clock time is not past the start's)
     /// to the one-year ceiling.
     private var endRange: ClosedRange<Date>? {
-        guard let when = item.when, let startDay, let first = WhenText.date(startDay) else { return nil }
+        guard let when, let startDay, let first = WhenText.date(startDay) else { return nil }
         let calendar = WhenText.calendar
         let from = WhenSpan.endLength(when: when, duration: item.duration, offset: 0) == nil ? 1 : 0
         guard let low = calendar.date(byAdding: .day, value: from, to: first),
@@ -479,14 +536,14 @@ struct ItemDateEditor: View {
     /// Where the start's wheel opens: the start time, 09:00 on an
     /// all-day date.
     private var startTime: Date {
-        guard let when = item.when else { return Date() }
+        guard let when else { return Date() }
         return WhenText.date(item.isTimed ? when : "\(when.prefix(10))T09:00") ?? Date()
     }
 
     /// Where the end's wheel opens: start + the stored length, an hour
     /// after the start while there is none.
     private var endTime: Date {
-        let start = item.when.flatMap(WhenText.date) ?? Date()
+        let start = when.flatMap(WhenText.date) ?? Date()
         let length = item.duration.flatMap { $0 > 0 ? $0 : nil } ?? WhenSpan.defaultLength
         return WhenText.calendar.date(byAdding: .minute, value: length, to: start) ?? start
     }
@@ -502,12 +559,12 @@ struct ItemDateEditor: View {
                 duration = length.map { .minutes(minutes: UInt32(clamping: $0)) } ?? .clear
             }
         }
-        model.setWhen(ref, when: "\(startDay)T\(WhenText.time(time))", duration: duration)
+        write("\(startDay)T\(WhenText.time(time))", duration: duration)
     }
 
     /// An end time confirmed: the length up to it.
     private func setEndTime(_ time: Date) {
-        guard let when = item.when, item.isTimed else { return }
+        guard let when, item.isTimed else { return }
         let c = WhenText.calendar.dateComponents([.hour, .minute], from: time)
         let end = (c.hour ?? 0) * 60 + (c.minute ?? 0)
         model.setDuration(ref, minutes: Self.length(from: when, toClock: end, was: item.duration))
@@ -691,6 +748,113 @@ private struct TimeSheet: View {
             .labelsHidden()
             .frame(maxWidth: .infinity)
             .editorHeader(title: title, cancel: cancel, done: { commit(time) })
+    }
+}
+
+/// The zone's picker, the half sheet under the date editor's boxes: a
+/// text box and the zones it names (`Zones` in the Kit: city, id, name
+/// or offset, by word prefix), every zone by city with the device's
+/// own first while nothing is typed. Each row is the city over the
+/// zone's name, its offset on the item's day at the trailing edge. A
+/// tap on a row is a draft, ticked in the list and named under the
+/// title, until the sheet's tick, which is off until a zone is picked.
+private struct ZoneSheet: View {
+    /// The item's day, or its whole `when`: offsets are quoted as of
+    /// it.
+    let day: String
+    let cancel: () -> Void
+    let commit: (String) -> Void
+
+    /// The zone picked: the stored one until another is tapped.
+    @State private var draft: String?
+    @State private var query = ""
+    @FocusState private var typing: Bool
+
+    init(zone: String?, day: String, cancel: @escaping () -> Void, commit: @escaping (String) -> Void) {
+        self.day = day
+        self.cancel = cancel
+        self.commit = commit
+        _draft = State(initialValue: zone)
+    }
+
+    var body: some View {
+        let zones = Zones.suggestions(query, in: Zones.options(day: day), first: Zones.deviceZone())
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    typedBox
+                    if zones.isEmpty {
+                        Text("No time zone in that yet")
+                            .foregroundStyle(.secondary)
+                            .frame(minHeight: 36)
+                    }
+                    // Some hundreds of rows while nothing is typed.
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(zones) { option in
+                            row(option)
+                            Divider()
+                        }
+                    }
+                }
+                .padding()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            // The long blank list opens on the stored zone.
+            .onAppear { if let draft { proxy.scrollTo(draft, anchor: .center) } }
+        }
+        .editorHeader(
+            title: String(localized: "Time zone"), itemTitle: draft.map { Zones.option($0, day: day).label },
+            canFinish: draft != nil, cancel: cancel, done: { if let draft { commit(draft) } }
+        )
+    }
+
+    private func row(_ option: ZoneOption) -> some View {
+        Button {
+            draft = option.id
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: option.city)
+                    if !option.name.isEmpty {
+                        Text(verbatim: option.name).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(verbatim: option.offset).foregroundStyle(.secondary).monospacedDigit()
+                if draft == option.id {
+                    Image(systemName: "checkmark").foregroundStyle(.tint)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(draft == option.id ? .isSelected : [])
+    }
+
+    private var typedBox: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary).frame(width: 20)
+            TextField("City or time zone", text: $query)
+                .focused($typing)
+                .submitLabel(.done)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .onSubmit { typing = false }
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear text")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 40)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

@@ -193,6 +193,40 @@ final class EngineTests: XCTestCase {
         XCTAssertNil(page.item.whenSuggested, "a date set answers the suggestion")
         XCTAssertTrue(page.starred)
 
+        // Fixed to a zone, the clock digits are that zone's: the
+        // row's `when` stays wall time here, the zone rides beside it
+        // (spec/calendar-plan.md "Fixed instants").
+        XCTAssertNil(page.item.whenZone)
+        try await calls.run { try $0.setWhenZone(workspace: nil, id: id, zone: "Asia/Tokyo") }
+        page = try await calls.run { try $0.item(workspace: nil, id: id) }
+        XCTAssertEqual(page.item.whenZone, "Asia/Tokyo")
+        let local = try XCTUnwrap(page.item.when)
+        XCTAssertEqual(WhenZone.wall(local, zone: "Asia/Tokyo"), "2030-01-04T09:00")
+        XCTAssertEqual(WhenZone.stored(local, zone: "Asia/Tokyo"), "2030-01-04T09:00[Asia/Tokyo]")
+        XCTAssertEqual(WhenZone.local("2030-01-04T09:00", zone: "Asia/Tokyo"), local)
+        // An edit of the zone's clock is written in the zone.
+        try await calls.run {
+            try $0.setWhen(
+                workspace: nil, id: id, when: WhenZone.fixed("2030-01-04T10:30", zone: "Asia/Tokyo"), duration: .keep)
+        }
+        page = try await calls.run { try $0.item(workspace: nil, id: id) }
+        XCTAssertEqual(page.item.whenZone, "Asia/Tokyo")
+        XCTAssertEqual(WhenZone.wall(try XCTUnwrap(page.item.when), zone: "Asia/Tokyo"), "2030-01-04T10:30")
+        // A zone the tzdb lacks is refused; floating again, the time
+        // stays the one this device showed.
+        do {
+            try await calls.run { try $0.setWhenZone(workspace: nil, id: id, zone: "Europe/Atlantis") }
+            XCTFail("an unknown zone was written")
+        } catch {}
+        let shown = page.item.when
+        try await calls.run { try $0.setWhenZone(workspace: nil, id: id, zone: nil) }
+        page = try await calls.run { try $0.item(workspace: nil, id: id) }
+        XCTAssertNil(page.item.whenZone)
+        XCTAssertEqual(page.item.when, shown)
+        try await calls.run {
+            try $0.setWhen(workspace: nil, id: id, when: "2030-01-04T09:00", duration: .keep)
+        }
+
         // A bare label takes the known place whole.
         let other = try await calls.run {
             try $0.addItem(workspace: nil, list: "inbox", text: "oil hinges", top: true)

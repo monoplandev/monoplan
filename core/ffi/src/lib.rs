@@ -309,6 +309,28 @@ pub fn matches_name(name: String, query: String) -> bool {
     monoplan_core::matches_name(&name, &query)
 }
 
+/// The wall time (`YYYY-MM-DDTHH:MM`) in the IANA zone `zone` at the
+/// instant the device-local timed `when` names
+/// (`spec/calendar-plan.md` "Fixed instants"): nil when the value is
+/// not timed or the tzdb does not know the zone. What the date and time
+/// fields of an item fixed to a zone show, and with `[zone]` appended
+/// the stored form `Engine.set_when` takes.
+#[uniffi::export]
+pub fn when_in_zone(when: String, zone: String) -> Option<String> {
+    // `YYYY-MM-DDTHH:MM`; a bare date would parse as its midnight.
+    if when.len() != 16 {
+        return None;
+    }
+    monoplan_core::zone::wall_in_zone(&when, &zone)
+}
+
+/// A stored `when` as this device shows it: a `...[Zone]` value as
+/// device-local wall time, anything else unchanged.
+#[uniffi::export]
+pub fn when_localized(stored: String) -> String {
+    monoplan_core::zone::localize(&stored)
+}
+
 /// Sign out: stop whatever holds the profile, hold it, revoke this
 /// device on the server, wipe it. What `monoplan auth logout` does, for
 /// the app's Settings. The revoke is best-effort (an unreachable server
@@ -843,8 +865,10 @@ impl Engine {
         })?)
     }
 
-    /// Set an item's planned date (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM`
-    /// floating) or clear it (nil), then apply `duration`.
+    /// Set an item's planned date or clear it (nil), then apply
+    /// `duration`: `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM` (wall time on this
+    /// device; an item fixed to a zone stays in it), or
+    /// `YYYY-MM-DDTHH:MM[Zone]` (that time in that zone).
     pub fn set_when(
         &self,
         workspace: Option<String>,
@@ -861,6 +885,20 @@ impl Engine {
                     api::items::set_duration(cx, &id, Some(minutes))
                 }
             }
+        })?)
+    }
+
+    /// Fix an item's timed `when` to an IANA zone, keeping its clock
+    /// digits, or make it floating again at the time this device shows
+    /// (nil).
+    pub fn set_when_zone(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        zone: Option<String>,
+    ) -> Result<(), EngineError> {
+        Ok(self.client.call_blocking(workspace, move |cx| {
+            api::items::set_when_zone(cx, &id, zone.as_deref())
         })?)
     }
 

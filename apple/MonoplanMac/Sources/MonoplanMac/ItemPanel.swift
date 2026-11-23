@@ -60,6 +60,9 @@ struct ItemPanel: View {
     /// A date was picked for the item, or cleared (nil), with what
     /// becomes of its duration.
     let setWhen: (ItemInfo, String?, DurationChange) -> Void
+    /// The item's timed date was fixed to an IANA zone, or made
+    /// floating again (nil).
+    let setWhenZone: (ItemInfo, String?) -> Void
     /// The item was marked an event, or a task again.
     let setEvent: (ItemInfo, Bool) -> Void
     /// Who the item can be assigned to; nil on Home, which has no
@@ -163,14 +166,20 @@ struct ItemPanel: View {
             // rule between each, with 16 pt between it and a row's
             // text (the stack's 4, 4 more, and the 8 inside a box).
             PanelRule().padding(.vertical, 4)
+            // A time fixed to a zone reads on that zone's clock in
+            // the date and time rows, the one place it does
+            // (spec/calendar-plan.md "Fixed instants"); what is
+            // edited there is written back in the zone.
+            let zone = item.item.whenZone
+            let shownWhen = item.item.when.map { WhenZone.wall($0, zone: zone) }
             if item.item.binnedAt == nil {
-                DateField(when: item.item.when, duration: item.item.duration.map(Int.init)) {
-                    setWhen(item, $0, $1)
+                DateField(when: shownWhen, duration: item.item.duration.map(Int.init)) {
+                    setShownWhen(item, $0, $1)
                 }
                 .id(identity)
                 // Its offers and month float over the rows under it.
                 .zIndex(2)
-            } else if let when = item.item.when {
+            } else if let when = shownWhen {
                 PanelField(
                     text: Self.dayText(String(when.prefix(10))),
                     note: Self.timeText(when) == nil ? Self.lengthText(item) : nil
@@ -184,7 +193,7 @@ struct ItemPanel: View {
             // columns: when it starts ("All day" while it has no
             // time), then, once it has a start, when it ends (a muted
             // "End" while it has no length).
-            if let when = item.item.when, item.item.binnedAt == nil {
+            if let when = shownWhen, item.item.binnedAt == nil {
                 let start = TimeOffers.minutes(of: when)
                 // Each box is outset by its inset, so 4 pt shows
                 // between the two.
@@ -218,13 +227,25 @@ struct ItemPanel: View {
                 .id(identity)
                 // Their lists float over the rows under them.
                 .zIndex(1.5)
-            } else if let time = item.item.when.flatMap(Self.timeText) {
+            } else if let when = shownWhen, let time = Self.timeText(when) {
                 HStack(spacing: PanelBox.inset * 2 + 4) {
                     PanelField(text: time) { Image(systemName: "clock") }
-                    let end = Self.endTimeText(item)
+                    let end = Self.endTimeText(when, duration: item.item.duration.map(Int.init))
                     PanelField(text: end ?? String(localized: "End"), empty: end == nil) {
                         Image(systemName: "arrow.right")
                     }
+                }
+            }
+            // The zone the time is fixed to, under the times and only
+            // beside one: blank is floating.
+            if let when = shownWhen, when.count >= 16 {
+                if item.item.binnedAt == nil {
+                    ZoneField(zone: zone, day: when) { setWhenZone(item, $0) }
+                        .id(identity)
+                        // Its list floats over the rows under it.
+                        .zIndex(1.25)
+                } else if let zone {
+                    PanelField(text: Zones.option(zone, day: when).label) { Image(systemName: "globe") }
                 }
             }
             // What the date means: something to do by then, or
@@ -279,15 +300,21 @@ struct ItemPanel: View {
     /// hours, so from Tue 09:00 it would end Fri 09:00): that length is
     /// reshaped to end on the same last day, an hour after the start.
     private func setTime(_ item: ItemInfo, _ minutes: Int?) {
-        guard let when = item.item.when else { return }
+        guard let when = item.item.when.map({ WhenZone.wall($0, zone: item.item.whenZone) }) else { return }
         let day = String(when.prefix(10))
-        guard let minutes else { return setWhen(item, day, .keep) }
+        guard let minutes else { return setShownWhen(item, day, .keep) }
         var change = DurationChange.keep
         if when.count < 16, let length = item.item.duration.map(Int.init),
            length >= 2 * TimeOffers.day, length % TimeOffers.day == 0 {
             change = .minutes(minutes: UInt32(length - TimeOffers.day + 60))
         }
-        setWhen(item, "\(day)T\(TimeOffers.text(minutes))", change)
+        setShownWhen(item, "\(day)T\(TimeOffers.text(minutes))", change)
+    }
+
+    /// Write a date as the date and time rows show it: on the clock
+    /// of the zone the item is fixed to, when it is to one.
+    private func setShownWhen(_ item: ItemInfo, _ when: String?, _ change: DurationChange) {
+        setWhen(item, when.map { WhenZone.fixed($0, zone: item.item.whenZone) }, change)
     }
 
     @ViewBuilder
@@ -422,9 +449,9 @@ struct ItemPanel: View {
     /// When a timed date ends, "15:30": its start and its length, on
     /// the clock alone (an end past midnight is the next day's time).
     /// Nil without a time or a length.
-    static func endTimeText(_ item: ItemInfo) -> String? {
-        guard let when = item.item.when, let start = timeText(when),
-              let minutes = item.item.duration.map(Int.init), minutes > 0,
+    static func endTimeText(_ when: String, duration: Int?) -> String? {
+        guard let start = timeText(when),
+              let minutes = duration, minutes > 0,
               let hour = Int(start.prefix(2)), let minute = Int(start.suffix(2))
         else { return nil }
         let end = (hour * 60 + minute + minutes) % 1440

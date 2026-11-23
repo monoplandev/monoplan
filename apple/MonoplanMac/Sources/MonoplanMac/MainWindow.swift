@@ -284,7 +284,12 @@ struct ItemCapture: Equatable {
     var workspace: String?
     var list: String
     var text = ""
+    /// The planned date as an item's is read: wall time on this
+    /// device, whether or not it is fixed to a zone.
     var when: String?
+    /// The IANA zone a timed `when` is fixed to; nil is floating
+    /// (spec/calendar-plan.md "Fixed instants").
+    var zone: String?
     var duration: Int?
     var event = false
     var place: Place?
@@ -297,6 +302,42 @@ struct ItemCapture: Equatable {
     var focusTitle = false
 
     var identity: String { "capture-\(key)" }
+
+    /// The register value the capture is made with: its `when`, in
+    /// its zone when it has one.
+    var storedWhen: String? { when.map { WhenZone.stored($0, zone: zone) } }
+
+    /// A date as `Engine.setWhen` takes one, kept the way the engine
+    /// would keep it: `...[Zone]` is that time in that zone, anything
+    /// else wall time on this device.
+    mutating func setWhen(_ value: String?) {
+        guard let value else {
+            when = nil
+            return
+        }
+        if let named = WhenZone.split(value).zone {
+            when = whenLocalized(stored: value)
+            zone = named
+        } else {
+            when = value
+        }
+    }
+
+    /// As `Engine.setWhenZone`: fix the time to `zone`, its clock
+    /// digits kept, or make it floating at the time this device shows
+    /// (nil). Nothing without a time, or for a zone the core does not
+    /// know.
+    mutating func setZone(_ zone: String?) {
+        guard let when, when.count >= 16 else { return }
+        guard let zone else {
+            self.zone = nil
+            return
+        }
+        guard WhenZone.knows(zone) else { return }
+        let digits = WhenZone.wall(when, zone: self.zone)
+        self.when = WhenZone.local(digits, zone: zone)
+        self.zone = zone
+    }
 }
 
 /// A sidebar row: a lens, or a list in a workspace (nil being Home).
@@ -1052,6 +1093,12 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }
     }
 
+    /// Fix an item's timed date to an IANA zone, its clock digits
+    /// kept, or make it floating again (nil) (`Engine.setWhenZone`).
+    func setWhenZone(workspace: String?, id: String, zone: String?) {
+        write { try $0.setWhenZone(workspace: workspace, id: id, zone: zone) }
+    }
+
     /// Set or clear an item's deadline (`Engine.setDeadline`).
     func setDeadline(workspace: String?, id: String, deadline: String?) {
         write { try $0.setDeadline(workspace: workspace, id: id, deadline: deadline) }
@@ -1686,12 +1733,14 @@ final class MainWindowModel: ObservableObject {
             capture.duration = nil
             capture.event = false
         }
+        // No time, no zone: an all-day date drops it.
+        if (capture.when?.count ?? 0) < 16 { capture.zone = nil }
         self.capture = capture
     }
 
     private static func fields(_ capture: ItemCapture?) -> NewItemFields {
         NewItemFields(
-            when: capture?.when, duration: capture?.duration.map(UInt32.init), event: capture?.event ?? false,
+            when: capture?.storedWhen, duration: capture?.duration.map(UInt32.init), event: capture?.event ?? false,
             place: capture?.place, placeExact: capture?.placeExact ?? false, whenSuggested: nil)
     }
 
@@ -1730,7 +1779,7 @@ final class MainWindowModel: ObservableObject {
         let item = Item(
             id: capture.identity, text: capture.text, listId: capture.list, state: .backlog, lifecycleAt: now,
             createdAt: now, createdBy: nil, assignee: nil, startedAt: nil, doneAt: nil, binnedAt: nil,
-            deadline: nil, when: capture.when, whenSuggested: nil, event: capture.event,
+            deadline: nil, when: capture.when, whenZone: capture.zone, whenSuggested: nil, event: capture.event,
             duration: capture.duration.map(UInt32.init), place: capture.place)
         return ItemInfo(
             item: item, notes: "", subtasks: [],

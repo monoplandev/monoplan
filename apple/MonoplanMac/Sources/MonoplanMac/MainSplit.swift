@@ -697,7 +697,7 @@ struct ItemPanelPane: View {
                     setWhen: { item, when, duration in
                         if capture != nil {
                             return model.editCapture {
-                                $0.when = when
+                                $0.setWhen(when)
                                 switch duration {
                                 case .keep: break
                                 case .clear: $0.duration = nil
@@ -706,6 +706,10 @@ struct ItemPanelPane: View {
                             }
                         }
                         model.setWhen(workspace: workspace, id: item.item.id, when: when, duration: duration)
+                    },
+                    setWhenZone: { item, zone in
+                        if capture != nil { return model.editCapture { $0.setZone(zone) } }
+                        model.setWhenZone(workspace: workspace, id: item.item.id, zone: zone)
                     },
                     setEvent: { item, event in
                         if capture != nil { return model.editCapture { $0.event = event } }

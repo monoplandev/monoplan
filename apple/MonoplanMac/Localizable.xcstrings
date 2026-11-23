@@ -1724,6 +1724,16 @@
         }
       }
     },
+    "No time zone in that yet" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ahí aún no hay una zona horaria"
+          }
+        }
+      }
+    },
     "Not running" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2168,6 +2178,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quitar estrella"
+          }
+        }
+      }
+    },
+    "Remove time zone" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar zona horaria"
           }
         }
       }
@@ -2874,6 +2894,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Esto elimina la copia local de tus datos de este Mac y crea un espacio de trabajo local nuevo. Tus datos permanecen en el servidor y vuelven cuando inicias sesión de nuevo."
+          }
+        }
+      }
+    },
+    "Time zone" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zona horaria"
           }
         }
       }

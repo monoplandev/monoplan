@@ -242,6 +242,9 @@ extension ItemInfo {
     /// Account id of the member the item is assigned to, when it is.
     var assignee: String? { item.assignee }
     var when: String? { item.when }
+    /// The IANA zone a timed `when` is fixed to; nil is floating
+    /// (spec/calendar-plan.md "Fixed instants").
+    var whenZone: String? { item.whenZone }
     var whenSuggested: String? { item.whenSuggested }
     /// An event (spec/events-plan.md): it happens on its date, so
     /// the date goes by instead of going overdue.

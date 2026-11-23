@@ -609,6 +609,14 @@ final class AppModel: ObservableObject {
         write({ try $0.setWhen(workspace: workspace, id: id, when: when, duration: duration) }, to: ref)
     }
 
+    /// Fix an item's timed date to an IANA zone, its clock digits
+    /// kept, or make it floating again at the time this device shows
+    /// (nil) (`Engine.setWhenZone`).
+    func setWhenZone(_ ref: ItemRef, zone: String?) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        write({ try $0.setWhenZone(workspace: workspace, id: id, zone: zone) }, to: ref)
+    }
+
     /// Mark a dated item an event, or a task again (`Engine.setEvent`).
     func setEvent(_ ref: ItemRef, event: Bool) {
         let (workspace, id) = (selector(ref.docId), ref.itemId)

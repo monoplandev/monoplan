@@ -577,6 +577,17 @@
         }
       }
     },
+    "City or time zone" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ciudad o zona horaria"
+          }
+        }
+      }
+    },
     "Clear" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2147,6 +2158,16 @@
         }
       }
     },
+    "No time zone in that yet" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ahí aún no hay una zona horaria"
+          }
+        }
+      }
+    },
     "Not done" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2651,6 +2672,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quitar fecha de fin"
+          }
+        }
+      }
+    },
+    "Remove time zone" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitar zona horaria"
           }
         }
       }
@@ -3398,6 +3430,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Esto elimina los datos de la cuenta de este iPhone. Permanecen en el servidor y en tus otros dispositivos."
+          }
+        }
+      }
+    },
+    "Time zone" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zona horaria"
           }
         }
       }
