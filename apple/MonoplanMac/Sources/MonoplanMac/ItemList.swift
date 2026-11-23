@@ -26,7 +26,7 @@ struct ItemListRow: Equatable {
     /// The workspace the item lives in; nil is Home.
     let workspace: String?
     let text: String
-    let state: ItemState
+    var state: ItemState
     /// The star at the row's far edge, or after the text when the
     /// small print has the edge.
     var starred = false
@@ -60,6 +60,14 @@ struct ItemListCapture {
 
 /// A drag of the list's rows over what lies outside it: the sidebar's
 /// rows take them (`SidebarDrops`). Points are the window's.
+/// An item closed (done or cancelled) or reopened from this window,
+/// for `ItemList.closes`. `serial` counts up across the window.
+struct ItemListClose: Equatable {
+    let serial: Int
+    let id: String
+    let closed: Bool
+}
+
 struct ItemListDrop {
     enum Outcome {
         /// Nothing there takes rows: the list goes on to its own drop.
@@ -110,6 +118,15 @@ struct ItemList: NSViewRepresentable {
     /// The last rows are in sight or nearly: a list read a page at a
     /// time (Done) reads on. Asked again on each scroll while they are.
     var nearEnd: (() -> Void)?
+    /// A row closed while shown here stays where it was, ticked, for a
+    /// beat before it leaves (`Linger`): a list's rows, Starred's and
+    /// Assigned's, which drop a row once it is done.
+    var lingers = false
+    /// The items this window closed or reopened lately, newest last,
+    /// from whichever control: the checkbox, the panel's tick, the
+    /// state menu. Those new since the last update start or join the
+    /// linger.
+    var closes: [ItemListClose] = []
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -143,6 +160,13 @@ struct ItemList: NSViewRepresentable {
     final class Coordinator: NSObject, DndListDataSource, DndListDelegate {
         var parent: ItemList
         private var rows: [String: ItemListRow] = [:]
+        /// What the list shows: `parent.rows` with the lingering rows
+        /// put back where they were.
+        private var shown: [ItemListRow] = []
+        private var linger = Linger()
+        private var flush: DispatchWorkItem?
+        /// The newest of `closes` already taken.
+        private var seenClose = 0
         private var surface: Surface?
         /// The model's selection as last carried into the list.
         private var synced: String?
@@ -185,19 +209,26 @@ struct ItemList: NSViewRepresentable {
             let moved = surface != next.surface
             // Text typed under the last list is that list's item.
             if moved { addRow.flush() }
-            let grew = !moved && next.rows.count > rows.count
+            // Ticked rows linger on the list they were ticked on only.
+            if moved || !next.lingers { endLinger() }
+            let fresh = next.closes.filter { $0.serial > seenClose }
+            seenClose = next.closes.last?.serial ?? seenClose
+            if !moved, next.lingers { take(fresh) }
+            let display = linger.overlay(next.rows)
+            let grew = !moved && display.count > shown.count
             // The item Return sent is in these rows, or wherever else
             // the panel sent it.
             let settled = !moved && next.capture?.settled != parent.capture?.settled
             parent = next
-            rows = Dictionary(next.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            shown = display
+            rows = Dictionary(display.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             list.model.config.reorder = next.reorder
             // An Inbox's rows have nowhere to go in it, and still drag
             // out to the sidebar.
             list.model.config.drag = next.reorder || next.drop != nil
 
             surface = next.surface
-            list.setOrder(next.rows.map(\.id), animated: !moved)
+            list.setOrder(display.map(\.id), animated: !moved)
             list.setTrailer(next.capture == nil ? nil : addRow)
             if settled { addRow.settle() }
             list.reloadRows()
@@ -232,7 +263,7 @@ struct ItemList: NSViewRepresentable {
 
         /// Within a windowful of the last row.
         private func checkEnd() {
-            guard let nearEnd = parent.nearEnd, let list, !parent.rows.isEmpty,
+            guard let nearEnd = parent.nearEnd, let list, !shown.isEmpty,
                   let content = list.scrollView.documentView else { return }
             let clip = list.scrollView.contentView.bounds
             if content.frame.maxY - clip.maxY < clip.height { nearEnd() }
@@ -248,6 +279,50 @@ struct ItemList: NSViewRepresentable {
                 guard let self, let row = self.rows[key] else { return }
                 self.parent.toggle(row, done)
             }
+        }
+
+        // MARK: Linger
+
+        /// A close of a row on screen holds it in place, ticked, and
+        /// pushes the whole group's exit to a beat after this close;
+        /// a reopen of a lingering row leaves it where it is, open.
+        /// Taken from the rows as they were before this update, which
+        /// may already lack the row if the write's read came first.
+        private func take(_ closes: [ItemListClose]) {
+            var closed = false
+            for close in closes {
+                if close.closed {
+                    guard let row = shown.first(where: { $0.id == close.id }) else { continue }
+                    linger.close(row, in: shown)
+                    closed = true
+                } else {
+                    linger.reopen(close.id)
+                }
+            }
+            if closed { armFlush() }
+        }
+
+        private func armFlush() {
+            flush?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.endLinger()
+                self.refresh()
+            }
+            flush = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Linger.beat, execute: work)
+        }
+
+        private func endLinger() {
+            flush?.cancel()
+            flush = nil
+            linger = Linger()
+        }
+
+        /// The same rows again, with the linger as it now is.
+        private func refresh() {
+            guard let list else { return }
+            apply(parent, to: list)
         }
 
         // MARK: DndListDelegate
@@ -280,7 +355,7 @@ struct ItemList: NSViewRepresentable {
             guard let drop = parent.drop else { return false }
             // In the order shown, whatever order they were picked in.
             let dragged = Set(keys)
-            let rows = parent.rows.filter { dragged.contains($0.id) }
+            let rows = shown.filter { dragged.contains($0.id) }
             switch drop.dropped(rows, windowPoint, list.window) {
             case .ignored:
                 return false
@@ -317,6 +392,68 @@ struct ItemList: NSViewRepresentable {
             }
             return menu
         }
+    }
+}
+
+/// The web's done linger (`lingerChain` in `js/web/src/Workspace.tsx`):
+/// a row ticked off a list that drops done rows stays where it was,
+/// ticked, for `beat` before it goes. Each tick inside the beat of the
+/// one before joins the group and holds it all another beat from
+/// itself, so a run of ticks leaves together once the user stops,
+/// rather than the rows under the pointer sliding up between clicks.
+/// Purely a display tail: the item is Done the moment it is ticked.
+/// Only ticks made in this list linger; a row closed elsewhere (another
+/// window, another device) leaves at the next read, as it did before.
+struct Linger {
+    /// The web's `DONE_LINGER_MS`.
+    static let beat: TimeInterval = 2
+
+    private struct Entry {
+        var row: ItemListRow
+        /// Where the row was among the rows that do not linger, when
+        /// it was ticked: each one after the rows ticked before it had
+        /// gone, as the web's capture.
+        let index: Int
+        /// Unticked while lingering: the row stays, open, until a read
+        /// has it back in its own place.
+        var reopened = false
+    }
+
+    private var entries: [Entry] = []
+
+    /// `row` was ticked in `shown`, the rows on screen.
+    mutating func close(_ row: ItemListRow, in shown: [ItemListRow]) {
+        entries.removeAll { $0.row.id == row.id }
+        let lingering = Set(entries.map(\.row.id))
+        let rest = shown.filter { !lingering.contains($0.id) }
+        let index = rest.firstIndex { $0.id == row.id } ?? rest.count
+        var ticked = row
+        ticked.state = .done
+        entries.append(Entry(row: ticked, index: index))
+    }
+
+    mutating func reopen(_ id: String) {
+        guard let i = entries.firstIndex(where: { $0.row.id == id }) else { return }
+        entries[i].reopened = true
+        entries[i].row.state = .todo
+    }
+
+    /// `rows` as read, with the lingering ones where they were. A row
+    /// still in the read (its write not yet read back) is shown ticked
+    /// in its own place; one gone from it is put back at its index,
+    /// replayed newest first (`restoreCapturedPositions` in
+    /// `js/web/src/linger.ts`). A reopened row the read has back again
+    /// is the read's.
+    mutating func overlay(_ rows: [ItemListRow]) -> [ItemListRow] {
+        guard !entries.isEmpty else { return rows }
+        let present = Set(rows.map(\.id))
+        entries.removeAll { $0.reopened && present.contains($0.row.id) }
+        let lingering = Set(entries.map(\.row.id))
+        var out = rows.filter { !lingering.contains($0.id) }
+        for entry in entries.reversed() {
+            out.insert(entry.row, at: min(max(entry.index, 0), out.count))
+        }
+        return out
     }
 }
 

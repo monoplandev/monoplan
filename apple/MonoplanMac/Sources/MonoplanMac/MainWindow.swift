@@ -342,6 +342,9 @@ final class MainWindowModel: ObservableObject {
     /// assigned to this account in every workspace. Always read: the
     /// sidebar counts them, and shows the lens only while there are any.
     @Published private(set) var assigned: [AssignedRow] = []
+    /// The items closed or reopened from this window lately, for the
+    /// rows' linger (`ItemList.closes`).
+    @Published private(set) var closes: [ItemListClose] = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
     /// The workspaces hidden from the Calendar (`Engine.calendarHiddenDocs`,
@@ -914,11 +917,20 @@ final class MainWindowModel: ObservableObject {
 
     func tick(_ item: Item) {
         let workspace = shown.workspace
+        noteClose(item.id, closed: true)
         write { try $0.setDone(workspace: workspace, id: item.id, done: true) }
+    }
+
+    /// A close or reopen for the rows' linger. The last few are enough:
+    /// a list takes the new ones at its next update.
+    private func noteClose(_ id: String, closed: Bool) {
+        let serial = (closes.last?.serial ?? 0) + 1
+        closes = Array((closes + [ItemListClose(serial: serial, id: id, closed: closed)]).suffix(16))
     }
 
     /// Tick or untick a lens's row, in its own workspace.
     func setDone(workspace: String?, id: String, done: Bool) {
+        noteClose(id, closed: done)
         write { try $0.setDone(workspace: workspace, id: id, done: done) }
     }
 
@@ -1179,6 +1191,7 @@ final class MainWindowModel: ObservableObject {
 
     /// Move an item to any workflow state (`Engine.setState`).
     func setState(workspace: String?, id: String, state: ItemState) {
+        noteClose(id, closed: state.isClosed)
         write { try $0.setState(workspace: workspace, id: id, state: state) }
     }
 
@@ -2315,7 +2328,9 @@ struct MainWindowView: View {
                     ended: { model.rowEnded(cancelled: $0, click: $1) },
                     settled: model.captureSettled)
                 : nil,
-            drop: sidebarDrop)
+            drop: sidebarDrop,
+            lingers: true,
+            closes: model.closes)
             // Under the toolbar, as a list is: the scroll view insets
             // its own content for it.
             .ignoresSafeArea()
@@ -2557,7 +2572,9 @@ struct MainWindowView: View {
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderStarred(ids: ids, before: before) },
             menu: itemListMenu,
-            drop: sidebarDrop)
+            drop: sidebarDrop,
+            lingers: true,
+            closes: model.closes)
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 if model.starred.isEmpty { emptyNote(Text("Nothing starred")) }
@@ -2588,7 +2605,9 @@ struct MainWindowView: View {
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { _, _ in },
             menu: itemListMenu,
-            drop: sidebarDrop)
+            drop: sidebarDrop,
+            lingers: true,
+            closes: model.closes)
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 if model.assigned.isEmpty { emptyNote(Text("Nothing assigned")) }
