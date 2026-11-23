@@ -66,6 +66,9 @@ pub enum AppEvent {
         /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or `None`.
         /// Floating wall-clock; consumers format without zone conversion.
         when: Option<String>,
+        /// The IANA zone the `when` is fixed to, or `None` when it is
+        /// floating. `when` is already wall time on this device.
+        when_zone: Option<String>,
         /// Pending date suggestion (`when`-shaped) or `None`.
         when_suggested: Option<String>,
         /// The item is an event (flagged and dated).
@@ -134,6 +137,8 @@ pub enum AppEvent {
     ItemWhenChanged {
         id: String,
         when: Option<String>,
+        /// The IANA zone the `when` is fixed to, or `None`.
+        when_zone: Option<String>,
         open_index: Option<usize>,
     },
     /// Item's pending date suggestion changed: written by a client that

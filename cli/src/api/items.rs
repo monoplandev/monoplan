@@ -152,9 +152,15 @@ pub struct Item {
     /// Date-only deadline (`YYYY-MM-DD`), when set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<String>,
-    /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set.
+    /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set:
+    /// wall time on this device, whether or not it is fixed to a zone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
+    /// The IANA zone the `when` is fixed to (`spec/calendar-plan.md`
+    /// "Fixed instants"); absent when it is floating.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub when_zone: Option<String>,
     /// Pending date suggestion (`when`-shaped), when one is unanswered.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when_suggested: Option<String>,
@@ -186,6 +192,7 @@ impl From<&ItemView> for Item {
             binned_at: item.binned_at,
             deadline: item.deadline.clone(),
             when: item.when.clone(),
+            when_zone: item.when_zone().map(str::to_string),
             when_suggested: item.when_suggested.clone(),
             event: item.event,
             duration: item.duration,
@@ -371,10 +378,20 @@ pub fn move_item(cx: &Ctx, id: &str, list: Option<&str>, pos: Option<usize>) -> 
     Ok(())
 }
 
-/// Set the planned date (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM` floating),
-/// or clear it and the duration (`None`). The core validates.
+/// Set the planned date, or clear it and the duration (`None`):
+/// `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM` (wall time on this device; an item
+/// fixed to a zone stays in it), or `YYYY-MM-DDTHH:MM[Zone]` (that time
+/// in that zone). The core validates.
 pub fn set_when(cx: &Ctx, id: &str, when: Option<&str>) -> anyhow::Result<()> {
     cx.doc.set_item_when(id, when)?;
+    Ok(())
+}
+
+/// Fix the item's timed `when` to an IANA zone, keeping its clock
+/// digits, or make it floating again at the time this device shows
+/// (`None`).
+pub fn set_when_zone(cx: &Ctx, id: &str, zone: Option<&str>) -> anyhow::Result<()> {
+    cx.doc.set_item_when_zone(id, zone)?;
     Ok(())
 }
 

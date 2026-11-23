@@ -443,6 +443,7 @@ mod tests {
             lifecycle_at: created_at,
             deadline: deadline.map(str::to_string),
             when: when.map(str::to_string),
+            when_zoned: None,
             when_suggested: None,
             event: false,
             duration: None,

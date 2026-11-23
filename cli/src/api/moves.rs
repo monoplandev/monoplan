@@ -310,7 +310,9 @@ pub fn reopen_into_starred(cx: &Ctx, item: &ItemRef, before: Option<&str>) -> an
         .and_then(|b| home.focus_entries().iter().position(|e| e.item_id == b))
         .unwrap_or(usize::MAX);
     match doc_id {
-        Some(doc_id) if Some(doc_id) != cx.home => Lens::foreign(home, doc_id).star(doc, &item.id, index),
+        Some(doc_id) if Some(doc_id) != cx.home => {
+            Lens::foreign(home, doc_id).star(doc, &item.id, index)
+        }
         Some(_) => Lens::home(doc).star(doc, &item.id, index),
         None => cx.lens.star(doc, &item.id, index),
     }
@@ -765,7 +767,9 @@ mod tests {
         assert_eq!(starred_texts(&doc), s(&["a", "c"]));
         assert!(!doc.get_item(&ids[1]).unwrap().is_open());
         // No row after it: the end.
-        as_call(&doc, &mut h, |cx| reopen_into_starred(cx, &given, None).unwrap());
+        as_call(&doc, &mut h, |cx| {
+            reopen_into_starred(cx, &given, None).unwrap()
+        });
         assert_eq!(starred_texts(&doc), s(&["a", "c", "b"]));
     }
 

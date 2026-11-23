@@ -7,6 +7,7 @@ pub mod places;
 pub mod search;
 pub mod storage;
 pub mod sync;
+pub mod zone;
 
 pub use crypto::*;
 pub use doc::{

@@ -177,6 +177,7 @@ mod tests {
             lifecycle_at: at,
             deadline: None,
             when: None,
+            when_zoned: None,
             when_suggested: None,
             event: false,
             duration: None,

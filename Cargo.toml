@@ -57,6 +57,9 @@ dirs = "7"
 dialoguer = "0.12"
 hex = "0.4"
 thiserror = "2"
+# tz rules for zoned `when` values (`spec/calendar-plan.md` "Fixed
+# instants"): system tzdata on unix, a bundled copy on wasm / windows.
+jiff = "1"
 anyhow = "1"
 bytes = "1"
 loro = "1.16"

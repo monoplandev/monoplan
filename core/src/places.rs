@@ -303,6 +303,7 @@ mod tests {
             subtasks: Vec::new(),
             deadline: None,
             when: None,
+            when_zoned: None,
             when_suggested: None,
             event: false,
             duration: None,

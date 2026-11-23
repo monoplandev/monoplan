@@ -65,6 +65,7 @@ use crate::crypto::{AEAD_NONCE_LEN, Dek};
 use crate::events::AppEvent;
 use crate::places::{PlaceSuggestion, place_uses};
 use crate::search::{SearchIndex, SearchResult};
+use crate::zone;
 use monoplan_protocol::EncryptedBlob;
 
 pub const LIST_INBOX: &str = "inbox";
@@ -650,9 +651,17 @@ pub struct ItemView {
     /// echoes the raw string; it never parses it into a timestamp.
     pub deadline: Option<String>,
     /// Optional planned date — `YYYY-MM-DD` (all-day) or
-    /// `YYYY-MM-DDTHH:MM` (timed), floating. `None` ≡ unset. Raw string,
-    /// never parsed into a timestamp; sorts by plain string compare.
+    /// `YYYY-MM-DDTHH:MM` (timed), as wall time on this device. `None` ≡
+    /// unset. A floating value is the register's string; a fixed one
+    /// (`when_zoned`) is re-expressed in the device's zone, so every
+    /// value here has the floating shape and sorts by plain string
+    /// compare. Device-dependent: never write it back or hash it, use
+    /// [`when_stored`](Self::when_stored).
     pub when: Option<String>,
+    /// The register's value when it is fixed to a zone
+    /// (`YYYY-MM-DDTHH:MM[Zone]`, `spec/calendar-plan.md` "Fixed
+    /// instants"); `None` for a floating or unset `when`.
+    pub when_zoned: Option<String>,
     /// Pending date suggestion, `when`-shaped; `None` ≡ none pending.
     /// Meaningful only while `when` is unset.
     pub when_suggested: Option<String>,
@@ -688,6 +697,17 @@ pub struct ItemView {
 }
 
 impl ItemView {
+    /// The `when` register as stored: the fixed form when it has a zone,
+    /// else the floating value. What a copy, an export and the state
+    /// hash carry; the same on every device.
+    pub fn when_stored(&self) -> Option<&str> {
+        self.when_zoned.as_deref().or(self.when.as_deref())
+    }
+    /// The IANA zone a fixed `when` is pinned to, as written; `None`
+    /// when floating or unset.
+    pub fn when_zone(&self) -> Option<&str> {
+        self.when_zoned.as_deref().and_then(|w| zone::split(w).1)
+    }
     /// Workflow register says Done (regardless of the bin mask).
     pub fn is_done(&self) -> bool {
         self.state == WorkflowState::Done
@@ -2266,10 +2286,10 @@ impl Doc {
         if let Some(deadline) = &item.deadline {
             self.set_item_deadline(&copy, Some(deadline))?;
         }
-        if let Some(when) = &item.when {
+        if let Some(when) = item.when_stored() {
             // Before the duration: a timed `when` defaults one, which
             // the original's then replaces.
-            self.set_item_when(&copy, Some(when))?;
+            self.write_item_when(&copy, Some(when.to_string()))?;
         }
         if item.event {
             self.set_item_event(&copy, true)?;
@@ -2419,6 +2439,7 @@ impl Doc {
                 done_at: None,
                 binned_at: None,
                 deadline: None,
+                when_zone: None,
                 when: None,
                 when_suggested: None,
                 event: false,
@@ -2646,10 +2667,21 @@ impl Doc {
     }
 
     /// Set or clear an item's planned date. `Some(value)` validates a
-    /// floating `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed)
-    /// value and writes the `when` register; `None` deletes the key. One
-    /// Loro commit. Malformed values — seconds, offsets, a bracketed
-    /// zone suffix — are rejected with `Invalid` and never touch the doc.
+    /// `YYYY-MM-DD` (all-day), `YYYY-MM-DDTHH:MM` (timed) or
+    /// `YYYY-MM-DDTHH:MM[Zone]` (timed, fixed to a zone) value and
+    /// writes the `when` register; `None` deletes the key. One Loro
+    /// commit. Malformed values — seconds, offsets, a zone this device's
+    /// tzdb does not know — are rejected with `Invalid` and never touch
+    /// the doc.
+    ///
+    /// A value without a zone is wall time on this device, the shape
+    /// [`ItemView::when`] has. Written to an item whose `when` is fixed
+    /// to a zone, a timed one keeps the zone: it is re-expressed there,
+    /// so a client that only knows local wall time moves the instant
+    /// without unpinning the item. An all-day value drops the zone (a
+    /// day has none); [`set_item_when_zone`](Self::set_item_when_zone)
+    /// with `None` makes a timed value floating.
+    ///
     /// Mirrors `set_item_deadline`. The `duration` register moves with
     /// it in the same commit at both ends: a timed value landing on an
     /// item with no duration writes `DEFAULT_DURATION_MINUTES` (a start
@@ -2664,6 +2696,66 @@ impl Doc {
             Some(raw) => Some(parse_when(raw)?),
             None => None,
         };
+        let stored = match normalized {
+            Some(value) => Some(match zone::split(&value) {
+                (_, Some(z)) if !zone::is_known(z) => {
+                    return Err(DocError::Invalid(format!("unknown time zone: {z:?}")));
+                }
+                (_, Some(_)) => value,
+                (wall, None) if when_is_timed(wall) => {
+                    let map = self.find_item(item_id)?;
+                    let current = read_string(&map, KEY_WHEN).unwrap_or_default();
+                    match zone::split(&current).1 {
+                        // A zone this device cannot convert into keeps
+                        // the digits, as the view showed them.
+                        Some(z) => {
+                            zone::join(zone::wall_in_zone(wall, z).as_deref().unwrap_or(wall), z)
+                        }
+                        None => value,
+                    }
+                }
+                _ => value,
+            }),
+            None => None,
+        };
+        self.write_item_when(item_id, stored)
+    }
+
+    /// Pin an item's timed `when` to an IANA zone, or make it floating
+    /// again (`None`). Pinning keeps the wall-clock digits the register
+    /// holds and changes what they mean: 14:00 floating, or 14:00 in
+    /// Paris, becomes 14:00 in `zone`, as a calendar's zone picker
+    /// does. Unpinning keeps what this device shows: the value becomes
+    /// the floating wall time [`ItemView::when`] had. `Invalid` when the
+    /// item has no timed `when` or the tzdb does not know the zone. One
+    /// Loro commit; none when nothing would change.
+    pub fn set_item_when_zone(&self, item_id: &str, zone: Option<&str>) -> Result<(), DocError> {
+        let map = self.find_item(item_id)?;
+        let current = read_string(&map, KEY_WHEN).unwrap_or_default();
+        let (wall, old) = zone::split(&current);
+        if !when_is_timed(wall) {
+            return Err(DocError::Invalid(
+                "a time zone needs a when with a time".to_string(),
+            ));
+        }
+        let next = match zone.map(str::trim) {
+            Some(z) if !zone::is_known(z) => {
+                return Err(DocError::Invalid(format!("unknown time zone: {z:?}")));
+            }
+            Some(z) => zone::join(wall, z),
+            None if old.is_none() => return Ok(()),
+            None => zone::localize(&current),
+        };
+        if next == current {
+            return Ok(());
+        }
+        self.write_item_when(item_id, Some(next))
+    }
+
+    /// Write an already-validated `when` register value (or delete the
+    /// key) with everything that moves with it; the body of
+    /// [`set_item_when`](Self::set_item_when).
+    fn write_item_when(&self, item_id: &str, normalized: Option<String>) -> Result<(), DocError> {
         let map = self.find_item(item_id)?;
         let (was_event, was_dated) = (is_event(&map), is_dated(&map));
         // `Some(Some(n))`: duration written; `Some(None)`: cleared.
@@ -2705,7 +2797,11 @@ impl Doc {
         };
         self.push_event(AppEvent::ItemWhenChanged {
             id: item_id.to_string(),
-            when: normalized,
+            when: normalized.as_deref().map(zone::localize),
+            when_zone: normalized
+                .as_deref()
+                .and_then(|w| zone::split(w).1)
+                .map(str::to_string),
             open_index,
         });
         // A `when` coming or going beside a set flag flips the effective
@@ -2780,7 +2876,7 @@ impl Doc {
         when: Option<&str>,
     ) -> Result<(), DocError> {
         let normalized = match when {
-            Some(raw) => Some(parse_when(raw)?),
+            Some(raw) => Some(parse_floating_when(raw)?),
             None => None,
         };
         let map = self.find_item(item_id)?;
@@ -2809,7 +2905,8 @@ impl Doc {
     /// suggestion to accept; `false` touches nothing.
     pub fn accept_item_when_suggestion(&self, item_id: &str) -> Result<bool, DocError> {
         let map = self.find_item(item_id)?;
-        let Some(value) = read_string(&map, KEY_WHEN_SUGGESTED).and_then(|s| parse_when(&s).ok())
+        let Some(value) =
+            read_string(&map, KEY_WHEN_SUGGESTED).and_then(|s| parse_floating_when(&s).ok())
         else {
             return Ok(false);
         };
@@ -4677,7 +4774,7 @@ impl Doc {
         if let Some(value) = src
             .when_suggested
             .as_deref()
-            .and_then(|w| parse_when(w).ok())
+            .and_then(|w| parse_floating_when(w).ok())
         {
             map.insert(KEY_WHEN_SUGGESTED, value.as_str())?;
         }
@@ -5754,6 +5851,7 @@ impl Doc {
                 if has(KEY_WHEN) && !entered_by_date(c.old.as_ref(), new, &c.keys) {
                     self.push_event(AppEvent::ItemWhenChanged {
                         id: id.clone(),
+                        when_zone: zone_of(&view.when_zoned),
                         when: view.when.clone(),
                         open_index: None,
                     });
@@ -5844,6 +5942,7 @@ impl Doc {
                     done_at: view.done_at,
                     binned_at: view.binned_at,
                     deadline: view.deadline,
+                    when_zone: zone_of(&view.when_zoned),
                     when: view.when,
                     when_suggested: view.when_suggested,
                     event: view.event,
@@ -5914,6 +6013,7 @@ impl Doc {
                             done_at: view.done_at,
                             binned_at: view.binned_at,
                             deadline: view.deadline,
+                            when_zone: zone_of(&view.when_zoned),
                             when: view.when,
                             when_suggested: view.when_suggested,
                             event: view.event,
@@ -5951,6 +6051,7 @@ impl Doc {
                         id,
                         AppEvent::ItemWhenChanged {
                             id: id.clone(),
+                            when_zone: zone_of(&view.when_zoned),
                             when: view.when,
                             open_index: Some(i),
                         },
@@ -6207,6 +6308,7 @@ impl Doc {
                 done_at: item.done_at,
                 binned_at: item.binned_at,
                 deadline: item.deadline,
+                when_zone: zone_of(&item.when_zoned),
                 when: item.when,
                 when_suggested: item.when_suggested,
                 event: item.event,
@@ -6317,7 +6419,8 @@ impl Doc {
             hasher.update([i.state as u8]);
             hasher.update(i.lifecycle_at.to_be_bytes());
             hash_opt_str(&mut hasher, i.deadline.as_deref());
-            hash_opt_str(&mut hasher, i.when.as_deref());
+            // The register, not the device-local view of it.
+            hash_opt_str(&mut hasher, i.when_stored());
             hash_opt_str(&mut hasher, i.when_suggested.as_deref());
             hasher.update([u8::from(i.event)]);
             hash_opt_i64(&mut hasher, i.duration.map(i64::from));
@@ -6602,7 +6705,7 @@ fn export_item(item: ItemView) -> ExportItem {
             at: item.lifecycle_at,
         },
         deadline: item.deadline,
-        when: item.when,
+        when: item.when_zoned.or(item.when),
         when_suggested: item.when_suggested,
         event: item.event,
         duration: item.duration,
@@ -7108,35 +7211,46 @@ fn parse_deadline(raw: &str) -> Result<String, DocError> {
     Ok(s.to_string())
 }
 
-/// Validate a planned date and return it normalized (trimmed). Accepts
-/// exactly `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed,
-/// 16 chars, hour `00..=23`, minute `00..=59`). The date part goes
-/// through `parse_deadline`'s calendar check. Seconds, offsets, and the
-/// reserved RFC 9557 `[Zone]` suffix are rejected until fixed-instant
-/// support lands (`spec/calendar-plan.md`). Floating; no timezone.
 /// Whether a normalised `when` carries a time part (`YYYY-MM-DDTHH:MM`,
-/// 16 chars) rather than being all-day (10 chars).
+/// 16 chars, with or without a `[Zone]` suffix) rather than being
+/// all-day (10 chars).
 fn when_is_timed(normalized: &str) -> bool {
-    normalized.len() == 16
+    normalized.len() >= 16
 }
 
+/// Validate a planned date and return it normalized (trimmed). Accepts
+/// `YYYY-MM-DD` (all-day, 10 chars), `YYYY-MM-DDTHH:MM` (timed, 16
+/// chars, hour `00..=23`, minute `00..=59`), both floating, and a timed
+/// value fixed to a zone, `YYYY-MM-DDTHH:MM[Zone]` (RFC 9557 with an
+/// IANA id, `spec/calendar-plan.md` "Fixed instants"). The date part
+/// goes through `parse_deadline`'s calendar check. Seconds, offsets and
+/// a zone on an all-day value are rejected. The zone is checked by
+/// shape only and kept as written: whether this device's tzdb knows it
+/// is the writer's question (`Doc::set_item_when`), not the grammar's,
+/// so an import from a device with newer tzdata keeps its value.
 fn parse_when(raw: &str) -> Result<String, DocError> {
     let s = raw.trim();
     let invalid = || {
         DocError::Invalid(format!(
-            "when must be YYYY-MM-DD or YYYY-MM-DDTHH:MM: {raw:?}"
+            "when must be YYYY-MM-DD, YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM[Zone]: {raw:?}"
         ))
     };
-    match s.len() {
-        10 => parse_deadline(s).map_err(|_| invalid()),
+    let (wall, zone) = zone::split(s);
+    if zone.is_some_and(|z| !zone::is_well_formed(z)) {
+        return Err(invalid());
+    }
+    match wall.len() {
+        10 => parse_deadline(wall)
+            .map(|_| s.to_string())
+            .map_err(|_| invalid()),
         16 => {
-            let bytes = s.as_bytes();
+            let bytes = wall.as_bytes();
             if bytes[10] != b'T' || bytes[13] != b':' {
                 return Err(invalid());
             }
-            parse_deadline(&s[..10]).map_err(|_| invalid())?;
+            parse_deadline(&wall[..10]).map_err(|_| invalid())?;
             let two = |from: usize| -> Option<u32> {
-                let part = &s[from..from + 2];
+                let part = &wall[from..from + 2];
                 if part.bytes().all(|b| b.is_ascii_digit()) {
                     part.parse::<u32>().ok()
                 } else {
@@ -7152,12 +7266,32 @@ fn parse_when(raw: &str) -> Result<String, DocError> {
     }
 }
 
+/// The zone id of a fixed `when` register value ([`ItemView::when_zoned`]).
+fn zone_of(when_zoned: &Option<String>) -> Option<String> {
+    when_zoned
+        .as_deref()
+        .and_then(|w| zone::split(w).1)
+        .map(str::to_string)
+}
+
+/// `parse_when` for a value that must stay floating (a suggestion).
+fn parse_floating_when(raw: &str) -> Result<String, DocError> {
+    let value = parse_when(raw)?;
+    if zone::split(&value).1.is_some() {
+        return Err(DocError::Invalid(format!(
+            "a suggested when takes no zone: {raw:?}"
+        )));
+    }
+    Ok(value)
+}
+
 fn item_view(map: &LoroMap) -> Option<ItemView> {
     let location = read_string(map, KEY_LOCATION)
         .and_then(|s| Location::parse(&s))
         .map(|l| l.list_id)
         .unwrap_or_else(|| LIST_INBOX.to_string());
     let (state, lifecycle_at) = workflow_of(map);
+    let stored_when = read_string(map, KEY_WHEN).filter(|s| !s.is_empty());
     Some(ItemView {
         id: read_string(map, KEY_ID)?,
         text: read_string(map, KEY_TEXT)?,
@@ -7166,7 +7300,8 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         state,
         lifecycle_at,
         deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
-        when: read_string(map, KEY_WHEN).filter(|s| !s.is_empty()),
+        when: stored_when.as_deref().map(zone::localize),
+        when_zoned: stored_when.filter(|s| zone::split(s).1.is_some()),
         when_suggested: read_string(map, KEY_WHEN_SUGGESTED).filter(|s| !s.is_empty()),
         event: is_event(map),
         duration: read_duration(map),
@@ -7462,6 +7597,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     done_at: post_it.done_at,
                     binned_at: post_it.binned_at,
                     deadline: post_it.deadline.clone(),
+                    when_zone: zone_of(&post_it.when_zoned),
                     when: post_it.when.clone(),
                     when_suggested: post_it.when_suggested.clone(),
                     event: post_it.event,
@@ -7501,9 +7637,10 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                         subtasks: post_it.subtasks.clone(),
                     });
                 }
-                if pre_it.when != post_it.when {
+                if pre_it.when != post_it.when || pre_it.when_zoned != post_it.when_zoned {
                     out.push(AppEvent::ItemWhenChanged {
                         id: post_it.id.clone(),
+                        when_zone: zone_of(&post_it.when_zoned),
                         when: post_it.when.clone(),
                         open_index: if pre_it.is_listed() { None } else { open_index },
                     });
@@ -9291,6 +9428,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: b.clone(),
                 when: Some("2026-12-01".into()),
                 open_index: None,
@@ -9312,6 +9450,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: b,
                 when: None,
                 open_index: Some(1),
@@ -9384,6 +9523,7 @@ mod tests {
         assert_eq!(
             evs,
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: second.clone(),
                 when: Some("2026-12-01".into()),
                 open_index: None,
@@ -9406,6 +9546,7 @@ mod tests {
         assert_eq!(
             evs,
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: second.clone(),
                 when: None,
                 open_index: Some(1),
@@ -11787,6 +11928,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: id.clone(),
                 when: Some("2026-07-13".into()),
                 open_index: None
@@ -11820,6 +11962,7 @@ mod tests {
             doc.drain_events(),
             vec![
                 AppEvent::ItemWhenChanged {
+                    when_zone: None,
                     id: id.clone(),
                     when: None,
                     open_index: Some(0)
@@ -11910,6 +12053,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: id.clone(),
                 when: Some("2026-07-13".into()),
                 open_index: None
@@ -11927,6 +12071,7 @@ mod tests {
             doc.drain_events(),
             vec![
                 AppEvent::ItemWhenChanged {
+                    when_zone: None,
                     id: id.clone(),
                     when: Some("2026-07-13T14:00".into()),
                     open_index: None
@@ -11946,6 +12091,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: id.clone(),
                 when: Some("2026-07-14T09:00".into()),
                 open_index: None
@@ -11967,6 +12113,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: id.clone(),
                 when: Some("2026-07-13".into()),
                 open_index: None
@@ -11982,6 +12129,7 @@ mod tests {
             doc.drain_events(),
             vec![
                 AppEvent::ItemWhenChanged {
+                    when_zone: None,
                     id: id.clone(),
                     when: None,
                     open_index: Some(0)
@@ -11998,6 +12146,7 @@ mod tests {
         assert_eq!(
             doc.drain_events(),
             vec![AppEvent::ItemWhenChanged {
+                when_zone: None,
                 id: id.clone(),
                 when: None,
                 open_index: None
@@ -12322,20 +12471,24 @@ mod tests {
         let _ = doc.drain_events();
 
         for bad in [
-            "2026-07-13T14:00:00",                   // seconds
-            "2026-07-13T14:00Z",                     // UTC marker
-            "2026-07-13T14:00+10:00",                // offset
-            "2026-07-13T14:00[Australia/Melbourne]", // reserved zone suffix
-            "2026-07-13T24:00",                      // hour out of range
-            "2026-07-13T14:60",                      // minute out of range
-            "2026-07-13T9:00",                       // single-digit hour
-            "2026-07-13t14:00",                      // lowercase separator
-            "2026-07-13 14:00",                      // space separator
-            "2026-07-13T14.00",                      // wrong time separator
-            "2026-07-13T",                           // dangling separator
-            "2027-02-29T10:00",                      // invalid date, valid time
-            "2026-13-01",                            // invalid all-day
-            "1752566400000",                         // unix millis
+            "2026-07-13T14:00:00",                         // seconds
+            "2026-07-13T14:00Z",                           // UTC marker
+            "2026-07-13T14:00+10:00",                      // offset
+            "2026-07-13T14:00[Europe/Atlantis]",           // zone the tzdb lacks
+            "2026-07-13T14:00[Europe/Lon don]",            // malformed zone
+            "2026-07-13T14:00[]",                          // empty zone
+            "2026-07-13[Australia/Melbourne]",             // zone on an all-day value
+            "2026-07-13T14:00+10:00[Australia/Melbourne]", // offset beside the zone
+            "2026-07-13T24:00",                            // hour out of range
+            "2026-07-13T14:60",                            // minute out of range
+            "2026-07-13T9:00",                             // single-digit hour
+            "2026-07-13t14:00",                            // lowercase separator
+            "2026-07-13 14:00",                            // space separator
+            "2026-07-13T14.00",                            // wrong time separator
+            "2026-07-13T",                                 // dangling separator
+            "2027-02-29T10:00",                            // invalid date, valid time
+            "2026-13-01",                                  // invalid all-day
+            "1752566400000",                               // unix millis
             "",
         ] {
             let err = doc.set_item_when(&id, Some(bad)).unwrap_err();
@@ -12420,6 +12573,7 @@ mod tests {
             doc.drain_events(),
             vec![
                 AppEvent::ItemWhenChanged {
+                    when_zone: None,
                     id: id.clone(),
                     when: Some("2026-11-06T08:30".into()),
                     open_index: None
@@ -12493,6 +12647,178 @@ mod tests {
                 .iter()
                 .any(|i| i.when_suggested.as_deref() == Some("2026-11-06"))
         );
+    }
+
+    #[test]
+    fn a_zoned_when_reads_as_device_wall_time() {
+        crate::zone::set_thread_device_zone(Some("Europe/Paris"));
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call").unwrap();
+        let _ = doc.drain_events();
+
+        doc.set_item_when(&id, Some("2026-07-13T14:00[Europe/London]"))
+            .unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when.as_deref(), Some("2026-07-13T15:00"));
+        assert_eq!(view.when_zone(), Some("Europe/London"));
+        assert_eq!(view.when_stored(), Some("2026-07-13T14:00[Europe/London]"));
+        // Timed, so it took the default duration like any timed value.
+        assert_eq!(view.duration, Some(DEFAULT_DURATION_MINUTES));
+        assert!(doc.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemWhenChanged { when: Some(w), when_zone: Some(z), .. }
+                if w == "2026-07-13T15:00" && z == "Europe/London"
+        )));
+
+        // The same register on a device elsewhere: another wall time,
+        // another day even, one instant.
+        crate::zone::set_thread_device_zone(Some("Australia/Melbourne"));
+        assert_eq!(
+            doc.get_item(&id).unwrap().when.as_deref(),
+            Some("2026-07-13T23:00")
+        );
+        crate::zone::set_thread_device_zone(None);
+    }
+
+    #[test]
+    fn a_local_write_keeps_the_zone_and_moves_the_instant() {
+        crate::zone::set_thread_device_zone(Some("Europe/Paris"));
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call").unwrap();
+        doc.set_item_when(&id, Some("2026-07-13T14:00[Europe/London]"))
+            .unwrap();
+
+        // A client that knows only local wall time drags it to 17:30.
+        doc.set_item_when(&id, Some("2026-07-14T17:30")).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when.as_deref(), Some("2026-07-14T17:30"));
+        assert_eq!(view.when_stored(), Some("2026-07-14T16:30[Europe/London]"));
+
+        // All-day has no zone to keep; a time after that is floating.
+        doc.set_item_when(&id, Some("2026-07-14")).unwrap();
+        assert_eq!(doc.get_item(&id).unwrap().when_zone(), None);
+        doc.set_item_when(&id, Some("2026-07-14T09:00")).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when_stored(), Some("2026-07-14T09:00"));
+        assert_eq!(view.when_zoned, None);
+        crate::zone::set_thread_device_zone(None);
+    }
+
+    #[test]
+    fn set_item_when_zone_pins_repins_and_unpins() {
+        crate::zone::set_thread_device_zone(Some("Europe/Paris"));
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call").unwrap();
+
+        // No time, no zone.
+        assert!(matches!(
+            doc.set_item_when_zone(&id, Some("Europe/London")),
+            Err(DocError::Invalid(_))
+        ));
+        doc.set_item_when(&id, Some("2026-07-13")).unwrap();
+        assert!(matches!(
+            doc.set_item_when_zone(&id, Some("Europe/London")),
+            Err(DocError::Invalid(_))
+        ));
+
+        doc.set_item_when(&id, Some("2026-07-13T14:00")).unwrap();
+        assert!(matches!(
+            doc.set_item_when_zone(&id, Some("Europe/Atlantis")),
+            Err(DocError::Invalid(_))
+        ));
+        // Unpinning a floating value is nothing.
+        let _ = doc.drain_events();
+        doc.set_item_when_zone(&id, None).unwrap();
+        assert!(doc.drain_events().is_empty());
+
+        // Pinning keeps the digits: 14:00 becomes 14:00 in London.
+        doc.set_item_when_zone(&id, Some("Europe/London")).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when_stored(), Some("2026-07-13T14:00[Europe/London]"));
+        assert_eq!(view.when.as_deref(), Some("2026-07-13T15:00"));
+
+        // So does re-pinning.
+        doc.set_item_when_zone(&id, Some("America/New_York"))
+            .unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(
+            view.when_stored(),
+            Some("2026-07-13T14:00[America/New_York]")
+        );
+        assert_eq!(view.when.as_deref(), Some("2026-07-13T20:00"));
+
+        // Unpinning keeps what the device shows.
+        doc.set_item_when_zone(&id, None).unwrap();
+        let view = doc.get_item(&id).unwrap();
+        assert_eq!(view.when_stored(), Some("2026-07-13T20:00"));
+        assert_eq!(view.when_zoned, None);
+        crate::zone::set_thread_device_zone(None);
+    }
+
+    #[test]
+    fn a_zoned_when_survives_copy_export_and_devices_agree_on_the_hash() {
+        crate::zone::set_thread_device_zone(Some("Europe/Paris"));
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "call").unwrap();
+        src.set_item_when(&id, Some("2026-07-13T14:00[Europe/London]"))
+            .unwrap();
+
+        let copy = src.duplicate_item(&id).unwrap();
+        assert_eq!(
+            src.get_item(&copy).unwrap().when_stored(),
+            Some("2026-07-13T14:00[Europe/London]")
+        );
+
+        let export = src.export_json();
+        let json = serde_json::to_string(&export).unwrap();
+        assert!(json.contains("2026-07-13T14:00[Europe/London]"));
+        let dst = Doc::new().unwrap();
+        dst.import_json(&export).unwrap();
+        assert!(
+            dst.iter_items()
+                .all(|i| { i.when_stored() == Some("2026-07-13T14:00[Europe/London]") })
+        );
+
+        // The fingerprint is over the register, not the local view.
+        let here = src.fingerprint();
+        crate::zone::set_thread_device_zone(Some("Asia/Tokyo"));
+        assert_eq!(src.fingerprint(), here);
+        crate::zone::set_thread_device_zone(None);
+    }
+
+    #[test]
+    fn a_zone_this_device_lacks_shows_its_digits_and_keeps_its_id() {
+        crate::zone::set_thread_device_zone(Some("Europe/Paris"));
+        // Arrives by import: written on a device with newer tzdata.
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "call").unwrap();
+        src.set_item_when(&id, Some("2026-07-13T14:00")).unwrap();
+        let mut export = src.export_json();
+        export.items[0].when = Some("2026-07-13T14:00[Europe/Atlantis]".into());
+        let doc = Doc::new().unwrap();
+        doc.import_json(&export).unwrap();
+        let item = doc.iter_items().next().unwrap();
+        assert_eq!(item.when.as_deref(), Some("2026-07-13T14:00"));
+        assert_eq!(item.when_zone(), Some("Europe/Atlantis"));
+
+        // A local edit keeps the id rather than dropping it.
+        doc.set_item_when(&item.id, Some("2026-07-13T16:00"))
+            .unwrap();
+        assert_eq!(
+            doc.get_item(&item.id).unwrap().when_stored(),
+            Some("2026-07-13T16:00[Europe/Atlantis]")
+        );
+        crate::zone::set_thread_device_zone(None);
+    }
+
+    #[test]
+    fn a_suggestion_takes_no_zone() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call").unwrap();
+        assert!(matches!(
+            doc.set_item_when_suggested(&id, Some("2026-07-13T14:00[Europe/London]")),
+            Err(DocError::Invalid(_))
+        ));
     }
 
     #[test]
@@ -12612,7 +12938,7 @@ mod tests {
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert!(b.drain_events().iter().any(|e| matches!(
             e,
-            AppEvent::ItemWhenChanged { id: eid, when: Some(w), open_index: None } if eid == &id && w == "2026-11-05T09:30"
+            AppEvent::ItemWhenChanged { id: eid, when: Some(w), open_index: None, .. } if eid == &id && w == "2026-11-05T09:30"
         )));
 
         a.set_item_when(&id, None).unwrap();
@@ -12622,7 +12948,7 @@ mod tests {
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert!(b.drain_events().iter().any(|e| matches!(
             e,
-            AppEvent::ItemWhenChanged { id: eid, when: None, open_index: Some(0) } if eid == &id
+            AppEvent::ItemWhenChanged { id: eid, when: None, open_index: Some(0), .. } if eid == &id
         )));
     }
 

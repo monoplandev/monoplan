@@ -2620,7 +2620,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemAssigneeChanged` — id, assignee? (undefined = unassigned)
 /// - `itemSubtasksChanged` — id, subtasks (JSON array of `{id, text, done?}`, the whole list in order)
-/// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
+/// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, wall time on this device), whenZone? (the IANA zone it is fixed to; undefined = floating), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
 /// - `itemEventChanged` — id, event
 /// - `itemDurationChanged` — id, duration? (undefined = unset; whole minutes)
@@ -2667,7 +2667,11 @@ pub struct AppEventJs {
     /// `None` means no deadline.
     deadline: Option<String>,
     /// Planned date (`itemAdded` / `itemWhenChanged`); `None` means unset.
+    /// Always wall time on this device.
     when: Option<String>,
+    /// The IANA zone the `when` is fixed to (`itemAdded` /
+    /// `itemWhenChanged`); `None` means floating.
+    when_zone: Option<String>,
     /// Pending date suggestion (`itemAdded` / `itemWhenSuggestedChanged`);
     /// `None` means none pending.
     when_suggested: Option<String>,
@@ -2822,6 +2826,10 @@ impl AppEventJs {
     pub fn when(&self) -> Option<String> {
         self.when.clone()
     }
+    #[wasm_bindgen(getter, js_name = whenZone)]
+    pub fn when_zone(&self) -> Option<String> {
+        self.when_zone.clone()
+    }
     #[wasm_bindgen(getter, js_name = whenSuggested)]
     pub fn when_suggested(&self) -> Option<String> {
         self.when_suggested.clone()
@@ -2871,6 +2879,7 @@ impl From<CoreAppEvent> for AppEventJs {
             started_at: None,
             deadline: None,
             when: None,
+            when_zone: None,
             when_suggested: None,
             event: None,
             duration: None,
@@ -2913,6 +2922,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                when_zone,
                 when_suggested,
                 event,
                 duration,
@@ -2935,6 +2945,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 binned_at,
                 deadline,
                 when,
+                when_zone,
                 when_suggested,
                 event: Some(event),
                 duration,
@@ -2992,11 +3003,13 @@ impl From<CoreAppEvent> for AppEventJs {
             CoreAppEvent::ItemWhenChanged {
                 id,
                 when,
+                when_zone,
                 open_index,
             } => AppEventJs {
                 kind: "itemWhenChanged",
                 id,
                 when,
+                when_zone,
                 open_index,
                 ..blank
             },
@@ -3227,6 +3240,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     if let Some(w) = &it.when {
         s.push_str(",\"when\":");
         s.push_str(&json_string(w));
+    }
+    if let Some(z) = it.when_zone() {
+        s.push_str(",\"whenZone\":");
+        s.push_str(&json_string(z));
     }
     if let Some(w) = &it.when_suggested {
         s.push_str(",\"whenSuggested\":");

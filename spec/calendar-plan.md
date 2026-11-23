@@ -20,7 +20,7 @@ lands; this file is the design record.
 | Why a second field? | `deadline` means "owed by": past it the item is overdue and red. A planned or scheduled day means "happens on" or "act on": past it the item is not owed, it is simply over. Using `deadline` for the second meaning makes every past event scream overdue. The distinction is what happens after the date, so it needs its own field. |
 | Replace `deadline`, or flag it? | **Neither. Add `when` beside it.** Both can coexist on one item ("do it Saturday, due Oct 31"), which a single date plus a kind flag can't express. Additive, so six months of real data needs no migration. Same names as Things, which is the model people already know. |
 | Date and time: one register or two? | **One register, `when`, shape-discriminated.** `YYYY-MM-DD` is all-day, `YYYY-MM-DDTHH:MM` is timed. Same rule as iCalendar `VALUE=DATE` vs `DATE-TIME`. One register can't tear under concurrent edit (date moved on one device, time set on another), sorts by plain string compare, and clears with one delete. An explicit flag is redundant with the shape and a third thing to keep consistent. |
-| Time zone? | **Floating only, now.** A `when` is a wall-clock intent, the devices travel together, and floating keeps sorting a string compare. The grammar reserves an RFC 9557 bracketed IANA suffix (`...T14:00[Europe/London]`) for fixed-instant values. Writers may later default to appending the device zone; untouched values stay floating, so nothing migrates. Note this is the task-manager default, not the calendar default: Apple and Google pin timed events to a zone. |
+| Time zone? | **Floating by default.** A `when` is a wall-clock intent, the devices travel together, and floating keeps sorting a string compare. The grammar reserves an RFC 9557 bracketed IANA suffix (`...T14:00[Europe/London]`) for fixed-instant values. Fixed values were built 2026-11-23 ("Fixed instants" under the deferred list): a zone is attached only when the user picks one, floating stays the default, and a fixed item shows in the device's local time. Note this is the task-manager default, not the calendar default: Apple and Google pin timed events to a zone. |
 | Recurrence? | **Not in the first cut.** No `repeat` field, no hint of one in the doc. Repeat-on-done (clone with the date advanced when ticked Done) is the likely first form; RRULE-style schedules are a calendar app's job. |
 | Does the clock ever write? | **Never.** A past `when` stays where it was set, on its day in the past. Nothing promotes an item to Live, adds it to Focus, or moves it because a day arrived: every device would race to do it. |
 | What does a past `when` mean? | **On an event, it went by; on a task, it is overdue** (decided 2026-11-13, narrowing 2026-09-30, which let every past `when` go by). `when` is fixed and does not roll over: it is never rewritten and never reinterpreted as "today". An event's `when` from a previous day is in the past, and the agenda, which renders no past days, does not select it. An Open task's is still to do: it was planned and not done, so it sits in Overdue until it is ticked, re-planned or cleared. The 2026-09-30 rule predates the `events` list (2026-10-02): once things that merely happen had a home of their own, a dated item outside it is work, and work that silently left the agenda when its day passed was lost. |
@@ -141,15 +141,17 @@ Item register, string, optional. Add to the `Item` table in `data-model.md`:
 When      = Date | DateTime
 Date      = YYYY "-" MM "-" DD                  ; 10 chars, floating calendar date
 DateTime  = Date "T" HH ":" MM                  ; 16 chars, floating wall-clock
-; reserved, rejected until fixed-instant support lands:
+; fixed to a zone (2026-11-23, see "Fixed instants"); `When` above is
+; also what every view reads, a Fixed value being shown as device wall time:
 Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:00[Australia/Melbourne]
 ```
 
 - Absent ≡ unset. Clearing deletes the key (as `deadline` does).
 - Validation: `Date` uses the existing calendar-date check (month range,
   day-in-month, leap years). `DateTime` adds `HH` in `00..=23` and `MM` in
-  `00..=59`. Seconds are never stored. Anything else, including a bracketed
-  suffix, is rejected with `Invalid`. Input is trimmed before validation, as
+  `00..=59`. Seconds are never stored. A `Fixed` value's zone is checked
+  by shape, and against the tzdb when it is written. Anything else is
+  rejected with `Invalid`. Input is trimmed before validation, as
   `parse_deadline` does; the stored value is the normalised form.
 - **All-day** ≡ 10-character value. There is no default time. On the day,
   an all-day `when` is owed all day. Where it sorts depends on what it
@@ -167,9 +169,9 @@ Fixed     = DateTime "[" IanaZone "]"           ; RFC 9557, e.g. 2026-07-13T14:0
   `new Date(stamp)` (UTC parse shifts the day in negative-offset zones); split
   the parts and build local, as `parseLocalDateParts` does. Time formatting
   respects the existing time-format preference (`format.tsx`).
-- **Reserved suffix**: the validator accepts exactly 10 or 16 characters.
-  When fixed instants land, the suffix becomes a strict superset, old data
-  needs no migration, and an absent suffix continues to mean floating. An
+- **Zone suffix** (built 2026-11-23, "Fixed instants"): a strict
+  superset of the floating grammar, so old data needed no migration and
+  an absent suffix continues to mean floating. An
   IANA name rather than an offset, because an offset pinned today is wrong for
   a future date after the next DST change. Old clients treat an unparseable
   value as absent, matching the `DefaultView` rule in `board.md`.
@@ -755,21 +757,53 @@ here.
   `when` advanced and the done item kept, so creation-to-done stats stay
   honest. No RRULE. This form covers tasks only: an event
   (`events-plan.md`) is never ticked, so recurring events are unsolved.
-- **Fixed instants.** The bracketed suffix above. Flipping the default means
-  writers append the device zone; sorting then needs instant normalisation
-  for mixed values, which is why it waits. Where the zone data comes from
-  (decided 2026-11-23, not built): the wall time to instant arithmetic lives
-  in Rust on `jiff`, one implementation for every client, so gap and fold
-  hours resolve the same everywhere. Native reads the system tzdata; the
-  wasm build bundles a copy (a tzdata bump is a dependency update and a
-  redeploy; per-zone TZif fetch through `TimeZone::tzif` is the fallback if
-  the bundle size hurts). The platform supplies only the device's current
-  zone and the localised zone names for a picker. Zone ids are stored as
-  given and compared after resolving through the tzdb, never by string
-  (`Asia/Calcutta` and `Asia/Kolkata` are one zone); an id the device's
-  tzdata does not know renders as floating with the raw id shown. Asking
-  the browser's `Intl` / `Temporal` for the rules was rejected: a second
-  algorithm for the ambiguous hours.
+- **Fixed instants.** Built 2026-11-23 in core, wasm events and the CLI;
+  no client has a zone picker yet. Decisions: a zone is attached only
+  when the user picks one (everything else stays floating, nothing
+  migrates), and a fixed item shows in the device's local time, on the
+  local day it falls on.
+  - **Stored**: `YYYY-MM-DDTHH:MM[Zone]`, wall time plus IANA id, never
+    the instant, so a rule change moves the instant with it. The id is
+    kept as written. All-day values take no zone, nor do suggestions.
+  - **Read**: `ItemView.when` is always wall time on this device in the
+    10 or 16 character shape, so every sort, day bucket and reminder
+    downstream is unchanged and still a string compare. The zone rides
+    beside it (`ItemView.when_zone()`, `when_zone` on `ItemAdded` /
+    `ItemWhenChanged` and the api `Item` row, `whenZone` in wasm). The
+    register itself is `when_stored()`: what a copy, an export, a
+    cross-doc move and the fingerprint carry, the same on every device.
+  - **Write**: `set_item_when` with a suffix sets that time in that
+    zone. Without one the value is local wall time; on an item already
+    fixed to a zone a timed value is re-expressed in that zone and keeps
+    it, so a client that knows nothing of zones (drag to reschedule, a
+    time picker) moves the instant without unpinning the item. An
+    all-day value drops the zone. `set_item_when_zone(Some(zone))` keeps
+    the clock digits and changes the zone they are in, as a calendar's
+    zone picker does; `None` makes the value floating at the time the
+    device shows.
+  - **Zone data** (`core/src/zone.rs`, on `jiff`): one implementation
+    for every client, so the hours a zone skips or repeats resolve the
+    same everywhere (a skipped time moves forward by the gap, a repeated
+    one takes the first occurrence). Native reads the system tzdata; the
+    wasm build bundles a copy and takes the device zone from `Intl`.
+    Measured 2026-11-23 on the bundler build: 4.09 MB to 4.52 MB raw,
+    1.08 MB to 1.19 MB brotli (about 107 KB). A tzdata bump there is a
+    dependency update and a redeploy; per-zone TZif fetch through
+    `TimeZone::tzif` is the fallback if the size hurts. Asking the
+    browser's `Intl` / `Temporal` for the rules was rejected: a second
+    algorithm for the ambiguous hours.
+  - **Unknown zones**: a write naming a zone the device's tzdata lacks
+    is refused. One that arrives by sync or import is kept: its wall
+    time shows as written, with its id, and a local edit keeps the id.
+  - **Not built**: a zone picker and label on web, iOS and macOS (the
+    platform supplies the localised zone names); `Engine.set_when_zone`
+    on the FFI; a wasm `setItemWhenZone`. Not checked on a device: that
+    `jiff` finds the system zone and tzdata inside the iOS sandbox (it
+    falls back to UTC if not). Views re-read the device zone on every
+    projection, but nothing re-projects when the zone changes under a
+    running app. Zone ids are not yet compared anywhere; when they are,
+    resolve aliases through the tzdb (`Asia/Calcutta` and `Asia/Kolkata`
+    are one zone), never compare strings.
 - **Month grid.** A workspace-level lens, sibling of Upcoming, on the
   `calendar` token: one month at a time on `@corvu/calendar` (already under
   the date picker), a few row titles per cell in placement order with a

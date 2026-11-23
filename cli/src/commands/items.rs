@@ -121,8 +121,9 @@ pub(super) fn item_json(item: &ItemView) -> Item {
 /// Trailing tags for a text row: ` @<when>` (with `+<duration>`
 /// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`,
 /// or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`)
-/// then ` !<deadline>`, then ` at:<place label>`, each only when set.
-/// Shared by `ls` and `agenda`.
+/// then ` tz:<zone>` when the `when` is fixed to a zone (the time shown
+/// is this device's), ` !<deadline>` and ` at:<place label>`, each only
+/// when set. Shared by `ls` and `agenda`.
 pub fn date_tags(item: &ItemView) -> String {
     let mut s = String::new();
     if let Some(w) = &item.when {
@@ -138,6 +139,10 @@ pub fn date_tags(item: &ItemView) -> String {
                 s.push_str(&format!("+{days}d"));
             }
         }
+    }
+    if let Some(z) = item.when_zone() {
+        s.push_str(" tz:");
+        s.push_str(z);
     }
     if let Some(d) = &item.deadline {
         s.push_str(" !");
@@ -410,9 +415,13 @@ pub struct SetArgs {
     /// Workflow state: backlog | todo | in_progress | review | done | cancelled.
     #[arg(long, group = "field", value_name = "STATE")]
     pub lifecycle: Option<LifecycleState>,
-    /// Planned date, `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, floating); `-` clears it and the duration.
+    /// Planned date, `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed, local time; an item fixed to a zone stays in it); `-` clears it and the duration. With --zone, the time is in that zone.
     #[arg(long, group = "field", value_name = "DATE|-")]
     pub when: Option<String>,
+    /// Fix the item's time to an IANA time zone (`Europe/London`), so it is one instant wherever it is read; `-` makes it floating again at the time shown here. Alone, keeps the clock digits and changes the zone they are in. Needs a time.
+    #[arg(long, group = "field", value_name = "ZONE|-")]
+    #[serde(default)]
+    pub zone: Option<String>,
     /// Pending date suggestion, same shape as --when: a date read out of the title, held until answered; `-` dismisses it. `--when` with the same value accepts it.
     #[arg(long, group = "field", value_name = "DATE|-")]
     #[serde(default)]
@@ -484,8 +493,20 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     if let Some(state) = args.lifecycle {
         write::set_state(cx, id, state.into())?;
     }
-    if let Some(when) = &args.when {
-        write::set_when(cx, id, clear_or(when))?;
+    // `--when` with a zone is that time in that zone, one write.
+    let zone = args.zone.as_deref().map(clear_or);
+    match (args.when.as_deref().map(clear_or), zone) {
+        (Some(Some(when)), Some(Some(zone))) if !when.contains('[') => {
+            write::set_when(cx, id, Some(&format!("{}[{zone}]", when.trim())))?;
+        }
+        (when, zone) => {
+            if let Some(when) = when {
+                write::set_when(cx, id, when)?;
+            }
+            if let Some(zone) = zone {
+                write::set_when_zone(cx, id, zone)?;
+            }
+        }
     }
     if let Some(suggested) = &args.when_suggested {
         write::set_when_suggested(cx, id, clear_or(suggested))?;
@@ -642,6 +663,7 @@ mod tests {
             pos: None,
             lifecycle: None,
             when: None,
+            zone: None,
             when_suggested: None,
             event: false,
             task: false,
@@ -655,6 +677,99 @@ mod tests {
             star: None,
             unstar: false,
         }
+    }
+
+    #[test]
+    fn set_zone_fixes_the_time_repins_it_and_floats_it_again() {
+        monoplan_core::zone::set_thread_device_zone(Some("Europe/Paris"));
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "call").unwrap();
+        let run = |args: SetArgs| {
+            set(
+                &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
+                args,
+                &mut Vec::new(),
+            )
+        };
+        let stored = || doc.get_item(&id).unwrap().when_stored().map(str::to_string);
+
+        // --when with --zone is that time in that zone.
+        run(SetArgs {
+            when: Some("2026-07-13T14:00".into()),
+            zone: Some("Europe/London".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert_eq!(stored().as_deref(), Some("2026-07-13T14:00[Europe/London]"));
+        let item = doc.get_item(&id).unwrap();
+        // Rows show this device's time and name the zone.
+        assert_eq!(item.when.as_deref(), Some("2026-07-13T15:00"));
+        assert_eq!(date_tags(&item), " @2026-07-13T15:00+1h tz:Europe/London");
+        let json = serde_json::to_value(item_json(&item)).unwrap();
+        assert_eq!(json["when"], "2026-07-13T15:00");
+        assert_eq!(json["when_zone"], "Europe/London");
+
+        // --when alone is local time and stays in the item's zone,
+        // even when the item is already fixed and --zone repeats it.
+        run(SetArgs {
+            when: Some("2026-07-13T18:00".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert_eq!(stored().as_deref(), Some("2026-07-13T17:00[Europe/London]"));
+        run(SetArgs {
+            when: Some("2026-07-13T14:00".into()),
+            zone: Some("Europe/London".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert_eq!(stored().as_deref(), Some("2026-07-13T14:00[Europe/London]"));
+
+        // --zone alone keeps the digits; `-` floats at the shown time.
+        run(SetArgs {
+            zone: Some("America/New_York".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert_eq!(
+            stored().as_deref(),
+            Some("2026-07-13T14:00[America/New_York]")
+        );
+        run(SetArgs {
+            zone: Some("-".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert_eq!(stored().as_deref(), Some("2026-07-13T20:00"));
+        assert!(
+            serde_json::to_value(item_json(&doc.get_item(&id).unwrap()))
+                .unwrap()
+                .get("when_zone")
+                .is_none()
+        );
+
+        // A zone the tzdb lacks, or a zone with no time, writes nothing.
+        assert!(
+            run(SetArgs {
+                zone: Some("Europe/Atlantis".into()),
+                ..set_args(&id)
+            })
+            .is_err()
+        );
+        run(SetArgs {
+            when: Some("2026-07-13".into()),
+            ..set_args(&id)
+        })
+        .unwrap();
+        assert!(
+            run(SetArgs {
+                zone: Some("Europe/London".into()),
+                ..set_args(&id)
+            })
+            .is_err()
+        );
+        assert_eq!(stored().as_deref(), Some("2026-07-13"));
+        monoplan_core::zone::set_thread_device_zone(None);
     }
 
     #[test]
@@ -1115,6 +1230,7 @@ mod tests {
             lifecycle_at: 0,
             deadline: None,
             when: Some("2026-10-06".into()),
+            when_zoned: None,
             when_suggested: None,
             event: false,
             duration: None,
