@@ -107,6 +107,9 @@ struct ItemList: NSViewRepresentable {
     /// Where rows dragged out of the list can go; nil is nowhere, and
     /// then a list that does not reorder does not drag either.
     var drop: ItemListDrop?
+    /// The last rows are in sight or nearly: a list read a page at a
+    /// time (Done) reads on. Asked again on each scroll while they are.
+    var nearEnd: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -126,6 +129,10 @@ struct ItemList: NSViewRepresentable {
         list.dormantSelectionColor = PaneColor.rowSelectedInactive
         list.placeholderColor = PaneColor.dropSlot
         list.dragBackgroundColor = PaneColor.list
+        // The list posts its clip view's bounds changes already.
+        NotificationCenter.default.addObserver(
+            context.coordinator, selector: #selector(Coordinator.scrolled(_:)),
+            name: NSView.boundsDidChangeNotification, object: list.scrollView.contentView)
         return list
     }
 
@@ -198,6 +205,10 @@ struct ItemList: NSViewRepresentable {
             // Typing one item after another: the row stays in view as
             // the list grows above it.
             if grew, addRow.isEditing { list.scrollToTrailer() }
+            // A page that does not reach the end of the window.
+            if next.nearEnd != nil {
+                DispatchQueue.main.async { [weak self] in self?.checkEnd() }
+            }
 
             // The model's selection moves the list's only when it has
             // itself changed (a search hit opened, the panel shut):
@@ -215,6 +226,16 @@ struct ItemList: NSViewRepresentable {
                 list.model.selection.clear()
                 list.render()
             }
+        }
+
+        @objc func scrolled(_ note: Notification) { checkEnd() }
+
+        /// Within a windowful of the last row.
+        private func checkEnd() {
+            guard let nearEnd = parent.nearEnd, let list, !parent.rows.isEmpty,
+                  let content = list.scrollView.documentView else { return }
+            let clip = list.scrollView.contentView.bounds
+            if content.frame.maxY - clip.maxY < clip.height { nearEnd() }
         }
 
         // MARK: DndListDataSource

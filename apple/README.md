@@ -148,8 +148,10 @@ toolbar's "Today" comes back to it, in an AppKit table,
 `AgendaTable.swift`, 2026-11-17, because a SwiftUI `List` cannot be
 opened part-way down reliably; a tray row for an event opens it), Starred
 (`Engine.starred`, with a tick and a star that takes the row out), Done
-(`Engine.doneEverywhere`, every workspace's merged newest first in Rust,
-capped at 200, the tick putting a row back; while it is shown the
+(`Engine.doneEverywhere`, every workspace's closed items, Done and
+Cancelled as on the web, merged newest first in Rust,
+200 rows at first and twice as many each time the end is scrolled
+near, `MainWindowModel.loadMoreDone`, the tick putting a row back; while it is shown the
 toolbar has a filter button, 2026-11-16, `DoneFilter.swift`: a popover
 of checkboxes for Workspaces and Lists with a search box, the iOS
 sheet's rules and `api::done::DoneFilter`, device-local in

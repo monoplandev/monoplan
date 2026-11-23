@@ -362,6 +362,9 @@ final class MainWindowModel: ObservableObject {
     /// workspaces the Calendar shows (`Engine.calendarCount`, the web's
     /// Upcoming badge). Always read.
     @Published private(set) var calendarCount = 0
+    /// How many Done items the filter admits, in all
+    /// (`Engine.doneCountEverywhere`): the rows are a page of them.
+    @Published private(set) var doneCount = 0
     /// The selected row's item, if one is: its panel is open.
     @Published private(set) var selected: ItemSelection?
     /// The panel's item page. On a new selection the old page stays
@@ -470,8 +473,13 @@ final class MainWindowModel: ObservableObject {
     /// How far back the Calendar reaches: the days gone by above
     /// Today, a year of them, as on iOS (`AppModel.agendaPastDays`).
     static let agendaPastDays: UInt32 = 365
-    /// How many Done rows the lens shows, newest first.
-    static let doneLimit = 200
+    /// How many Done rows the lens reads first, newest first; more as
+    /// its end is scrolled to (`loadMoreDone`).
+    static let donePage = 200
+    /// How many Done rows are asked for now.
+    private var doneLimit = MainWindowModel.donePage
+    /// The limit the rows shown were read with.
+    private var doneLoadedLimit = 0
 
     init(engine: EngineController) {
         self.engine = engine
@@ -515,9 +523,9 @@ final class MainWindowModel: ObservableObject {
     }
 
     /// The window's title: the list's name with its Open count, as the
-    /// sidebar row has it. Starred and the Bin count their rows; the
-    /// Calendar and Done have no count (Done's rows are capped). None
-    /// for zero.
+    /// sidebar row has it. Starred and the Bin count their rows, Done
+    /// every item its filter admits (its rows are a page of them); the
+    /// Calendar has no count. None for zero.
     var windowTitle: String {
         let count = titleCount
         return count > 0 ? "\(listTitle) (\(count))" : listTitle
@@ -548,7 +556,8 @@ final class MainWindowModel: ObservableObject {
         case .starred: return starred.count
         case .assigned: return assigned.count
         case .bin: return binned.count
-        case .agenda, .done: return 0
+        case .done: return doneCount
+        case .agenda: return 0
         case nil: return items.count
         }
     }
@@ -578,6 +587,7 @@ final class MainWindowModel: ObservableObject {
             return
         }
         self.lens = lens
+        doneLimit = Self.donePage
         clearItem()
         generation += 1
         reload()
@@ -675,6 +685,7 @@ final class MainWindowModel: ObservableObject {
         done = []
         binned = []
         calendarCount = 0
+        doneCount = 0
     }
 
     private func clear() {
@@ -699,6 +710,8 @@ final class MainWindowModel: ObservableObject {
         var agenda: [AgendaGroup] = []
         var calendarHidden: [String] = []
         var done: [DoneRow] = []
+        var doneLimit = 0
+        var doneCount = 0
         var binned: [BinEntry] = []
         var calendarCount = 0
         /// The selection the read was made for, and its item.
@@ -711,7 +724,7 @@ final class MainWindowModel: ObservableObject {
     func reload() {
         guard visible, let calls = engine.calls else { return }
         let workspace = workspace, list = list, generation = generation, lens = lens
-        let picked = selected, doneChoice = doneFilterChoice
+        let picked = selected, doneChoice = doneFilterChoice, doneLimit = doneLimit
         let asked = Date()
         var began = asked, ended = asked
         calls.run({ engine -> Snapshot in
@@ -759,7 +772,9 @@ final class MainWindowModel: ObservableObject {
                 // in Rust; the filter narrowed to the sections just
                 // read, so the two agree.
                 let filter = Self.effectiveDoneFilter(doneChoice, sections: sections)
-                snapshot.done = try engine.doneEverywhere(filter: filter, limit: UInt32(Self.doneLimit)).map {
+                snapshot.doneLimit = doneLimit
+                snapshot.doneCount = Int(try engine.doneCountEverywhere(filter: filter))
+                snapshot.done = try engine.doneEverywhere(filter: filter, limit: UInt32(doneLimit)).map {
                     entry in
                     let section = sections.first { $0.id == entry.docId }
                     return DoneRow(
@@ -813,6 +828,8 @@ final class MainWindowModel: ObservableObject {
                 self.agenda = snapshot.agenda
                 self.calendarHidden = snapshot.calendarHidden
                 self.done = snapshot.done
+                self.doneLoadedLimit = snapshot.doneLimit
+                self.doneCount = snapshot.doneCount
                 self.binned = snapshot.binned
                 self.calendarCount = snapshot.calendarCount
                 // An item selected since the read went out keeps the
@@ -1455,6 +1472,19 @@ final class MainWindowModel: ObservableObject {
         edit(&next)
         doneFilterChoice = next
         DoneFilterStore.save(next)
+        doneLimit = Self.donePage
+        reload()
+    }
+
+    /// The end of Done scrolled near: double the window and read it
+    /// whole again, as iOS's `AppModel.loadMoreDone` (the newest N
+    /// stays right while items are ticked and reopened underneath,
+    /// where a cursor would skip or repeat rows). Nothing while the
+    /// rows shown fell short of their limit (that was all of them) or
+    /// a larger read is already out.
+    func loadMoreDone() {
+        guard lens == .done, doneLoadedLimit == doneLimit, done.count >= doneLimit else { return }
+        doneLimit *= 2
         reload()
     }
 
@@ -2529,7 +2559,8 @@ struct MainWindowView: View {
     }
 
     /// Done: every workspace's newest Done items that the filter
-    /// (`DoneFilter.swift`) admits, newest first. The
+    /// (`DoneFilter.swift`) admits, newest first, 200 to begin with and
+    /// twice as many each time the end is scrolled near. The
     /// tick puts a row back. As the web's Done rows: the tick, when it
     /// entered Done, the text, and the list it is on at the far edge.
     /// On `ItemList`, so rows drag onto the sidebar as a list's do: a
@@ -2552,7 +2583,8 @@ struct MainWindowView: View {
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { _, _ in },
             menu: itemListMenu,
-            drop: sidebarDrop)
+            drop: sidebarDrop,
+            nearEnd: { model.loadMoreDone() })
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 if model.done.isEmpty {

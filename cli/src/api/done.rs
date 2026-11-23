@@ -49,8 +49,12 @@ pub fn done_count(cx: &Ctx, since: Option<i64>) -> anyhow::Result<u32> {
     Ok(select_done(&items, since, None).len() as u32)
 }
 
-/// Every open workspace's Done, not-binned items that `filter` admits,
-/// newest first, each tagged with its workspace.
+/// Every open workspace's closed, not-binned items that `filter`
+/// admits, newest first by the moment each was closed, each tagged
+/// with its workspace. Closed is Done and Cancelled both, as the web's
+/// Done view has it (`DocsLayer.doneItems`, `spec/board.md`): the lens
+/// is where a cancelled item is found and reopened. `monoplan done`
+/// ([`done`]) is completions only.
 fn admitted(cx: &Ctx, filter: &DoneFilter) -> Vec<DoneEntry> {
     let mut rows: Vec<DoneEntry> = cx
         .sources()
@@ -63,8 +67,9 @@ fn admitted(cx: &Ctx, filter: &DoneFilter) -> Vec<DoneEntry> {
             } else {
                 Vec::new()
             };
-            select_done(&items, None, None)
-                .into_iter()
+            items
+                .iter()
+                .filter(|i| i.is_closed() && !i.is_binned())
                 .filter(|i| {
                     filter.lists.is_empty()
                         || filter.lists.contains(&format!("{key}/{}", i.list_id))
@@ -86,8 +91,8 @@ fn admitted(cx: &Ctx, filter: &DoneFilter) -> Vec<DoneEntry> {
     rows
 }
 
-/// [`done`] across every open workspace, narrowed by `filter`: the
-/// newest `limit` rows, `None` being unbounded.
+/// The Done lens: closed items across every open workspace, narrowed
+/// by `filter`: the newest `limit` rows, `None` being unbounded.
 pub fn done_everywhere(
     cx: &Ctx,
     filter: &DoneFilter,
@@ -110,7 +115,7 @@ mod tests {
     use super::*;
     use crate::commands::focus::Lens;
     use crate::workspace::Candidate;
-    use monoplan_core::{Doc, DocId, LIST_INBOX};
+    use monoplan_core::{Doc, DocId, ItemLifecycle, LIST_INBOX};
 
     #[test]
     fn the_spanning_read_filters_by_workspace_and_list() {
@@ -127,6 +132,10 @@ mod tests {
         let b = tick(&work, LIST_INBOX, "b");
         let c = tick(&home, &chores, "c");
         home.add_item(LIST_INBOX, "open").unwrap();
+        // Cancelled is closed too: the lens has it, `done` does not.
+        let d = home.add_item(LIST_INBOX, "d").unwrap();
+        home.set_item_lifecycle(&d, ItemLifecycle::Cancelled)
+            .unwrap();
 
         let tags = [
             (
@@ -168,17 +177,23 @@ mod tests {
         let all = done_everywhere(&cx, &DoneFilter::default(), None).unwrap();
         assert_eq!(
             all.iter().map(|r| r.item.id.clone()).collect::<Vec<_>>(),
-            [c.clone(), b.clone(), a.clone()]
+            [d.clone(), c.clone(), b.clone(), a.clone()]
         );
-        assert_eq!(all[1].doc_id, Some(work_id.clone()));
-        assert_eq!(ids(&DoneFilter::default(), Some(2)), [c.clone(), b.clone()]);
+        assert_eq!(all[2].doc_id, Some(work_id.clone()));
+        assert_eq!(ids(&DoneFilter::default(), Some(2)), [d.clone(), c.clone()]);
+        let completed: Vec<String> = done(&cx, None, None)
+            .unwrap()
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        assert_eq!(completed, [c.clone(), a.clone()]);
 
         let docs = DoneFilter {
             docs: vec![home_id.clone()],
             lists: vec![],
         };
-        assert_eq!(ids(&docs, None), [c.clone(), a.clone()]);
-        assert_eq!(done_count_everywhere(&cx, &docs).unwrap(), 2);
+        assert_eq!(ids(&docs, None), [d.clone(), c.clone(), a.clone()]);
+        assert_eq!(done_count_everywhere(&cx, &docs).unwrap(), 3);
 
         // A list is its doc's: Work's inbox is not Home's.
         let lists = DoneFilter {
