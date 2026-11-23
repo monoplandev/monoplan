@@ -1,4 +1,4 @@
-// A list's rows, Starred's and Done's, on `DndListView` (`apple/MonoplanDnd`,
+// A list's rows, Starred's, Assigned's and Done's, on `DndListView` (`apple/MonoplanDnd`,
 // the web's list component on AppKit): several rows selected at once,
 // dragged to reorder, moved with ⌘↑ / ⌘↓ (spec/mac-dnd-plan.md). The
 // other lenses are still SwiftUI lists, and the Calendar a table.
@@ -27,7 +27,8 @@ struct ItemListRow: Equatable {
     let workspace: String?
     let text: String
     let state: ItemState
-    /// The star at the row's far edge.
+    /// The star at the row's far edge, or after the text when the
+    /// small print has the edge.
     var starred = false
     /// Small print at the row's far edge (where the item lives).
     var note: String?
@@ -416,7 +417,9 @@ private final class ItemRowContent: NSView {
         let side = Self.checkSide
         check.frame = NSRect(x: Self.edge - (side - 15) / 2, y: mid - side / 2, width: side, height: side)
         var right = bounds.maxX - Self.edge
-        if !star.isHidden {
+        // With small print at the edge, the star follows the text.
+        let trailingStar = !star.isHidden && !note.isHidden
+        if !star.isHidden, !trailingStar {
             star.frame = NSRect(x: right - 13, y: mid - 6.5, width: 13, height: 13)
             right = star.frame.minX - 8
         }
@@ -442,7 +445,12 @@ private final class ItemRowContent: NSView {
             right = note.frame.minX - 8
         }
         let height = ceil(title.intrinsicContentSize.height)
-        title.frame = NSRect(x: left, y: mid - height / 2, width: max(0, right - left), height: height)
+        var width = max(0, right - left)
+        if trailingStar {
+            width = min(max(0, width - 13 - 6), ceil(title.cell?.cellSize.width ?? width))
+            star.frame = NSRect(x: left + width + 6 - pad, y: mid - 6.5, width: 13, height: 13)
+        }
+        title.frame = NSRect(x: left, y: mid - height / 2, width: width, height: height)
     }
 
     /// The hairline under the row. A selected row has none: the

@@ -91,8 +91,12 @@ rows drag the same way since 2026-11-23 (the lens moved onto
 `ItemList`, `reorder` off, several rows selectable): onto a list or an
 Inbox they move and stay Done, and stay in the lens unless its filter
 leaves the new list out; onto the Bin they are binned; onto Starred
-nothing happens (the core stars Open items only), as on the web. Not
-built: drags from the other lenses (Calendar, Assigned, Bin: not on
+nothing happens (the core stars Open items only), as on the web.
+Assigned's rows the same day, on the same terms: a move keeps the
+assignee, across workspaces too (it is the mover's own:
+`sharing-plan.md` "Assignment"), so the row stays in the lens; Starred stars them. Its row
+has small print at the far edge, so its star follows the text. Not
+built: drags from the other lenses (Calendar, Bin: not on
 `DndListView`), unfolding a folded workspace or scrolling the sidebar
 under a drag.
 

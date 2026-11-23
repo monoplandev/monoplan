@@ -1196,7 +1196,7 @@ final class MainWindowModel: ObservableObject {
     /// (`SidebarDrop.swift`).
     let drops = SidebarDrops()
 
-    /// Rows dragged from the list, Starred or Done, in the order shown, let
+    /// Rows dragged from the list, Starred, Assigned or Done, in the order shown, let
     /// go on a sidebar row (spec/mac-dnd-plan.md phase 3; the web's
     /// `onDndDragEnd`). One typed call each, so one Undo step:
     ///
@@ -1221,6 +1221,7 @@ final class MainWindowModel: ObservableObject {
             items.removeAll { ids.contains($0.id) }
             starred.removeAll { ids.contains($0.id) }
             done.removeAll { ids.contains($0.item.id) }
+            assigned.removeAll { ids.contains($0.item.id) }
             bin(refs)
             return false
         case .starred:
@@ -1244,8 +1245,8 @@ final class MainWindowModel: ObservableObject {
                     }
                 } else {
                     if let selected, ids.contains(selected.id) { clearItem() }
-                    // Starred's and Done's rows stay: they are starred,
-                    // or Done, wherever they live.
+                    // A lens's rows stay: they are starred, assigned or
+                    // Done wherever they live.
                     if shown.lens == nil { items.removeAll { ids.contains($0.id) } }
                 }
                 write { try $0.moveItemsAcross(items: refs, to: workspace, list: list, index: 0) }
@@ -2258,7 +2259,7 @@ struct MainWindowView: View {
             }
     }
 
-    /// Rows dragged out of a list, Starred or Done onto the sidebar: the row
+    /// Rows dragged out of a list, Starred, Assigned or Done onto the sidebar: the row
     /// under the drag is lit, and takes them when they are let go.
     private var sidebarDrop: ItemListDrop {
         ItemListDrop(
@@ -2501,33 +2502,30 @@ struct MainWindowView: View {
     /// by their earliest date, then the rest newest first. A row has
     /// its tick, its text with its star, and at the far edge its list
     /// and, when not Personal's, its workspace. The tick drops
-    /// the row.
+    /// the row. On `ItemList`, so rows drag onto the sidebar as a
+    /// list's do; they stay assigned wherever they go.
     private var assigned: some View {
-        List(selection: selection { id in model.assigned.first { $0.item.id == id }?.workspace }) {
-            ForEach(model.assigned) { row in
-                HStack(alignment: .center, spacing: 8) {
-                    ItemCheckButton(state: row.item.state) {
-                        model.setDone(workspace: row.workspace, id: row.item.id, done: $0)
-                    }
-                    Text(verbatim: row.item.text)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if model.starredIds.contains(row.item.id) { starMark }
-                    Spacer()
-                    Text(verbatim: model.assignedNote(row))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .itemRow()
-                .itemMenu(model, workspace: row.workspace, id: row.item.id)
-                .tag(row.item.id)
+        ItemList(
+            surface: model.shown,
+            rows: model.assigned.map {
+                ItemListRow(
+                    id: $0.item.id, workspace: $0.workspace, text: $0.item.text, state: $0.item.state,
+                    starred: model.starredIds.contains($0.item.id), note: model.assignedNote($0))
+            },
+            selected: model.selected?.id,
+            // By date, never by hand: its rows only drag out, to the
+            // sidebar.
+            reorder: false,
+            select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
+            toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
+            move: { _, _ in },
+            menu: itemListMenu,
+            drop: sidebarDrop)
+            .ignoresSafeArea()
+            .overlay(alignment: .topLeading) {
+                if model.assigned.isEmpty { emptyNote(Text("Nothing assigned")) }
             }
-            if model.assigned.isEmpty {
-                Text("Nothing assigned").foregroundStyle(.secondary)
-            }
-        }
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
     }
 
     /// Done: every workspace's newest Done items that the filter
