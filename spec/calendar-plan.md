@@ -757,7 +757,19 @@ here.
   (`events-plan.md`) is never ticked, so recurring events are unsolved.
 - **Fixed instants.** The bracketed suffix above. Flipping the default means
   writers append the device zone; sorting then needs instant normalisation
-  for mixed values, which is why it waits.
+  for mixed values, which is why it waits. Where the zone data comes from
+  (decided 2026-11-23, not built): the wall time to instant arithmetic lives
+  in Rust on `jiff`, one implementation for every client, so gap and fold
+  hours resolve the same everywhere. Native reads the system tzdata; the
+  wasm build bundles a copy (a tzdata bump is a dependency update and a
+  redeploy; per-zone TZif fetch through `TimeZone::tzif` is the fallback if
+  the bundle size hurts). The platform supplies only the device's current
+  zone and the localised zone names for a picker. Zone ids are stored as
+  given and compared after resolving through the tzdb, never by string
+  (`Asia/Calcutta` and `Asia/Kolkata` are one zone); an id the device's
+  tzdata does not know renders as floating with the raw id shown. Asking
+  the browser's `Intl` / `Temporal` for the rules was rejected: a second
+  algorithm for the ambiguous hours.
 - **Month grid.** A workspace-level lens, sibling of Upcoming, on the
   `calendar` token: one month at a time on `@corvu/calendar` (already under
   the date picker), a few row titles per cell in placement order with a
