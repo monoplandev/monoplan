@@ -2,7 +2,7 @@
 
 [Monoplan](https://monoplan.app/) is an e2ee, local-first & collaborative, tasks + calendar app, with conflict resolution backed by Loro. It is optimised for ergonomics and frictionless capture and will work offline.
 
-<img width="2296" height="1466" alt="macos-app-nov-19" src="https://github.com/user-attachments/assets/88e47c0e-5ecd-4dba-8632-76369bd7904f" />
+<img width="2178" height="1422" alt="framed" src="https://github.com/user-attachments/assets/bb842049-76f0-4eed-bc45-263c74f3ddf2" />
 
 ⚠️ ATTN: Monoplan is undergoing extensive and frequent changes, you can use it locally, but you may have to manually export and import data between updates.
 
