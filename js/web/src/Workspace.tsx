@@ -61,6 +61,7 @@ import {
 } from "./dayGroups.ts";
 import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
 import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
+
 import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
@@ -151,6 +152,10 @@ import {
   withLane,
   type ViewSpec,
 } from "./view.ts";
+
+/** Agenda columns and the calendar header's List / Columns switch.
+ *  Off for now: the header shows the calendar's title instead. */
+const AGENDA_COLUMNS = false;
 
 // Done items linger in their live list this long after being marked
 // done, so the user sees the strike-through before the row drops out.
@@ -855,7 +860,12 @@ export function Workspace(props: {
   // Which agenda view the header's switch shows: the agenda list (days
   // down the page) or the agenda columns (a column per day), both
   // `Upcoming`. A device preference (`agendaMode.ts`).
-  const [agendaMode, setAgendaMode] = createSignal<AgendaMode>(loadAgendaMode());
+  // Columns are switched off for now (2026-11-23): the switch is hidden,
+  // the calendar header shows its title again, and the agenda is always
+  // the list. Flip `AGENDA_COLUMNS` to bring them back.
+  const [agendaMode, setAgendaMode] = createSignal<AgendaMode>(
+    AGENDA_COLUMNS ? loadAgendaMode() : "list",
+  );
   // A day the sidebar's mini calendar jumped to, so the agenda's empty
   // days reach it (`fillEmptyDays`); dropped when the agenda is left.
   const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
@@ -3670,11 +3680,11 @@ export function Workspace(props: {
             {/* Reserved views (Focus, Home/Inbox, Done, Bin) can't store a
                 custom icon, so mirror their fixed navbar glyph here as a
                 static, non-interactive counterpart to the list icon. */}
-            <Show when={view().kind !== "upcoming" && viewIcon(view())} keyed>
+            <Show when={(!AGENDA_COLUMNS || view().kind !== "upcoming") && viewIcon(view())} keyed>
               {(svg) => <span class="list-icon-static" innerHTML={svg} />}
             </Show>
             {/* The calendar's title is its view switch. */}
-            <Show when={view().kind === "upcoming"}>
+            <Show when={AGENDA_COLUMNS && view().kind === "upcoming"}>
               <SegmentedControl
                 class="theme-segmented"
                 aria-label={m().nav.upcoming}
@@ -3700,7 +3710,7 @@ export function Workspace(props: {
                 </SegmentedControl.Item>
               </SegmentedControl>
             </Show>
-            <Show when={view().kind !== "upcoming"}>
+            <Show when={!AGENDA_COLUMNS || view().kind !== "upcoming"}>
             <h1>
             {/* A list (Inbox included) lives in one workspace; prefix its
                 name with the workspace's so the title reads

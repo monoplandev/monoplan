@@ -132,3 +132,4 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - custom ios lists w hints + sliding + faster drag
 - tui
 - side by side days agenda view
+- floating kanban surface
