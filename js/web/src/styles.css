@@ -50,8 +50,11 @@
   --error-text: #991b1b;
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
-  /* Today's number in the month grids. */
-  --calendar-today: #dc2626;
+  /* Today's number in the month grids and today's agenda heading: a
+     yellow highlighter fill under black text, flipped in the dark theme to a faint
+     yellow wash under the pastel as text. */
+  --calendar-today-bg: #fdffb3;
+  --calendar-today-text: #000;
   --dnd-select-bg: #dbeafe;
   /* Divider under a selected row: a blue-grey a step darker than the
      selection fill so the row's edge still reads against it. */
@@ -97,7 +100,8 @@
   --error-text: #f87171;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
-  --calendar-today: #f87171;
+  --calendar-today-bg: color-mix(in srgb, #fdffb3 16%, var(--bg));
+  --calendar-today-text: #fdffb3;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #293a5b;
@@ -551,9 +555,12 @@ body {
   color: var(--text-muted);
 }
 
-/* Today's heading in the mini calendar's today red. */
+/* Today's heading in the mini calendar's today highlight. */
 .upcoming-day[data-urgency="today"] .upcoming-day-label {
-  color: var(--calendar-today);
+  background: var(--calendar-today-bg);
+  color: var(--calendar-today-text);
+  border-radius: 3px;
+  padding: 2px 6px;
 }
 
 /* The blank slot of an empty day, one row high: the day's drop
@@ -4716,8 +4723,9 @@ button.file-name:hover {
 }
 
 .calendar-cell-trigger[data-today] {
-  font-weight: 700;
-  color: var(--calendar-today);
+  font-weight: 500;
+  background: var(--calendar-today-bg);
+  color: var(--calendar-today-text);
 }
 
 .calendar-cell-trigger[data-selected] {
@@ -4727,7 +4735,7 @@ button.file-name:hover {
 
 /* A related day marked without selecting it (the mini calendar's
    shown item's date): a 1px ring alone, so the day keeps its own text
-   (today's red included) and the range band shows through. Before
+   (today's highlight included) and the range band shows through. Before
    preview so a preview wins. */
 .calendar-cell-trigger[data-marked] {
   box-shadow: inset 0 0 0 1px
