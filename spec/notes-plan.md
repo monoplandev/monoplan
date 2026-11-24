@@ -19,7 +19,7 @@ at research time and 1.16.0 after the bump.
 | Lazy creation | **Yes, via Loro mergeable containers** (`LoroMap::ensure_mergeable_text`, Rust 1.13.1+). Created on first write; concurrent first writes on two devices merge into one text. Items without notes carry nothing. |
 | Editor connector | **None fits as-is.** Every Loro editor binding needs a JS `LoroDoc`; Monoplan's doc lives in Rust wasm. We write a thin delta bridge across the wasm boundary instead. |
 | Rich text model | **Flat rich text in one `LoroText`** (Quill delta model: inline marks, line formats as attributes on `\n`). Not a ProseMirror node tree. |
-| Images | **By reference**, never bytes in the CRDT. A `U+FFFC` placeholder character carrying an `image` attribute that names an encrypted attachment. Attachments are a new dumb server surface (own spec, later phase). |
+| Images | **By reference**, never bytes in the CRDT. A `U+FFFC` placeholder character carrying an `image` attribute that names an encrypted attachment. Attachments are their own surface (`spec/attachments.md`). |
 | `text` field | **Stays a string register.** A title is one short phrase rewritten whole, so a character merge of two concurrent rewrites interleaves them into nonsense; LWW gives one clean title. Also saves a container per item. Decided 2026-09-08 (see "Why `text` stays a register"). |
 | Schema | **v3 to v4**, clean break, export / wipe / import per `data-model.md` policy. |
 
@@ -487,31 +487,25 @@ Does not transfer: per-post docs and the whole replace / epoch machinery
 (single-doc here); server-side reads and the JSON mirror (E2EE server);
 rebuilding the editor on snapshot import; loro-prosemirror itself (JS doc).
 
-## 5. Images (Phase 4, own spec)
+## 5. Images (Phase 4, on `attachments.md`)
 
 Bytes never enter the CRDT: one photo would be a megabyte update blob in every
 snapshot and every device's WAL. Instead:
 
-- New server surface, `spec/attachments.md`: `PUT /attachments/<id>` and
-  `GET /attachments/<id>` per account, opaque encrypted blobs, size cap
-  (proposal 8 MiB), sqlite table `attachments(account_id, id, bytes,
-  created_at)`. Same dumbness as ops: the server cannot read them.
-- Client: downscale to at most 2048 px on the long edge, encode WebP,
-  encrypt with the account DEK (AES-GCM, fresh nonce, per
-  `encryption.md`), upload, then insert `U+FFFC` with
-  `image: { id, mime, w, h }`. Cache decrypted bytes in IndexedDB (web) or
-  the sqlite store (CLI, if it ever renders).
-- Garbage: the server cannot count references. Pre-release rule: hard
-  delete of an item deletes the attachments its notes reference (client
-  issues the deletes). A periodic client-side sweep is future work; leaks
-  are bounded by the size cap.
-- Sync of attachments is separate from op sync and needs no protocol
-  change; a note referencing an attachment the device has not fetched
-  shows a placeholder until `GET` succeeds.
-- Snapshots do not include attachments. Durability is the attachments
-  table.
+An image is an attachment (`spec/attachments.md`, decided 2026-11-24, which
+replaces the sketch that stood here: per-doc not per-account, a key per file,
+tombstones and an owner's sweep for garbage, no local cache of the bytes).
+What is left for this plan:
 
-Estimate: 3 days including the server spec, tests, and the web upload path.
+- Client: downscale to at most 2048 px on the long edge, encode WebP, attach
+  it to the item like any file, then insert `U+FFFC` with
+  `image: { id, w, h }`. The name, type and key come from the file's entry.
+- An image removed from the notes stays attached to the item until it is
+  removed there; the embed is a reference, not the owner.
+- A note referencing a file whose bytes are not fetched, or are gone, shows a
+  placeholder.
+
+Estimate: 1 day on top of attachments.
 
 ## 6. Order of work
 
@@ -521,7 +515,7 @@ Estimate: 3 days including the server spec, tests, and the web upload path.
 | 1 | `notes` as mergeable `LoroText` (`text` stays a register), `update` diffing, content-clear (no key delete), classifier arm, schema v4 cutover, merge tests. **Done 2026-09-08.** | 1 |
 | 2 | Delta bridge (`_utf16` inbound, shadow-string outbound), coalesced capture, dialog writes deltas, live remote edits under caret. **Done 2026-09-08.** | 1.5 |
 | 3 | Rich text: style config, Quill 2 adaptor (or CodeMirror fallback), toolbar, paste whitelist, plain projection with `[image]` | 3 |
-| 4 | Attachments spec + server + client upload, image insert | 3 |
+| 4 | Image insert, on attachments (`spec/attachments.md`, built first) | 1 |
 
 Phase 1 is worth doing alone: it removes the one CRDT failure users notice
 (the dropped notes edit between phone and laptop when both were offline)
@@ -537,5 +531,5 @@ product decisions and can wait.
   images, and nested lists no. Revisit if notes grow.
 - Whether the CLI should print marks (Markdown-ish) or plain text.
   Plan: plain text from `to_string()` with `[image]`.
-- Attachment retention after item bin vs hard delete: bin keeps, hard
-  delete removes. Restore therefore never loses an image.
+- Attachment retention after item bin vs hard delete: settled in
+  `attachments.md` (bin keeps, hard delete tombstones).
