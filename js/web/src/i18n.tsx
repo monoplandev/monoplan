@@ -265,6 +265,25 @@ export type Messages = {
     addSubtask: string;
     /** A list row's subtask count tooltip. */
     subtasksDone: (done: number, total: number) => string;
+    /** The task surface's attachments group (`spec/attachments.md`). */
+    attachments: string;
+    attachFile: string;
+    /** Tooltip on a file's name: a click saves it to disk. */
+    fileSave: (name: string) => string;
+    /** Accessible name of a file row's menu. */
+    fileActions: (name: string) => string;
+    fileDownload: string;
+    fileUploading: string;
+    fileTooLarge: string;
+    fileQuota: string;
+    fileOffline: string;
+    fileUnavailable: string;
+    fileFailed: string;
+    /** A list row's attachment count tooltip. */
+    filesCount: (n: number) => string;
+    /** Alert when a move to another workspace stops because an
+     *  attachment could not be copied there. */
+    moveFilesFailed: (reason: string) => string;
     activity: string;
     activityCompleted: string;
     activityElapsed: string;
@@ -796,6 +815,20 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       subtask: "Subtarea",
       addSubtask: "Añadir subtarea",
       subtasksDone: (done, total) => `${done} de ${total} subtareas hechas`,
+      attachments: "Archivos adjuntos",
+      attachFile: "Adjuntar archivo",
+      fileSave: (name) => `Descargar ${name}`,
+      fileActions: (name) => `Acciones de ${name}`,
+      fileDownload: "Descargar",
+      fileUploading: "Subiendo…",
+      fileTooLarge: "Supera los 25 MB",
+      fileQuota: "Almacenamiento lleno",
+      fileOffline: "Sin conexión",
+      fileUnavailable: "Ya no está disponible",
+      fileFailed: "No se pudo completar",
+      filesCount: (n) => (n === 1 ? "1 archivo adjunto" : `${n} archivos adjuntos`),
+      moveFilesFailed: (reason) =>
+        `No se movió nada: no se pudieron copiar los archivos adjuntos (${reason}).`,
       activity: "Actividad",
       activityCompleted: "Completado",
       activityElapsed: "Transcurrido",
@@ -1200,6 +1233,20 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       subtask: "Subtask",
       addSubtask: "Add subtask",
       subtasksDone: (done, total) => `${done} of ${total} subtasks done`,
+      attachments: "Attachments",
+      attachFile: "Attach file",
+      fileSave: (name) => `Download ${name}`,
+      fileActions: (name) => `Actions for ${name}`,
+      fileDownload: "Download",
+      fileUploading: "Uploading…",
+      fileTooLarge: "Over 25 MB",
+      fileQuota: "Storage is full",
+      fileOffline: "Offline",
+      fileUnavailable: "No longer available",
+      fileFailed: "Couldn't complete",
+      filesCount: (n) => (n === 1 ? "1 attachment" : `${n} attachments`),
+      moveFilesFailed: (reason) =>
+        `Nothing was moved: the attachments couldn't be copied (${reason}).`,
       activity: "Activity",
       activityCompleted: "Completed",
       activityElapsed: "Elapsed",

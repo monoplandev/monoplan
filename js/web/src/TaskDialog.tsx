@@ -32,6 +32,8 @@ import { fixedWhen, localWhen, zoneWall } from "./zones.ts";
 import { ListPicker, type ListOption } from "./ListPicker.tsx";
 import { AssigneeField, type Assignment } from "./AssigneeField.tsx";
 import { SubtasksField } from "./SubtasksField.tsx";
+import { FilesField } from "./FilesField.tsx";
+import type { FilesHost } from "./sync/files.ts";
 import checkSvg from "./icons/check.svg?raw";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
@@ -197,6 +199,9 @@ export function TaskDialog(props: {
    *  Account-scoped like the star, so not read through `app`: a place
    *  used in any workspace is suggested in every other. */
   knownPlaces: (limit: number) => PlaceSuggestion[];
+  /** The host half of attachments (`sync/files.ts`): uploads and
+   *  downloads. The entries themselves are `app`'s. */
+  files: FilesHost;
   /** The star. Focus lives in the Home doc for every workspace
    *  (spec/focus.md: a shared doc's item is a foreign ref), so neither
    *  the read nor the writes can go through `app` when it is not Home.
@@ -1681,6 +1686,25 @@ export function TaskDialog(props: {
                   onRemove={(sub) => props.app.removeSubtask(it().id, sub)}
                 />
               </section>
+            )}
+          </Show>
+
+          {/* Attachments under the subtasks (`spec/attachments.md`). Only
+              once the item exists, and only where there is something to
+              show: a signed-out session cannot attach. */}
+          <Show when={item()}>
+            {(it) => (
+              <Show when={props.files.enabled || (it().files?.length ?? 0) > 0}>
+                <section class="task-dialog-section task-dialog-files">
+                  <FilesField
+                    files={() => it().files ?? []}
+                    canAttach={props.files.enabled}
+                    onAttach={(file) => props.files.attach(props.app, it().id, file)}
+                    onRead={(fileId) => props.files.read(props.app, fileId)}
+                    onRemove={(fileId) => props.app.removeFile(fileId)}
+                  />
+                </section>
+              </Show>
             )}
           </Show>
 

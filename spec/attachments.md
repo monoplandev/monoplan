@@ -1,8 +1,9 @@
 # Attachments
 
-Status: **decided 2026-11-24. Phases 1 (server) and 2 (core) built the same
-day; the rest is plan.** What they do that this text did not first say is
-under "As built".
+Status: **decided 2026-11-24. Phases 1 (server), 2 (core) and 3 (web) built
+the same day; the rest is plan.** What they do that this text did not first
+say is under "As built". The web surface is covered by unit tests and has
+not been run in a browser.
 
 Files attached to items. The bytes are online-only: they live on the server as
 encrypted blobs and are fetched on demand. The doc carries only the metadata
@@ -286,7 +287,7 @@ after the window.
 |---|---|
 | 1 | **Built 2026-11-24.** Server: table, blob store interface with the directory backend, the six routes, quota, purge task, doc / account delete cascade; integration tests |
 | 2 | **Built 2026-11-24.** Core: `files` container, mutations, `ItemView.files`, events, hard-delete cleanup, export form, cross-doc adopt / release |
-| 3 | Web: attach, list, open, rename, remove in the task surface; the row count; the owner's sweep |
+| 3 | **Built 2026-11-24.** Web: attach, list, open, remove in the task surface (no rename: cut the same day); the row count; the purge loop and the owner's sweep; the blob copy before a cross-doc move |
 | 4 | CLI (`item attach` / `item files`), then the typed api / FFI and the iOS and macOS item surfaces |
 | 5 | Notes images on top (`notes-plan.md` phase 4) |
 
@@ -360,9 +361,64 @@ Phase 2, the core (`core/src/doc.rs`, tests `files_*` beside it).
 - **Wasm** (`core/web`): the `itemFilesChanged` event, and `files` on
   `itemAdded` and on the item JSON. No mutation is bound yet; the web store
   ignores the event until phase 3.
-- **Left for phase 3:** the purge loop in a host, the sweep's doc half
-  (removing live entries whose item is gone, origin `"sweep"`), and sealing
-  / opening blobs.
+
+Phase 3, the web (`js/web/src/sync/files.ts` the host half,
+`FilesField.tsx` the surface, tests in `js/web/test/files.test.ts`), with
+the core and wasm additions it needed.
+
+- **Core.** `seal_file` / `open_file` in `core/src/crypto/aead.rs`
+  (`crypto.md` §3). `Doc::mark_ownerless_files(created_before)` is the
+  sweep's doc half: it marks, origin `"sweep"`, no event, and the ordinary
+  purge finishes the job. `Doc::stored_file_ids()` is every key of the
+  container, including entries this build cannot read, so a sweeping
+  client never tombstones the blob of an entry in a newer shape.
+- **Wasm.** `sealFile` / `openFile`, and on `Replica`: `attachFile`,
+  `renameFile`, `removeFile`, `fileKey`, `filesToPurge`, `forgetFiles`,
+  `markOwnerlessFiles`, `storedFileIds`. Not on the bare `Doc` class.
+- **Ids and keys** are generated in the browser (`crypto.getRandomValues`):
+  16 random bytes as hex for the id, 32 for the key.
+- **Attach** refuses over 25 MiB before reading the file, cleans the name
+  to what the core accepts (control characters out, cut to 255 bytes with
+  the extension kept), and writes the entry only if the doc is still open
+  when the upload returns. A row for the upload shows under the list until
+  the entry lands, and stays with the reason if it fails (over the cap,
+  storage full, offline, other).
+- **Open always saves to disk.** The bytes go to the browser as a download
+  typed `application/octet-stream`, never rendered in the app's origin: the
+  media type is whatever a member of a shared workspace wrote, and an HTML
+  or SVG blob opened in a tab would run with access to the local keys.
+  Nothing is cached; every open fetches.
+- **Housekeeping is pulsed.** The runtime pulses a doc after each server
+  frame for it and every doc when the socket comes up; a pulse settles
+  3 seconds after the last one, and does nothing while the doc has changes
+  the server has not acknowledged (the ack is itself a frame, so it pulses
+  again). A settle is the purge, then the sweep if one is due. Nothing
+  runs for a signed-out session.
+- **Purge** stops at the first `DELETE` that fails for a reason other than
+  404 / 410 and forgets what was answered up to there. An undo inside the
+  3 seconds clears the mark before anything is sent.
+- **The sweep learns ownership from the list route**: the pooled quota
+  figures come to the owner only, so their presence is the test. Every
+  member's client therefore asks for the list once a day per doc and a
+  non-owner stops there. The day is kept per doc in `localStorage`
+  (`monoplan.files.sweep.<doc_id>`), stamped only once the list has been
+  fetched and, for the owner, the doc has nothing unsent.
+- **Cross-doc move** (`Workspace.tsx` `withFilesCopied`, around the three
+  gestures that cross docs): `copy` for every live file of the crossing
+  items, then the move exactly as before. 409 on a copy restores the id in
+  the target; 410 restores the source and copies again; 404 at the source
+  (the file was already unavailable) is passed over. Any other failure, or
+  being offline, moves nothing and says so in an alert. Blobs copied
+  before a later copy failed are orphans for the target owner's sweep.
+- **Rows** show a file glyph and the count on Open items, beside the
+  subtask count. The task surface shows the section only once the item
+  exists, and not at all to a signed-out session with no files.
+- **No rename on the web** (cut 2026-11-24): a file keeps the name it was
+  attached under. `Doc::rename_file` and the wasm `renameFile` stay; the
+  store and the surface do not call them.
+- **Not built:** drop or paste to attach, upload progress, a retry on a
+  failed upload row (dismiss and pick again), the quota figures anywhere in
+  the UI, image previews.
 
 ## Open
 

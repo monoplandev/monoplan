@@ -22,6 +22,7 @@ import { type Session } from "../Login.tsx";
 import { dekVault } from "./dekVault.ts";
 import { unwrapNewMemberships } from "./docKeys.ts";
 import { createDocsLayer, type DocsLayer } from "./docs.ts";
+import { createFilesHost } from "./files.ts";
 import { createHomeApp, createSyncedApp, type DocApp, type HomeApp } from "./store.ts";
 import { createSyncBridge, SyncBridge } from "./sync.ts";
 import { createViewState } from "./viewState.ts";
@@ -325,6 +326,14 @@ export function createWorkspaceRuntime(props: {
     app,
     [...runtimes.values()].map((r) => r.app),
   );
+  // Attachments' host half (`files.ts`): uploads and downloads for the
+  // task surface, and each doc's purge / sweep housekeeping, pulsed
+  // from the sync bridge below.
+  const files = createFilesHost({
+    anonymous: props.session.anonymous,
+    appOf: (docId) => runtimes.get(docId)?.app,
+  });
+  onCleanup(() => files.dispose());
   // Reactive owner of this runtime, so a doc created later from an
   // event handler can register its cleanups against the same lifetime.
   const owner = getOwner();
@@ -381,6 +390,8 @@ export function createWorkspaceRuntime(props: {
           // Whatever the account joined or created while this tab was
           // offline (or never heard a nudge for).
           relistDocs();
+          // Removals made while offline, here or elsewhere.
+          for (const docId of runtimes.keys()) files.pulse(docId);
         }
         if (kind === "offline") {
           props.setOnline(false);
@@ -393,6 +404,7 @@ export function createWorkspaceRuntime(props: {
       },
       onServerFrame: (docId) => {
         runtimes.get(docId)?.onServerFrame();
+        files.pulse(docId);
         saveDeviceSoon();
       },
       onMembershipsChanged: () => relistDocs(),
@@ -654,6 +666,7 @@ export function createWorkspaceRuntime(props: {
       setView({ kind: "list", id: "inbox" });
     if (relisting) relistStale = true;
     forgetPresence(docId);
+    files.forget(docId);
     bridge?.removeReplica(docId);
     docs.removeDoc(docId);
     runtimes.delete(docId);
@@ -769,6 +782,7 @@ export function createWorkspaceRuntime(props: {
     app,
     docApps,
     docs,
+    files,
     view,
     setView,
     createDoc,

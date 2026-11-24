@@ -179,7 +179,9 @@ export interface DocsLayer {
    *  restored, closed rows stay closed; a starred row keeps its Focus
    *  slot. Ids already in the target doc, or in no open doc, are
    *  skipped. One undo step across the docs involved. Returns the ids
-   *  that moved. */
+   *  that moved. Attachment entries move with their items; the caller
+   *  has the server copy their blobs into the target doc first
+   *  (`FilesHost.copyForMove`, `spec/attachments.md`). */
   moveToDoc(
     ids: readonly string[],
     targetDocId: string,

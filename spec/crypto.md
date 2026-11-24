@@ -30,6 +30,7 @@ Used for two distinct purposes:
 - **Home DEK wrap:** `Kek::wrap(&dek)` — encrypt the primary doc's DEK (the Home DEK, which is the account key) under the password-derived KEK at signup / password change. One wrap per `(account, password)`. Optional second wrap per `(account, recovery_code)`.
 - **Doc DEK wrap:** `Dek::wrap_dek(&other)` / `Dek::unwrap_dek(&wrapped)` — encrypt any other doc's DEK under the Home DEK (same AEAD, fresh nonce; byte-for-byte `Dek::seal` over the 32 key bytes). One wrap per non-primary membership (`encryption.md` §Wrap-states).
 - **Op + snapshot encryption:** `Dek::seal(&plaintext)` — encrypt every CRDT op and snapshot blob before it goes to the server. Fresh random 24-byte nonce per call. Server stores ciphertext + nonce as opaque blobs.
+- **Attachment sealing:** `seal_file(key, plaintext)` / `open_file(key, blob)` — encrypt a file under its own random 32-byte key, which lives in the file's doc entry and so under the doc's DEK (`attachments.md` §Encryption). One shot, fresh random nonce, stored as one body: `nonce || ciphertext`, 40 bytes longer than the plaintext.
 
 **Why this AEAD:** Software-fast (no AES-NI hardware needed — important for wasm and mobile). 24-byte nonces let us use random nonces safely (collision probability ~2⁻⁹⁶ even after a billion uses). Simple API surface — easy to use right.
 
@@ -111,6 +112,7 @@ random ──▶ InviteSecret (32 bytes, URL fragment only) ──HKDF─┤ inv
                                                             │ invite KEK  │──XChaCha20-Poly1305──▶ wrap(doc DEK) ─▶ server (opaque, on doc_invites)
                                                             └─────────────┘
 DEK ──XChaCha20-Poly1305(fresh nonce per blob)──▶ ciphertext for each op + snapshot ─▶ server (opaque)
+file key (random, in the doc) ──XChaCha20-Poly1305(fresh nonce)──▶ nonce || ciphertext of one attachment ─▶ server (opaque)
 ```
 
 Layered roles:

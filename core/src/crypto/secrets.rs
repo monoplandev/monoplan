@@ -8,7 +8,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::{CryptoError, Result};
 
-const KEY_LEN: usize = 32;
+pub(crate) const KEY_LEN: usize = 32;
 
 macro_rules! key32 {
     ($name:ident, $doc:literal) => {

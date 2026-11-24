@@ -88,6 +88,33 @@ export function parseSubtasksJson(json: string | undefined | null): Subtask[] | 
   }
 }
 
+/** One attachment as its item shows it (`spec/attachments.md`): the
+ *  doc's entry without its key. The bytes are on the server, fetched
+ *  when the file is opened. `name` and `mime` are what the attaching
+ *  client wrote: display only, never trusted. `size` is the plaintext
+ *  length in bytes. */
+export interface ItemFile {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: number;
+  createdBy?: string;
+}
+
+/** Parse the JSON text the wasm boundary carries attachments as;
+ *  `undefined` for none. */
+export function parseFilesJson(json: string | undefined | null): ItemFile[] | undefined {
+  if (!json) return undefined;
+  try {
+    const v = JSON.parse(json) as unknown;
+    if (!Array.isArray(v) || v.length === 0) return undefined;
+    return v as ItemFile[];
+  } catch {
+    return undefined;
+  }
+}
+
 /** Parse the JSON text the wasm boundary carries a place as; `undefined`
  *  for unset or anything that is not a place. */
 export function parsePlaceJson(json: string | undefined | null): Place | undefined {
@@ -164,6 +191,9 @@ export interface ItemView {
   /** Subtasks in their own order (`spec/subtasks.md`). Absent means
    *  none. Replaced whole on every change. */
   subtasks?: Subtask[];
+  /** Attachments, oldest first (`spec/attachments.md`). Absent means
+   *  none. Replaced whole on every change. */
+  files?: ItemFile[];
   /** Reflection stamp: first entry into In Progress, if any. */
   startedAt?: number;
   /** Reflection stamp: last entry into Done, if any. View sorts use
@@ -572,6 +602,40 @@ export interface DocApp extends DocItemActions {
    *  undo step: the items live on in the doc that adopted them, and the
    *  personal layer undoes both halves together. */
   releaseItems(ids: string[]): void;
+  // ---- attachments (`spec/attachments.md`). The doc half only: the
+  // bytes go to and from the server through the files host
+  // (`files.ts`), which calls these around its requests.
+  /** Record an attachment whose sealed blob is already on the server
+   *  under `fileId`. One undo step. Throws on a name the core refuses
+   *  or an id the doc already holds. */
+  attachFile(
+    itemId: string,
+    fileId: string,
+    name: string,
+    mime: string,
+    size: number,
+    key: Uint8Array,
+  ): void;
+  /** Remove an attachment: it leaves the item at once and its entry
+   *  stays marked until a client has tombstoned the blob. Undo brings
+   *  it back. */
+  removeFile(fileId: string): void;
+  /** The key a live attachment's blob opens with. */
+  fileKey(fileId: string): Uint8Array | undefined;
+  /** Ids of the entries marked for purge: blobs still to tombstone. */
+  filesToPurge(): string[];
+  /** Delete the marked entries among `fileIds`, once the server has
+   *  tombstoned their blobs. Never an undo step. */
+  forgetFiles(fileIds: string[]): number;
+  /** The sweep's doc half: mark for purge the live entries whose item
+   *  is gone and that were attached before `createdBefore` (unix
+   *  millis). Never an undo step. Returns how many it marked. */
+  markOwnerlessFiles(createdBefore: number): number;
+  /** Every file id the doc holds an entry for, live or marked. */
+  storedFileIds(): string[];
+  /** Whether local changes are still waiting for the server to take
+   *  them. The files host holds its clean-up until this is false. */
+  hasUnsyncedOps(): boolean;
   /** Drop this doc's undo / redo history, as a hard delete does. The
    *  personal layer calls it when a cross-doc move's other half can no
    *  longer be undone, so this half is never undone alone. */
@@ -952,6 +1016,7 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           createdBy: ev.createdBy ?? undefined,
           assignee: ev.assignee ?? undefined,
           subtasks: parseSubtasksJson(ev.subtasks),
+          files: parseFilesJson(ev.files),
           startedAt: ev.startedAt != null ? Number(ev.startedAt) : undefined,
           doneAt: ev.doneAt != null ? Number(ev.doneAt) : undefined,
           binnedAt: ev.binnedAt != null ? Number(ev.binnedAt) : undefined,
@@ -1075,6 +1140,12 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       case "itemSubtasksChanged": {
         if (state.itemsById[ev.id]) {
           setState("itemsById", ev.id, "subtasks", parseSubtasksJson(ev.subtasks));
+        }
+        break;
+      }
+      case "itemFilesChanged": {
+        if (state.itemsById[ev.id]) {
+          setState("itemsById", ev.id, "files", parseFilesJson(ev.files));
         }
         break;
       }
@@ -1705,6 +1776,36 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     },
     releaseItems(ids) {
       mutate(() => replica.releaseItems(ids));
+    },
+    attachFile(itemId, fileId, name, mime, size, key) {
+      mutate(() => replica.attachFile(itemId, fileId, name, mime, size, key));
+    },
+    removeFile(fileId) {
+      mutate(() => replica.removeFile(fileId));
+    },
+    fileKey(fileId) {
+      return replica.fileKey(fileId) ?? undefined;
+    },
+    filesToPurge() {
+      return replica.filesToPurge();
+    },
+    // The two maintenance writes commit under the core's undo-excluded
+    // sweep origin and change nothing a view shows.
+    forgetFiles(fileIds) {
+      const n = replica.forgetFiles(fileIds);
+      if (n > 0) flush();
+      return n;
+    },
+    markOwnerlessFiles(createdBefore) {
+      const n = replica.markOwnerlessFiles(createdBefore);
+      if (n > 0) flush();
+      return n;
+    },
+    storedFileIds() {
+      return replica.storedFileIds();
+    },
+    hasUnsyncedOps() {
+      return replica.hasUnsyncedOps();
     },
     forgetUndoHistory() {
       replica.forgetUndo();

@@ -3614,6 +3614,155 @@ input.task-check:hover {
   }
 }
 
+/* Attachments (`FilesField`, `spec/attachments.md`): a column of rows
+   in the subtasks' geometry (a 16px leading glyph, 28px lines): the
+   file's name as a button that saves it, its size, and a menu shown on
+   hover. Uploads in flight follow as rows of their own; the trailing
+   row attaches. */
+.files {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  min-width: 0;
+}
+
+.file-lead {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 28px;
+  color: var(--text-faint);
+}
+
+.file-icon {
+  display: inline-flex;
+}
+
+.file-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.file-spinner {
+  animation: place-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-spinner {
+    animation: none;
+  }
+}
+
+.file-name {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  line-height: 20px;
+  color: var(--text);
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.file-name {
+  cursor: pointer;
+}
+
+button.file-name:hover {
+  text-decoration: underline;
+}
+
+.file-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.file-row[data-failed] .file-meta {
+  color: var(--text-muted);
+}
+
+.file-pending .file-name {
+  color: var(--text-muted);
+}
+
+.file-menu,
+.file-dismiss {
+  width: 24px;
+  height: 24px;
+  margin-inline-start: auto;
+}
+
+.file-menu {
+  opacity: 0;
+}
+
+.file-row:hover .file-menu,
+.file-menu:focus-visible,
+.file-menu[data-expanded] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .file-menu {
+    opacity: 1;
+  }
+}
+
+/* The attach row fills on hover like the date and place fields
+   (`--bg-badge`, 4px corners). The fill reaches 6px past the row on
+   each side so the glyph stays in the files' leading column. */
+.file-add {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: calc(100% + 12px);
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  line-height: 20px;
+  color: var(--text-empty);
+  text-align: start;
+  cursor: pointer;
+  outline: none;
+}
+
+.file-add:hover {
+  background: var(--bg-badge);
+}
+
+.file-add:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+
+/* A row's attachment count: the file glyph and a number, plain like
+   the subtask count. */
+.row-files {
+  background: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* A row's subtask count: plain text like the stamp, no pill. */
 .row-subtasks {
   background: none;

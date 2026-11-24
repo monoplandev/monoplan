@@ -10,6 +10,8 @@ import {
   type RevealTarget,
 } from "./ItemContextMenu.tsx";
 import { subtaskCount } from "./SubtasksField.tsx";
+import { fileCount } from "./fileFormat.ts";
+import fileSvg from "./icons/file.svg?raw";
 import { Avatar } from "./Avatar.tsx";
 import { PlaceBadge } from "./PlaceBadge.tsx";
 import { WhenBadge } from "./WhenBadge.tsx";
@@ -202,6 +204,14 @@ export function Row(props: {
   // The subtask count (`spec/subtasks.md`): all a row shows of an
   // item's subtasks. Open items only, as the dates.
   const subtasks = () => (isOpen(props.item()) ? subtaskCount(props.item().subtasks) : null);
+  // The attachment count (`spec/attachments.md`), under the same rule.
+  const files = () => (isOpen(props.item()) ? fileCount(props.item().files) : null);
+  const filesBadge = (n: number) => (
+    <span class="badge row-files" title={m().workspace.filesCount(n)}>
+      <span class="badge-icon" innerHTML={fileSvg} />
+      {n}
+    </span>
+  );
   const assigneeTitle = (a: { email: string | null }): string =>
     m().workspace.assignedTo(a.email ?? m().sharing.formerMember);
   const showInlineBadges = () =>
@@ -215,7 +225,8 @@ export function Row(props: {
             (isOpen(props.item()) &&
               (Boolean(props.item().when) ||
                 Boolean(props.item().place) ||
-                Boolean(subtasks())))))));
+                Boolean(subtasks()) ||
+                Boolean(files())))))));
   let textRef!: HTMLSpanElement;
   // Set by the Enter keydown handler before it dispatches the synthetic
   // Escape that drives collapse. The collapse effect reads (and resets)
@@ -557,6 +568,7 @@ export function Row(props: {
             ((isOpen(props.item()) && props.item().when) ||
               (canPinToFocus() && focused()) ||
               subtasks() ||
+              files() ||
               assignee() ||
               rowStamp())
           }
@@ -583,6 +595,7 @@ export function Row(props: {
                 </span>
               )}
             </Show>
+            <Show when={files()}>{(n) => filesBadge(n())}</Show>
             <Show when={assignee()}>
               {(a) => (
                 <Avatar accountId={a().accountId} email={a().email} title={assigneeTitle(a())} />
@@ -649,6 +662,9 @@ export function Row(props: {
                   {c().done}/{c().total}
                 </span>
               )}
+            </Show>
+            <Show when={!props.badgesInFooter && !props.expanded() && files()}>
+              {(n) => filesBadge(n())}
             </Show>
             <Show when={!props.badgesInFooter && assignee()}>
               {(a) => (

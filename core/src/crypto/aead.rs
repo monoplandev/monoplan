@@ -14,7 +14,7 @@ use chacha20poly1305::{
 
 use super::{
     CryptoError, Result, random_bytes,
-    secrets::{Dek, Kek},
+    secrets::{Dek, KEY_LEN, Kek},
 };
 
 /// 24 bytes — XChaCha20's extended nonce. Random-nonce safe up to ~2^96
@@ -98,6 +98,49 @@ impl Dek {
     }
 }
 
+/// Bytes a sealed file is longer than its plaintext: the nonce in
+/// front and the Poly1305 tag behind.
+pub const FILE_SEAL_OVERHEAD: usize = AEAD_NONCE_LEN + 16;
+
+fn file_cipher(key: &[u8]) -> Result<XChaCha20Poly1305> {
+    let key: [u8; KEY_LEN] = key.try_into().map_err(|_| CryptoError::InvalidKeyLength {
+        expected: KEY_LEN,
+        actual: key.len(),
+    })?;
+    Ok(XChaCha20Poly1305::new(&key.into()))
+}
+
+/// Seal an attachment under its own file key (`spec/attachments.md`
+/// "Encryption"): `nonce (24 bytes) || XChaCha20-Poly1305(key,
+/// plaintext)`, one shot, a fresh random nonce. The result is the
+/// opaque body the server stores.
+pub fn seal_file(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
+    let cipher = file_cipher(key)?;
+    let nonce: [u8; AEAD_NONCE_LEN] = random_bytes();
+    let ct = cipher
+        .encrypt(&XNonce::from(nonce), plaintext)
+        .map_err(|_| CryptoError::Aead)?;
+    let mut blob = Vec::with_capacity(AEAD_NONCE_LEN + ct.len());
+    blob.extend_from_slice(&nonce);
+    blob.extend_from_slice(&ct);
+    Ok(blob)
+}
+
+/// Inverse of [`seal_file`]. A blob under another key (the server
+/// answering with the wrong file), a truncated or a tampered one is
+/// `CryptoError::Aead`.
+pub fn open_file(key: &[u8], blob: &[u8]) -> Result<Vec<u8>> {
+    let cipher = file_cipher(key)?;
+    if blob.len() < FILE_SEAL_OVERHEAD {
+        return Err(CryptoError::Aead);
+    }
+    let (nonce, ct) = blob.split_at(AEAD_NONCE_LEN);
+    let nonce: [u8; AEAD_NONCE_LEN] = nonce.try_into().map_err(|_| CryptoError::Aead)?;
+    cipher
+        .decrypt(&XNonce::from(nonce), ct)
+        .map_err(|_| CryptoError::Aead)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +194,41 @@ mod tests {
             other.as_bytes(),
             "same bytes, same AEAD: the type split is a client-side discipline, not a crypto boundary"
         );
+    }
+
+    #[test]
+    fn file_seal_open_roundtrip() {
+        let key = [3u8; 32];
+        for payload in [Vec::new(), b"hello".to_vec(), vec![9u8; 100_000]] {
+            let blob = seal_file(&key, &payload).unwrap();
+            assert_eq!(blob.len(), payload.len() + FILE_SEAL_OVERHEAD);
+            assert_eq!(open_file(&key, &blob).unwrap(), payload);
+        }
+        // Fresh nonce per seal.
+        assert_ne!(
+            seal_file(&key, b"x").unwrap(),
+            seal_file(&key, b"x").unwrap()
+        );
+    }
+
+    #[test]
+    fn file_open_refuses_wrong_key_tampering_and_short_blobs() {
+        let key = [3u8; 32];
+        let mut blob = seal_file(&key, b"contents").unwrap();
+        assert!(matches!(
+            open_file(&[4u8; 32], &blob),
+            Err(CryptoError::Aead)
+        ));
+        assert!(matches!(
+            open_file(&key, &blob[..10]),
+            Err(CryptoError::Aead)
+        ));
+        let last = blob.len() - 1;
+        blob[last] ^= 1;
+        assert!(matches!(open_file(&key, &blob), Err(CryptoError::Aead)));
+        assert!(matches!(
+            seal_file(&[0u8; 31], b"x"),
+            Err(CryptoError::InvalidKeyLength { .. })
+        ));
     }
 }

@@ -102,6 +102,21 @@ pub fn place_suggestions_json(uses: Vec<String>, query: &str, limit: usize) -> S
     suggestions_to_json(&monoplan_core::merge_place_uses(&uses, query, limit))
 }
 
+/// Seal an attachment under its file key (`spec/attachments.md`
+/// "Encryption"): the body to `PUT`, `nonce || ciphertext`. `key` is 32
+/// random bytes the host generates per file.
+#[wasm_bindgen(js_name = sealFile)]
+pub fn seal_file(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, JsError> {
+    monoplan_core::seal_file(key, plaintext).map_err(js_err)
+}
+
+/// Open a downloaded attachment with the key from its entry
+/// (`Replica.fileKey`). Throws on a wrong key or a damaged body.
+#[wasm_bindgen(js_name = openFile)]
+pub fn open_file(key: &[u8], blob: &[u8]) -> Result<Vec<u8>, JsError> {
+    monoplan_core::open_file(key, blob).map_err(js_err)
+}
+
 // ---------- lifecycle ----------
 
 /// Resolved item lifecycle (`spec/data-model.md` "Lifecycle"), mirrored
@@ -2045,6 +2060,74 @@ impl Replica {
         self.doc()
             .remove_subtask(item_id, subtask_id)
             .map_err(js_err)
+    }
+
+    // -- attachments (`spec/attachments.md`) --
+
+    /// See [`Doc::attach_file`]: record a blob the host has already
+    /// uploaded. `size` is the plaintext length, `key` the 32 bytes the
+    /// blob was sealed under.
+    #[wasm_bindgen(js_name = attachFile)]
+    pub fn attach_file(
+        &self,
+        item_id: &str,
+        file_id: &str,
+        name: &str,
+        mime: &str,
+        size: f64,
+        key: &[u8],
+    ) -> Result<(), JsError> {
+        if !(size.is_finite() && size >= 0.0 && size.fract() == 0.0) {
+            return Err(JsError::new("file size must be a whole number of bytes"));
+        }
+        self.doc()
+            .attach_file(item_id, file_id, name, mime, size as u64, key)
+            .map_err(js_err)
+    }
+
+    #[wasm_bindgen(js_name = renameFile)]
+    pub fn rename_file(&self, file_id: &str, name: &str) -> Result<(), JsError> {
+        self.doc().rename_file(file_id, name).map_err(js_err)
+    }
+
+    /// See [`Doc::remove_file`]: marks the entry for purge.
+    #[wasm_bindgen(js_name = removeFile)]
+    pub fn remove_file(&self, file_id: &str) -> Result<(), JsError> {
+        self.doc().remove_file(file_id).map_err(js_err)
+    }
+
+    /// The key a live attachment's blob is sealed under, or `undefined`.
+    #[wasm_bindgen(js_name = fileKey)]
+    pub fn file_key(&self, file_id: &str) -> Option<Vec<u8>> {
+        self.doc().file_key(file_id).map(|k| k.to_vec())
+    }
+
+    /// See [`Doc::files_to_purge`].
+    #[wasm_bindgen(js_name = filesToPurge)]
+    pub fn files_to_purge(&self) -> Vec<String> {
+        self.doc().files_to_purge()
+    }
+
+    /// See [`Doc::forget_files`]. Returns how many entries went.
+    #[wasm_bindgen(js_name = forgetFiles)]
+    pub fn forget_files(&self, file_ids: Vec<String>) -> Result<usize, JsError> {
+        let refs: Vec<&str> = file_ids.iter().map(|s| s.as_str()).collect();
+        self.doc().forget_files(&refs).map_err(js_err)
+    }
+
+    /// See [`Doc::mark_ownerless_files`]. `created_before` is unix
+    /// millis.
+    #[wasm_bindgen(js_name = markOwnerlessFiles)]
+    pub fn mark_ownerless_files(&self, created_before: f64) -> Result<usize, JsError> {
+        self.doc()
+            .mark_ownerless_files(created_before as i64)
+            .map_err(js_err)
+    }
+
+    /// See [`Doc::stored_file_ids`].
+    #[wasm_bindgen(js_name = storedFileIds)]
+    pub fn stored_file_ids(&self) -> Vec<String> {
+        self.doc().stored_file_ids()
     }
 
     /// Set (`Some`) or clear (`None`) an item's planned date. The value

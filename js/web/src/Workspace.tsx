@@ -108,6 +108,7 @@ import {
 import { type DayRange, type TodayPlace, Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
+import { FileError, type FilesHost } from "./sync/files.ts";
 import type { Assignment } from "./AssigneeField.tsx";
 import type { PresentAccount } from "./sync/runtime.ts";
 import type { DocsLayer } from "./sync/docs.ts";
@@ -281,6 +282,9 @@ export function Workspace(props: {
    *  (Focus, calendar, Done, Bin) render from the layer's merged reads
    *  and route each row's mutations by `ItemView.docId`. */
   docs: DocsLayer;
+  /** The host half of attachments (`runtime.files`): the task surface's
+   *  uploads and downloads, and the blob copy before a cross-doc move. */
+  files: FilesHost;
   // View lives in `MainApp` so device writes can persist it alongside
   // the sync frontier in one debounced put. See `currentView` on
   // `DeviceConfig`.
@@ -2021,6 +2025,41 @@ export function Workspace(props: {
     setCrossMoveOpen(true);
   };
 
+  // A cross-doc move takes the items' attachments with it
+  // (`spec/attachments.md` "Cross-doc move"): the server copies each
+  // blob into the target doc first, and only then do the entries move
+  // with their items (`move`, the whole of what the gesture does, so
+  // nothing of it runs ahead of the copy). Items without attachments,
+  // and ones already in the target doc, move at once. A copy that fails moves nothing and says why; the move
+  // is refused the same way while offline, since the copy cannot run.
+  const withFilesCopied = (
+    ids: readonly string[],
+    targetDocId: string,
+    move: () => void,
+  ): void => {
+    const blobs = ids.flatMap((id) => {
+      const it = docs.getItem(id);
+      if (!it || it.docId === targetDocId) return [];
+      return (it.files ?? []).map((f) => ({ docId: it.docId, fileId: f.id }));
+    });
+    if (blobs.length === 0) {
+      move();
+      return;
+    }
+    props.files.copyForMove(blobs, targetDocId).then(move, (e) => {
+      const kind = e instanceof FileError ? e.kind : "failed";
+      if (kind === "failed") console.error("cross-doc move: file copy failed:", e);
+      const w = m().workspace;
+      const reason =
+        kind === "quota"
+          ? w.fileQuota
+          : kind === "offline" || kind === "signedOut"
+            ? w.fileOffline
+            : w.fileFailed;
+      alert(w.moveFilesFailed(reason));
+    });
+  };
+
   // Land `ids` (visible order) as the first items of a list of `tApp`:
   // rows of another doc cross over (ids kept, binned rows restored,
   // closed rows still closed; one undo step across the docs), rows
@@ -2073,7 +2112,9 @@ export function Workspace(props: {
     if (h !== null && h.listId === targetListId && h.docId === mApp.docId && !anyBinned) {
       return;
     }
-    confirmingCrossDoc(ids, mApp.docId, () => landBlock(ids, mApp, targetListId));
+    confirmingCrossDoc(ids, mApp.docId, () =>
+      withFilesCopied(ids, mApp.docId, () => landBlock(ids, mApp, targetListId)),
+    );
   };
   const landBlock = (ids: readonly string[], mApp: DocApp, targetListId: string) => {
     const sel = actionSelection();
@@ -2674,17 +2715,19 @@ export function Workspace(props: {
     if (!tApp) return;
     const movable = idsInOrder.filter((id) => docs.getItem(id) !== undefined);
     if (movable.length === 0) return;
-    confirmingCrossDoc(movable, tApp.docId, () => {
-      relocateTo(movable, tApp, target.listId);
-      // When dragging out of the current list, the rows are no longer
-      // visible here — leaving them "selected" means a phantom block
-      // anchor lingers. Same-list drops keep selection so the user can
-      // continue acting on the rows they just rearranged.
-      const v = view();
-      const sameList =
-        v.kind === "list" && v.id === target.listId && viewDocId() === target.docId;
-      if (!sameList) selection.clear();
-    });
+    confirmingCrossDoc(movable, tApp.docId, () =>
+      withFilesCopied(movable, tApp.docId, () => {
+        relocateTo(movable, tApp, target.listId);
+        // When dragging out of the current list, the rows are no longer
+        // visible here — leaving them "selected" means a phantom block
+        // anchor lingers. Same-list drops keep selection so the user can
+        // continue acting on the rows they just rearranged.
+        const v = view();
+        const sameList =
+          v.kind === "list" && v.id === target.listId && viewDocId() === target.docId;
+        if (!sameList) selection.clear();
+      }),
+    );
   };
   document.addEventListener("primavera-dnd-dragmove", onDndDragMove);
   document.addEventListener("primavera-dnd-dragend", onDndDragEnd);
@@ -3576,10 +3619,12 @@ export function Workspace(props: {
           // its new doc (keyed on `taskApp`).
           const target = docs.appOf(docId);
           if (!target) return;
-          confirmingCrossDoc([id], docId, () => {
-            const at = target.state.listOpen[listId]?.length ?? 0;
-            docs.moveToDoc([id], docId, listId, at);
-          });
+          confirmingCrossDoc([id], docId, () =>
+            withFilesCopied([id], docId, () => {
+              const at = target.state.listOpen[listId]?.length ?? 0;
+              docs.moveToDoc([id], docId, listId, at);
+            }),
+          );
         }}
         // Only a shared workspace is named in the list picker: Personal
         // is the default and goes unsaid, as on the agenda.
@@ -3588,6 +3633,7 @@ export function Workspace(props: {
         }
         // Known places are the account's, not the item's doc's.
         knownPlaces={(limit) => docs.placeSuggestions("", limit)}
+        files={props.files}
         // Focus is Home's regardless of the item's doc: a shared doc's
         // item is pinned as a foreign ref, and the star reads Home's
         // entries so it lights for both. Written through Home directly

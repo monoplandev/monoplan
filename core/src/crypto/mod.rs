@@ -22,7 +22,7 @@ mod kdf;
 mod recovery;
 mod secrets;
 
-pub use aead::{AEAD_NONCE_LEN, WrappedDek};
+pub use aead::{AEAD_NONCE_LEN, FILE_SEAL_OVERHEAD, WrappedDek, open_file, seal_file};
 pub use invite::{INVITE_ID_INFO, INVITE_ID_LEN, INVITE_KEK_INFO, INVITE_SECRET_LEN, InviteSecret};
 pub use kdf::{
     AUTH_INFO, KEK_INFO, RECOVERY_AUTH_INFO, RECOVERY_KEK_INFO, derive_password_master,

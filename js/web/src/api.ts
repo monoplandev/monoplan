@@ -188,6 +188,26 @@ export interface Member {
   added_at: number;
 }
 
+/** One stored attachment blob as the server records it
+ *  (`spec/attachments.md` §Routes). `bytes` is the sealed size. */
+export interface StoredFile {
+  id: string;
+  bytes: number;
+  created_at: number;
+  /** Set once tombstoned; purged 30 days later unless restored. */
+  deleted_at?: number | null;
+}
+
+/** `GET /api/docs/:id/files`. The pooled `used_bytes` / `limit_bytes`
+ *  come to the doc's owner only, which is also how a client learns it
+ *  is the owner here. */
+export interface FilesList {
+  doc_bytes: number;
+  used_bytes?: number | null;
+  limit_bytes?: number | null;
+  files: StoredFile[];
+}
+
 export interface ApiErrorBody {
   code: string;
   message: string;
@@ -420,6 +440,55 @@ export const api = {
     );
   },
 
+  // ---- attachments (`spec/attachments.md` §Routes) ----
+
+  /** Store a sealed blob under a client-chosen id. 409 when the id is
+   *  already there (a retry of the caller's own upload: success), 413
+   *  over the size cap, 507 `quota` when the doc owner's allowance is
+   *  full. */
+  async putFile(docId: string, fileId: string, body: Uint8Array): Promise<void> {
+    await send(filePath(docId, fileId), {
+      method: "PUT",
+      body,
+      contentType: "application/octet-stream",
+    });
+  },
+
+  /** The sealed blob. 404 when the server has no such file, 410 when it
+   *  is tombstoned (`restoreFile` brings it back inside the grace
+   *  period). */
+  async getFile(docId: string, fileId: string): Promise<Uint8Array> {
+    const res = await send(filePath(docId, fileId), {
+      method: "GET",
+      accept: "application/octet-stream",
+    });
+    return new Uint8Array(await res.arrayBuffer());
+  },
+
+  /** Tombstone a blob (any member). Repeating it keeps the first stamp;
+   *  404 when the server has no such file. */
+  async deleteFile(docId: string, fileId: string): Promise<void> {
+    await del<unknown>(filePath(docId, fileId));
+  },
+
+  /** Clear a tombstone. A no-op on a live file; 404 once purged, 507
+   *  `quota` when the bytes no longer fit. */
+  async restoreFile(docId: string, fileId: string): Promise<void> {
+    await post<unknown>(`${filePath(docId, fileId)}/restore`, {});
+  },
+
+  /** Duplicate a blob into another doc the caller is a member of, under
+   *  the same id, server side. 409 when the target already has the id,
+   *  410 when the source is tombstoned, 507 `quota` for the target's
+   *  owner. */
+  async copyFile(docId: string, fileId: string, toDocId: string): Promise<void> {
+    await post<unknown>(`${filePath(docId, fileId)}/copy`, { to_doc_id: toDocId });
+  },
+
+  async listFiles(docId: string): Promise<FilesList> {
+    return get(`/api/docs/${encodeURIComponent(docId)}/files`);
+  },
+
   async renameDevice(deviceId: string, name: string): Promise<void> {
     await patch<unknown>(`/api/devices/${encodeURIComponent(deviceId)}`, { name });
   },
@@ -448,10 +517,31 @@ async function del<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+function filePath(docId: string, fileId: string): string {
+  return `/api/docs/${encodeURIComponent(docId)}/files/${encodeURIComponent(fileId)}`;
+}
+
 async function request<T>(
   path: string,
   init: { method: string; body?: string },
 ): Promise<T> {
+  const res = await send(path, {
+    method: init.method,
+    body: init.body,
+    contentType: init.body !== undefined ? JSON_CT : undefined,
+  });
+  const text = await res.text();
+  if (text.length === 0) return undefined as T;
+  return decodeBody<T>(text);
+}
+
+/** One request; resolves with the response when it is 2xx and throws an
+ *  `ApiError` otherwise (error bodies are JSON on every route, the
+ *  attachment ones included). */
+async function send(
+  path: string,
+  init: { method: string; body?: string | Uint8Array; contentType?: string; accept?: string },
+): Promise<Response> {
   const requestId = newRequestId();
   const res = await fetch(path, {
     method: init.method,
@@ -460,30 +550,27 @@ async function request<T>(
     // accidental `'omit'` would silently break logged-in calls.
     credentials: "same-origin",
     headers: {
-      ...(init.body !== undefined ? { "Content-Type": JSON_CT } : {}),
-      Accept: JSON_CT,
+      ...(init.contentType !== undefined ? { "Content-Type": init.contentType } : {}),
+      Accept: init.accept ?? JSON_CT,
       [REQUEST_ID_HEADER]: requestId,
     },
-    body: init.body,
+    body: init.body as BodyInit | undefined,
   });
+  if (res.ok) return res;
   const echoedRequestId = res.headers.get(REQUEST_ID_HEADER) ?? requestId;
   const text = await res.text();
-  if (!res.ok) {
-    let err: ApiErrorBody | null = null;
-    try {
-      err = JSON.parse(text) as ApiErrorBody;
-    } catch {
-      // body wasn't JSON — surface a generic error
-    }
-    throw new ApiError(
-      res.status,
-      err?.code ?? "http_error",
-      echoedRequestId,
-      err?.message ?? `${res.status} ${res.statusText}`,
-    );
+  let err: ApiErrorBody | null = null;
+  try {
+    err = JSON.parse(text) as ApiErrorBody;
+  } catch {
+    // body wasn't JSON — surface a generic error
   }
-  if (text.length === 0) return undefined as T;
-  return decodeBody<T>(text);
+  throw new ApiError(
+    res.status,
+    err?.code ?? "http_error",
+    echoedRequestId,
+    err?.message ?? `${res.status} ${res.statusText}`,
+  );
 }
 
 function newRequestId(): string {

@@ -3377,6 +3377,48 @@ impl Doc {
         Ok(forgotten)
     }
 
+    /// The sweep's doc half (`spec/attachments.md` "Garbage"): mark
+    /// for purge every live entry whose owner item is not in the doc
+    /// (one device attached while another hard-deleted the item) and
+    /// whose `created_at` is before `created_before` (unix millis; the
+    /// host passes a day ago, so an entry whose item is still on its
+    /// way is left). The ordinary purge then takes their blobs. A
+    /// maintenance commit, never an undo step, and no event: nothing
+    /// showed these. Returns how many entries it marked.
+    pub fn mark_ownerless_files(&self, created_before: i64) -> Result<usize, DocError> {
+        let files = self.files_map();
+        let now = now_millis();
+        let mut marked = 0;
+        for mut entry in self.file_entries() {
+            if entry.to_purge.is_some()
+                || entry.file.created_at >= created_before
+                || self.find_item(&entry.item).is_ok()
+            {
+                continue;
+            }
+            entry.to_purge = Some(now);
+            files.insert(&entry.file.id, entry.to_loro_value())?;
+            marked += 1;
+        }
+        if marked > 0 {
+            self.inner
+                .commit_with(CommitOptions::new().origin(SWEEP_ORIGIN));
+            self.rebuild_file_index();
+        }
+        Ok(marked)
+    }
+
+    /// Every id the `files` container holds, in id order: live entries,
+    /// marked ones, and ones this build cannot read (a newer shape).
+    /// What the sweep subtracts from the server's rows to find the
+    /// blobs no entry names, so an entry it does not understand still
+    /// keeps its blob.
+    pub fn stored_file_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.files_map().keys().map(|k| k.to_string()).collect();
+        ids.sort();
+        ids
+    }
+
     /// The key an attachment's blob is sealed under, for the host to
     /// open what it downloads. `None` for an id with no live
     /// well-formed entry.
@@ -12579,6 +12621,55 @@ mod tests {
 
     fn file_names_sorted(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn files_sweep_marks_entries_whose_item_is_gone() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let keep = a.add_item(LIST_INBOX, "keep").unwrap();
+        let gone = a.add_item(LIST_INBOX, "gone").unwrap();
+        let (kept, late) = (file_id(1), file_id(2));
+        a.attach_file(&keep, &kept, "kept.txt", "", 1, &[1; 32])
+            .unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+
+        // One device attaches while the other hard-deletes the item.
+        a.attach_file(&gone, &late, "late.txt", "", 2, &[2; 32])
+            .unwrap();
+        b.set_item_binned(&gone, true).unwrap();
+        b.delete_binned(&gone).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        a.apply_remote(&dek, &fb).unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(a.get_item(&gone).is_none());
+        assert!(a.files_to_purge().is_empty());
+        assert_eq!(a.stored_file_ids(), vec![kept.clone(), late.clone()]);
+        let _ = a.drain_events();
+
+        // Too young to judge: its item may still be on its way.
+        assert_eq!(a.mark_ownerless_files(0).unwrap(), 0);
+        assert!(a.files_to_purge().is_empty());
+
+        let steps = a.undo_count();
+        assert_eq!(a.mark_ownerless_files(i64::MAX).unwrap(), 1);
+        assert_eq!(a.files_to_purge(), vec![late.clone()]);
+        assert_eq!(a.file_key(&late), None);
+        assert_eq!(file_names(&a, &keep), vec!["kept.txt"]);
+        assert!(a.drain_events().is_empty());
+        // Idempotent, and not an undo step.
+        assert_eq!(a.mark_ownerless_files(i64::MAX).unwrap(), 0);
+        assert_eq!(a.undo_count(), steps);
+
+        // The mark syncs, and the purge ends it like any other.
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert_eq!(b.files_to_purge(), vec![late.clone()]);
+        assert_eq!(b.forget_files(&[&late]).unwrap(), 1);
+        assert_eq!(b.stored_file_ids(), vec![kept]);
     }
 
     #[test]
