@@ -75,7 +75,7 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - ui idea - you should probably be able to click on the first empty slot of a list to add an item?
 - Consider SVG emojis that fit the theme
 - foreign keyboard shortcuts?
-- indexeddb smoke tests? do we have an in-mem storage adapter? via playwright?
+- browser smoke tests? do we have an in-mem storage adapter? via playwright?
 - dependency/dependent links? e.g. "blocked by", "solved by", "duplicate of"
 - show keyboard shortcuts when hovered over an item somehow?
 - cancelled status (child of done?!)
@@ -106,7 +106,6 @@ signature actually yields an owned copy, not another view. Cross-ref: `spec/loca
 - audit of anything ever-growing garbage in data model
 - automate sweeper function
 - perma deleting archived lists + recovering orphans
-- can't directly add emojis opening up the macos emoji picker through the emoji interface into title
 - Mem profiling web app (and maybe hybrid mac app)
 - consider optimistic UI when looking at multi-tab/after hybrid app
 - figure out safari scroll state issue - autoscroll up/down while dragging to top/bottom is not super reliable - and sometimes the scroll gets stuck esp. on first open it seems?

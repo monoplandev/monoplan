@@ -24,6 +24,7 @@ import { SegmentedControl } from "@kobalte/core/segmented-control";
 import { Switch } from "@kobalte/core/switch";
 import { Tooltip } from "@kobalte/core/tooltip";
 import archiveSvg from "./icons/archive.svg?raw";
+import arrowRightSvg from "./icons/arrow-right.svg?raw";
 import calendarSvg from "./icons/calendar.svg?raw";
 import personSvg from "./icons/person.svg?raw";
 import cardStackSvg from "./icons/card-stack.svg?raw";
@@ -104,7 +105,7 @@ import {
   type CaptureHandle,
   type NewItemTarget,
 } from "./TaskDialog.tsx";
-import { type DayRange, Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
+import { type DayRange, type TodayPlace, Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
 import type { Assignment } from "./AssigneeField.tsx";
@@ -866,6 +867,9 @@ export function Workspace(props: {
   // The agenda's days on screen, shaded on the mini calendar; null
   // while it is not open (the view clears it as it goes).
   const [agendaRange, setAgendaRange] = createSignal<DayRange | null>(null);
+  // Where Today is against the agenda's pane: the header's "Today" points
+  // there, and is disabled while it is on screen.
+  const [todayPlace, setTodayPlace] = createSignal<TodayPlace>("here");
   createEffect(() => {
     if (view().kind !== "upcoming") setAgendaReach(null);
   });
@@ -3993,18 +3997,24 @@ export function Workspace(props: {
               </Tooltip>
             </Show>
             {/* The calendar's "Today": back to where the view opens
-                (Overdue's header, else Today's), as the Mac toolbar's. */}
+                (Overdue's header, else Today's), as the Mac toolbar's.
+                Its arrow points the way there; disabled while Today is
+                on screen. */}
             <Show when={view().kind === "upcoming"}>
               <button
                 type="button"
-                class="icon-button header-text-button"
+                class="icon-button header-text-button today-button"
                 tabIndex={-1}
+                disabled={todayPlace() === "here"}
+                data-place={todayPlace()}
+                data-layout={agendaMode()}
                 onClick={() => {
                   upcomingHandle?.scrollToToday();
                   upcomingHandle?.focus();
                 }}
               >
                 {m().calendar.today}
+                <span class="today-button-arrow" aria-hidden="true" innerHTML={arrowRightSvg} />
               </button>
             </Show>
             {/* The calendar merges every doc; the Done view's filter menu
@@ -4265,6 +4275,7 @@ export function Workspace(props: {
             onDraftInput={setDraftText}
             onDraftSettle={settleAgendaDraft}
             onVisibleRange={setAgendaRange}
+            onTodayPlace={setTodayPlace}
           />
           )}
           </Show>

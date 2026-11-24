@@ -966,6 +966,37 @@ body {
   font-size: 13px;
 }
 
+/* The calendar's "Today" arrow: the way back to Today, down when it is
+   below the pane, up when above (left / right in agenda columns). */
+.today-button {
+  gap: 4px;
+}
+
+.today-button-arrow {
+  display: inline-flex;
+}
+
+/* On Today: no arrow, its room kept so the header does not shift. */
+.today-button[data-place="here"] .today-button-arrow {
+  visibility: hidden;
+}
+
+.today-button[data-place="after"] .today-button-arrow svg {
+  transform: rotate(90deg);
+}
+
+.today-button[data-place="before"] .today-button-arrow svg {
+  transform: rotate(-90deg);
+}
+
+.today-button[data-layout="columns"][data-place="after"] .today-button-arrow svg {
+  transform: none;
+}
+
+.today-button[data-layout="columns"][data-place="before"] .today-button-arrow svg {
+  transform: rotate(180deg);
+}
+
 .icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);

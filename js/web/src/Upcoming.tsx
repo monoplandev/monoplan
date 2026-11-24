@@ -143,6 +143,11 @@ export interface DayRange {
   to: string;
 }
 
+/** Where the view's opening place (Overdue, else Today: what the
+ *  header's "Today" scrolls back to) sits against the pane: on screen,
+ *  or off it before (above; left in columns) or after. */
+export type TodayPlace = "here" | "before" | "after";
+
 /** On screen by less than this (px) a day does not count as shown: a
  *  sliver of a day's end at the top, or of its header at the bottom,
  *  would flick the range at every boundary. */
@@ -224,6 +229,9 @@ export function Upcoming(props: {
   /** The days on screen, first and last (`YYYY-MM-DD`), when they
    *  change; null on leaving. For the mini calendar's shading. */
   onVisibleRange?: (range: DayRange | null) => void;
+  /** Where Today sits against the pane, when it changes (the header's
+   *  "Today" points at it, and greys out while it is on screen). */
+  onTodayPlace?: (place: TodayPlace) => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -600,12 +608,43 @@ export function Upcoming(props: {
     lastRange = sig;
     props.onVisibleRange(range);
   };
+  // Today's place, read off the DOM with the range: its section's box
+  // against the pane, else (not drawn) its index against the drawn days.
+  let lastPlace: TodayPlace | null = null;
+  const publishTodayPlace = () => {
+    if (!props.onTodayPlace || !hostEl?.isConnected) return;
+    const i = anchorIndex();
+    const g = props.groups[i];
+    let place: TodayPlace = "here";
+    if (g) {
+      const el = hostEl.querySelector<HTMLElement>(
+        `section[data-group="${CSS.escape(g.key)}"]`,
+      );
+      if (el) {
+        const box = hostEl.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        const lo = cols ? box.left : box.top;
+        const hi = cols ? box.right : box.bottom;
+        const start = cols ? r.left : r.top;
+        const end = cols ? r.right : r.bottom;
+        const min = Math.min(RANGE_MIN_SHOWN, end - start);
+        if (end - lo < min) place = "before";
+        else if (hi - start < min) place = "after";
+      } else {
+        place = i < span().start ? "before" : "after";
+      }
+    }
+    if (place === lastPlace) return;
+    lastPlace = place;
+    props.onTodayPlace(place);
+  };
   let rangeFrame = 0;
   const scheduleRange = () => {
     if (rangeFrame) return;
     rangeFrame = requestAnimationFrame(() => {
       rangeFrame = 0;
       publishRange();
+      publishTodayPlace();
     });
   };
   createEffect(() => {
