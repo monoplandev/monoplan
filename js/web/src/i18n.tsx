@@ -108,8 +108,8 @@ export type Messages = {
     continue: string;
     /** Pre-release banner shown above both sign-in and sign-up. The link
      *  text is rendered as an anchor to the mailing-list signup. */
-    prereleaseNotice: string;
-    prereleaseLink: string;
+    welcome: string;
+    skip: string;
   };
   nav: {
     inbox: string;
@@ -711,10 +711,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       recoverySaved: "He anotado estas 12 palabras",
       copied: "Copiado",
       continue: "Continuar",
-      prereleaseNotice:
-        "Esta es una versión preliminar. Los datos se borrarán con regularidad.",
-      prereleaseLink:
-        "Suscríbete a nuestra lista de correo para saber cuándo se lance Monoplan.",
+      welcome:
+        "Hola, te damos la bienvenida a Monoplan. Estás probando una versión alfa. Todos los datos se borran una vez por semana. Echa un vistazo con libertad.",
+      skip: "Omitir",
     },
     nav: {
       inbox: "Bandeja de entrada",
@@ -1131,10 +1130,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       recoverySaved: "I have written down these 12 words",
       copied: "Copied",
       continue: "Continue",
-      prereleaseNotice:
-        "This is a pre-release build. Data will be regularly deleted.",
-      prereleaseLink:
-        "Sign up to the mailing list to get notified when Monoplan releases.",
+      welcome:
+        "Hi, welcome to Monoplan. You're trying an alpha build. All data is deleted once a week. Feel free to look around.",
+      skip: "Skip",
     },
     nav: {
       inbox: "Inbox",

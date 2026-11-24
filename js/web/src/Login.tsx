@@ -78,13 +78,10 @@ interface AdoptedDoc {
   dek: Dek;
 }
 
-/** Illustration shown as the left half of the auth dialog on wide
- *  screens; a header band above the form on narrow viewports (see
- *  `.auth-dialog-art`). */
-const AUTH_ART_URL = "/monoplan-logo.png";
-
-/** Mailing-list signup linked from the pre-release notice. */
-const MAILING_LIST_URL = "https://monoplan.app/#mailing-list";
+/** Brand marks heading the auth screen, served from `public/`. The
+ *  wordmark is dark ink on transparent; dark mode inverts it in CSS. */
+const AUTH_SPHERE_URL = "/monoplan-sphere.png";
+const AUTH_WORDMARK_URL = "/monoplan-logo.png";
 
 function defaultDeviceName(): string {
   return `web-${typeof navigator !== "undefined" ? navigator.platform : "unknown"}`;
@@ -172,15 +169,6 @@ function AuthForm(props: {
 
   return (
     <form class="auth-form" onSubmit={submit}>
-      <p class="auth-prerelease-notice" role="note">
-        <WarningIcon />
-        <span>
-          {m().auth.prereleaseNotice}{" "}
-          <a href={MAILING_LIST_URL} target="_blank" rel="noopener noreferrer">
-            {m().auth.prereleaseLink}
-          </a>
-        </span>
-      </p>
       <Dialog.Title class="auth-dialog-title">{title()}</Dialog.Title>
       <label>
         {m().auth.email}
@@ -305,9 +293,10 @@ function RecoveryCodePane(props: { code: string; onContinue: () => void }) {
   );
 }
 
-/** Controlled Kobalte Dialog wrapping the auth form. Mirrors the shape
- *  of `Settings` — App owns the open signal, the dialog owns its own
- *  portal/overlay/close-button. ESC and overlay click both close. */
+/** The auth dialog: a controlled Kobalte Dialog on the brand ground,
+ *  one column (marks, welcome note, form). "Skip" at the bottom right
+ *  closes it, as do ESC and an overlay click; the owner holds the open
+ *  signal. */
 export function AuthDialog(props: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
@@ -338,71 +327,40 @@ export function AuthDialog(props: {
       <Dialog.Portal>
         <Dialog.Overlay class="dialog-overlay" />
         <div class="dialog-positioner">
-          <Dialog.Content class="auth-dialog" onCloseAutoFocus={closeToItems}>
-            <Show when={!pending()}>
-              <Dialog.CloseButton class="auth-dialog-close" aria-label={m().common.close}>
-                <CloseIcon />
-              </Dialog.CloseButton>
-            </Show>
-            <div class="auth-dialog-art" aria-hidden="true">
-              <img src={AUTH_ART_URL} alt="" decoding="async" />
+        <Dialog.Content class="auth-screen" onCloseAutoFocus={closeToItems}>
+          <div class="auth-screen-body">
+            <div class="auth-screen-brand">
+              <img class="auth-screen-sphere" src={AUTH_SPHERE_URL} alt="" decoding="async" />
+              <img
+                class="auth-screen-wordmark"
+                src={AUTH_WORDMARK_URL}
+                alt="Monoplan"
+                decoding="async"
+              />
             </div>
             <Show
               when={pending()}
               fallback={
-                <AuthForm
-                  initialMode={props.initialMode}
-                  onSession={props.onSession}
-                  onRecoveryCode={(session, code) => setPending({ session, code })}
-                />
+                <>
+                  <p class="auth-screen-welcome">{m().auth.welcome}</p>
+                  <AuthForm
+                    initialMode={props.initialMode}
+                    onSession={props.onSession}
+                    onRecoveryCode={(session, code) => setPending({ session, code })}
+                  />
+                </>
               }
             >
               {(p) => <RecoveryCodePane code={p().code} onContinue={finish} />}
             </Show>
-          </Dialog.Content>
+          </div>
+          <Show when={!pending()}>
+            <Dialog.CloseButton class="auth-screen-skip">{m().auth.skip}</Dialog.CloseButton>
+          </Show>
+        </Dialog.Content>
         </div>
       </Dialog.Portal>
     </Dialog>
-  );
-}
-
-function WarningIcon() {
-  return (
-    <svg
-      class="auth-prerelease-icon"
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
   );
 }
 
