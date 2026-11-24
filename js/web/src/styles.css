@@ -281,6 +281,24 @@ body {
 .mini-calendar .calendar-cell {
   padding: 1px 0;
 }
+/* The agenda's days on screen: one band across the cells, rounded at
+   its ends and where a week row breaks it. Separate borders so the
+   cells take a radius (collapse ignores it; no borders, same layout). */
+.mini-calendar .calendar-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.mini-calendar .calendar-cell[data-in-range] {
+  background: color-mix(in srgb, var(--link) 9%, transparent);
+}
+.mini-calendar .calendar-cell[data-in-range]:is([data-range-start], :first-child) {
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+}
+.mini-calendar .calendar-cell[data-in-range]:is([data-range-end], :last-child) {
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
 .mini-calendar .calendar-cell-trigger {
   width: 100%;
   max-width: 26px;
@@ -4530,10 +4548,12 @@ input.task-check:hover {
 }
 
 /* A related day marked without selecting it (the mini calendar's
-   shown item's date): the fill alone, so the day keeps its own text
-   (today's red included). Before preview so a preview wins. */
+   shown item's date): a 1px ring alone, so the day keeps its own text
+   (today's red included) and the range band shows through. Before
+   preview so a preview wins. */
 .calendar-cell-trigger[data-marked] {
-  background: color-mix(in srgb, var(--link) 18%, var(--bg));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, color-mix(in srgb, var(--link) 18%, var(--bg)), var(--link) 25%);
 }
 
 /* A soft selection previews a suggestion without changing the saved date. */

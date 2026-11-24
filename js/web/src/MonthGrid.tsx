@@ -28,6 +28,10 @@ export function MonthGrid(props: {
   /** `YYYY-MM-DD` of a day to mark as related without selecting it
    *  (the mini calendar's: the shown item's date), or null. */
   markedDay?: string | null;
+  /** Days to shade as one band, `YYYY-MM-DD` inclusive (the mini
+   *  calendar's: the agenda's days on screen), or null. While set,
+   *  today's week is not banded. */
+  range?: { from: string; to: string } | null;
   /** Always draw six weeks (the extra filled from the next month), so
    *  the grid keeps one height as the months page by. */
   fixedWeeks?: boolean;
@@ -76,6 +80,16 @@ export function MonthGrid(props: {
   const isThisMonth = (d: Date) => {
     const now = new Date(nowMs());
     return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  };
+  // Day keys order as strings. Start and end round the band's ends.
+  const rangeAttrs = (stamp: string) => {
+    const r = props.range;
+    if (!r || stamp < r.from || stamp > r.to) return {};
+    return {
+      "data-in-range": "",
+      "data-range-start": stamp === r.from ? "" : undefined,
+      "data-range-end": stamp === r.to ? "" : undefined,
+    };
   };
   const weekdayHeading = (d: Date) =>
     Array.from(weekdayFmt().format(d)).slice(0, 2).join("");
@@ -174,7 +188,10 @@ export function MonthGrid(props: {
               <For each={cal.weeks}>
                 {(week) => (
                   <tr
+                    // Today's week band gives way to a range band: the
+                    // two would read as one.
                     data-current-week={
+                      !props.range &&
                       week.some((day) => localDateStamp(day) === today())
                         ? ""
                         : undefined
@@ -182,7 +199,10 @@ export function MonthGrid(props: {
                   >
                     <For each={week}>
                       {(day) => (
-                        <Calendar.Cell class="calendar-cell">
+                        <Calendar.Cell
+                          class="calendar-cell"
+                          {...rangeAttrs(localDateStamp(day))}
+                        >
                           <Calendar.CellTrigger
                             day={day}
                             class="calendar-cell-trigger"

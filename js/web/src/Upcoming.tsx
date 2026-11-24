@@ -43,6 +43,11 @@
 // drawn beforehand, and the window holds still until it lands; a far day
 // is drawn next to the pane, the days between left out until then.
 //
+// The days on screen go out to the Workspace (`onVisibleRange`) for
+// the mini calendar to shade: the first and last day section shown by
+// more than a sliver, read a frame after every scroll, smooth ones
+// included (one run of a far flight's two at a time).
+//
 // The days gone by (a year of them, `AGENDA_PAST_DAYS`: events that
 // happened, items settled on the day they were planned for) sit above,
 // as on the Mac and iOS Calendar. The view opens scrolled so Overdue's
@@ -132,6 +137,17 @@ import {
   type ItemView,
 } from "./sync/store.ts";
 
+/** The first and last day on screen, as `YYYY-MM-DD`. */
+export interface DayRange {
+  from: string;
+  to: string;
+}
+
+/** On screen by less than this (px) a day does not count as shown: a
+ *  sliver of a day's end at the top, or of its header at the bottom,
+ *  would flick the range at every boundary. */
+const RANGE_MIN_SHOWN = 24;
+
 /** The slice of `DndImperative` the Workspace drives on this view. */
 export interface UpcomingImperative {
   /** Move keyboard focus to the agenda so arrow keys act on it. Never
@@ -205,6 +221,9 @@ export function Upcoming(props: {
   /** Days down the page (the default) or a column a day. Read once: the
    *  Workspace remounts the view when the mode changes. */
   layout?: "list" | "columns";
+  /** The days on screen, first and last (`YYYY-MM-DD`), when they
+   *  change; null on leaving. For the mini calendar's shading. */
+  onVisibleRange?: (range: DayRange | null) => void;
 }) {
   const { m, locale } = useAppI18n();
 
@@ -535,8 +554,74 @@ export function Upcoming(props: {
     });
   };
   onCleanup(() => cancelAnimationFrame(frame));
+
+  // The days on screen, for the mini calendar: the first and last drawn
+  // day section shown by at least `RANGE_MIN_SHOWN` (all of a shorter
+  // one), Overdue skipped. Read off the DOM a frame after a scroll, a
+  // resize or a change to the rows, flights included. A far flight draws
+  // its destination as a second run straight after the pane's days (the
+  // days between left out), so only the run of the first day counted is
+  // read: the range steps from one run to the other as the seam passes,
+  // never spanning the days skipped. Published only when it changes.
+  let lastRange = "";
+  const groupIndex = createMemo(
+    () => new Map(props.groups.map((g, i) => [g.key, i] as const)),
+  );
+  const publishRange = () => {
+    if (!props.onVisibleRange || !hostEl?.isConnected) return;
+    const rs = runs();
+    let run: Span | null = null;
+    const box = hostEl.getBoundingClientRect();
+    const lo = cols ? box.left : box.top;
+    const hi = cols ? box.right : box.bottom;
+    let from: string | null = null;
+    let to: string | null = null;
+    for (const el of hostEl.querySelectorAll<HTMLElement>("section[data-group]")) {
+      const key = el.dataset.group!;
+      if (key === OVERDUE_KEY) continue;
+      const r = el.getBoundingClientRect();
+      const start = cols ? r.left : r.top;
+      const end = cols ? r.right : r.bottom;
+      if (end <= lo) continue;
+      if (start >= hi) break;
+      const shown = Math.min(end, hi) - Math.max(start, lo);
+      if (shown < Math.min(RANGE_MIN_SHOWN, end - start)) continue;
+      if (rs.length > 1) {
+        const i = groupIndex().get(key) ?? -1;
+        run ??= rs.find((r) => i >= r.start && i <= r.end) ?? null;
+        if (run && (i < run.start || i > run.end)) break;
+      }
+      from ??= key;
+      to = key;
+    }
+    const range = from && to ? { from, to } : null;
+    const sig = range ? `${range.from}/${range.to}` : "";
+    if (sig === lastRange) return;
+    lastRange = sig;
+    props.onVisibleRange(range);
+  };
+  let rangeFrame = 0;
+  const scheduleRange = () => {
+    if (rangeFrame) return;
+    rangeFrame = requestAnimationFrame(() => {
+      rangeFrame = 0;
+      publishRange();
+    });
+  };
+  createEffect(() => {
+    void props.groups;
+    scheduleRange();
+  });
+  onCleanup(() => {
+    cancelAnimationFrame(rangeFrame);
+    if (lastRange) props.onVisibleRange?.(null);
+  });
+
   onMount(() => {
-    const ro = new ResizeObserver(scheduleWindow);
+    const ro = new ResizeObserver(() => {
+      scheduleWindow();
+      scheduleRange();
+    });
     ro.observe(hostEl);
     onCleanup(() => ro.disconnect());
   });
@@ -610,6 +695,7 @@ export function Upcoming(props: {
       setWindow(keep, null);
     }
     updateWindow();
+    scheduleRange();
   };
   // `scrollend` is the signal where there is one; a quiet spell is the
   // fallback, and covers a scroll that had nowhere to go.
@@ -742,6 +828,7 @@ export function Upcoming(props: {
     if (flying) land();
   };
   const onScroll = () => {
+    scheduleRange();
     if (flying) {
       armLanding();
       return;

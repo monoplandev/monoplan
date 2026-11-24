@@ -481,9 +481,22 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.
   The item the task surface shows (entered, or followed in the side
-  pane) has its `when` day marked, a tinted cell, not a selection
+  pane) has its `when` day marked, a 1px ring, not a selection
   (2026-11-24); a newly marked day in another month pages the grid
   there, and clearing the mark leaves the month as it is.
+  While the agenda is open, the days on screen are shaded as one band
+  (2026-11-24, `Upcoming`'s `onVisibleRange`): the first and last day
+  section shown by at least 24px (all of a shorter one), Overdue
+  skipped, empty days hidden between them included. Read a frame after
+  a scroll, resize or row change, through a Today / mini calendar
+  flight too; mid-flight only the run of the first day counted is read,
+  so the band steps across the far run's seam rather than spanning the
+  days left out. The grid shows the band's first day's month, paging
+  whenever that day changes and lands in another month (a range across
+  two months shows the earlier), so a month paged to by hand holds
+  until the agenda's first day on screen changes. Today's week band
+  is dropped while the range band shows: one band at a time. No scroll
+  snapping (variable-height days, the windowing's re-layouts).
 - **Columns** (web, built 2026-11-23; decisions in
   `agenda-columns-plan.md`): the segmented control that stands in for the
   view's title picks "List" (the days down the page, everything above) or

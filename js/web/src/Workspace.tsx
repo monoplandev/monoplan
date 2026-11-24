@@ -104,7 +104,7 @@ import {
   type CaptureHandle,
   type NewItemTarget,
 } from "./TaskDialog.tsx";
-import { Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
+import { type DayRange, Upcoming, type UpcomingImperative } from "./Upcoming.tsx";
 import { useSession } from "./SessionContext.tsx";
 import { createMemberDirectory } from "./sync/members.ts";
 import type { Assignment } from "./AssigneeField.tsx";
@@ -863,6 +863,9 @@ export function Workspace(props: {
   // A day the sidebar's mini calendar jumped to, so the agenda's empty
   // days reach it (`fillEmptyDays`); dropped when the agenda is left.
   const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
+  // The agenda's days on screen, shaded on the mini calendar; null
+  // while it is not open (the view clears it as it goes).
+  const [agendaRange, setAgendaRange] = createSignal<DayRange | null>(null);
   createEffect(() => {
     if (view().kind !== "upcoming") setAgendaReach(null);
   });
@@ -3456,7 +3459,11 @@ export function Workspace(props: {
         }
         header={
           <Show when={miniCalendarShown()}>
-            <MiniCalendar onPickDay={showAgendaDay} markedDay={shownItemDay()} />
+            <MiniCalendar
+              onPickDay={showAgendaDay}
+              markedDay={shownItemDay()}
+              range={agendaRange()}
+            />
           </Show>
         }
       />
@@ -4257,6 +4264,7 @@ export function Workspace(props: {
             draft={agendaDraft}
             onDraftInput={setDraftText}
             onDraftSettle={settleAgendaDraft}
+            onVisibleRange={setAgendaRange}
           />
           )}
           </Show>
