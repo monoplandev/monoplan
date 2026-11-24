@@ -1,8 +1,8 @@
 # Attachments
 
-Status: **decided 2026-11-24. Phase 1 (server) built the same day; the rest is
-plan.** What the server does that this text did not first say is under
-"As built".
+Status: **decided 2026-11-24. Phases 1 (server) and 2 (core) built the same
+day; the rest is plan.** What they do that this text did not first say is
+under "As built".
 
 Files attached to items. The bytes are online-only: they live on the server as
 encrypted blobs and are fetched on demand. The doc carries only the metadata
@@ -43,6 +43,7 @@ Each entry is one **atomic plain map** (a single LWW value, as `place`):
 | `key` | bytes (32) | the file key (below) |
 | `created_at` | i64 | unix millis |
 | `created_by` | string? | account id, on shared workspaces; self-asserted like the item register |
+| `to_purge` | i64? | unix millis the attachment was removed; present ≡ **marked for purge** (below) |
 
 A file has **one owner item**, named by the entry. There is no per-item list
 of file ids: an item's attachments are the entries whose `item` is its id, in
@@ -51,8 +52,23 @@ no mergeable child to create on first attach, and no item-side id that can
 point at a missing entry. The cost is that a file cannot be attached to two
 items; attach it twice.
 
-Rename replaces the entry whole. Nothing else about an entry changes after it
-is written.
+Rename replaces the entry whole, and so does the purge mark. Nothing else
+about an entry changes after it is written.
+
+### Marked for purge
+
+Removing an attachment does not delete its entry. It writes `to_purge` on it
+(decided 2026-11-24, replacing delete-then-`DELETE`): the entry leaves every
+view at once and stays in the doc as the durable instruction to tombstone its
+blob. The instruction syncs like any other change, so a removal made offline
+is acted on by whichever member's client is next online, the removing device
+included, instead of waiting for the owner's sweep to notice a blob no entry
+names.
+
+An entry therefore has three states: **live**, **marked** (`to_purge` set,
+blob still stored), and **gone** (entry deleted, after the server tombstoned
+the blob). Only a live entry is in `ItemView.files`, has a key to read, or can
+be renamed. A marked entry still holds its id: attaching under it is refused.
 
 Later consumers reference a file by id and never hold bytes or keys
 themselves: a notes image embed (`notes-plan.md`) carries `image: { id, w, h }`
@@ -65,9 +81,12 @@ Each is one commit and one undo step.
 - `attach_file(item_id, file_id, name, mime, size, key)`: writes the entry.
   Called only **after** the upload has succeeded (below).
 - `rename_file(file_id, name)`.
-- `remove_file(file_id)`: deletes the entry. The host then tombstones the blob.
-- **Hard delete** of an item (`delete_binned`, `empty_bin`) deletes its
-  entries in the same commit. The host then tombstones each blob.
+- `remove_file(file_id)`: marks the entry for purge. Undo clears the mark.
+- **Hard delete** of an item (`delete_binned`, `empty_bin`) marks its
+  entries for purge in the same commit.
+- `forget_files(file_ids)`: deletes the entries among them that are still
+  marked, once the server has tombstoned their blobs. Origin `"sweep"`,
+  excluded from undo, no event. `files_to_purge()` lists what is waiting.
 - **Bin keeps.** A binned item keeps its entries and its blobs, so restore
   never loses a file.
 - **Duplicate** does not copy attachments (first pass).
@@ -202,6 +221,15 @@ other devices cannot open.
 user opens the file. Decrypted bytes are held for the session at most and
 never written to the local store.
 
+**Purge.** Any member's client, when online: read `files_to_purge()`,
+`DELETE` each blob, and pass the ids the server answered (2xx, or 404 / 410:
+already gone) to `forget_files`. Run after a local removal or hard delete, and
+on connect once the replica is caught up, which is what picks up a removal
+made offline or on another device. Two devices doing it at once is harmless:
+a repeated `DELETE` keeps the first stamp and `forget_files` skips an entry
+that is already gone. An entry that is live again by then (an undo) is
+skipped too, and its blob comes back through the 410 path below.
+
 **Missing bytes.** A 404 or 410 on an entry the doc still holds renders the
 row as unavailable. On 410 the client calls `restore` and retries: a reference
 that outlived its tombstone (a stale device, a concurrent edit) wins inside
@@ -209,28 +237,33 @@ the grace period.
 
 **Cross-doc move** (`sharing-plan.md` "Cross-doc move") extends the existing
 order: `copy` each file to the target doc, adopt (the export form carries the
-entries, keys included), release, then tombstone the source blobs. A failed
-copy aborts the move before anything is written.
+entries, keys included), release. The release marks the source entries for
+purge, so the source blobs go by the ordinary purge. A failed copy aborts the
+move before anything is written. Adopt replaces a marked entry of the same id
+(the item moving back to a doc it left); the host then finds the id already on
+the server (409 on `copy`) and restores it instead.
 
 ## Garbage
 
 Two ways a blob stops being wanted:
 
-1. **Deliberate.** `remove_file` or a hard delete. The acting client, any
-   member, issues the `DELETE` right after the commit.
-2. **Orphans.** A blob no entry names (an upload whose commit never landed, a
-   deliberate delete whose `DELETE` never arrived), or an entry whose owner
-   item is gone (one device attached while another hard-deleted the item; a
-   client that predates this container did the delete).
+1. **Deliberate.** `remove_file`, a hard delete, or the release half of a
+   cross-doc move. The entry is marked for purge and any member's client
+   finishes it ("Purge" above). Nothing here depends on the sweep.
+2. **Orphans.** A blob no entry names (an upload whose commit never landed;
+   an attach or an adopt that was undone, which deletes the entry outright),
+   or a live entry whose owner item is gone (one device attached while
+   another hard-deleted the item).
 
 Orphans are collected by a **sweep**, run only by the **doc owner's** clients,
 only when the replica is caught up with nothing pending, at most once a day
 per doc:
 
-- Remove entries whose `item` is not in `items` and whose `created_at` is over
-  24 hours old. Commit with origin `"sweep"`, excluded from undo.
+- Mark for purge the live entries whose `item` is not in `items` and whose
+  `created_at` is over 24 hours old. Commit with origin `"sweep"`, excluded
+  from undo. The ordinary purge then takes their blobs.
 - `GET` the file list. Tombstone every row that is not tombstoned, is over
-  24 hours old, and has no entry.
+  24 hours old, and has no entry, live or marked.
 
 The 24 hours covers an upload still on its way to its commit. The 30 days
 covers everything else a sweeping client cannot see: a device that has been
@@ -252,7 +285,7 @@ after the window.
 | Phase | Scope |
 |---|---|
 | 1 | **Built 2026-11-24.** Server: table, blob store interface with the directory backend, the six routes, quota, purge task, doc / account delete cascade; integration tests |
-| 2 | Core: `files` container, mutations, `ItemView.files`, events, hard-delete cleanup, export form, cross-doc adopt / release |
+| 2 | **Built 2026-11-24.** Core: `files` container, mutations, `ItemView.files`, events, hard-delete cleanup, export form, cross-doc adopt / release |
 | 3 | Web: attach, list, open, rename, remove in the task surface; the row count; the owner's sweep |
 | 4 | CLI (`item attach` / `item files`), then the typed api / FFI and the iOS and macOS item surfaces |
 | 5 | Notes images on top (`notes-plan.md` phase 4) |
@@ -286,6 +319,50 @@ tests in `server/tests/files.rs`).
   collects such objects yet.
 - **Bodies are buffered whole** in memory on the way in and out, which the
   25 MiB cap allows.
+
+Phase 2, the core (`core/src/doc.rs`, tests `files_*` beside it).
+
+- **Types.** `ItemFile` is the entry as an item shows it (`id`, `name`,
+  `mime`, `size`, `created_at`, `created_by`; no key, no owner).
+  `ExportFile` is the export form. `size` is `u64` in Rust and an i64 in the
+  doc.
+- **Reads.** `ItemView.files` in `(created_at, id)` order, from a disposable
+  index of the container that is rebuilt whole whenever it changes.
+  `Doc::file_key(file_id)` gives the key, `Doc::file_owner(file_id)` the
+  owner item id. An entry that is malformed, or sits under an id that is not
+  32 lowercase hex characters, reads as absent.
+- **`attach_file`** refuses an id the doc already holds, a key that is not
+  32 bytes, and a name that is empty after trimming, over 255 bytes or
+  holding a control character. `mime` may be empty (unknown) and is at most
+  255 bytes. It stamps `created_at` and, when the doc has an author,
+  `created_by`. The item may be binned.
+- **`rename_file`** to the name it already has is a no-op with no commit.
+- **Removal with the item.** Hard delete and `release_items` (the giving
+  half of a cross-doc move) both mark the items' entries for purge in the
+  same commit. Undoing a release puts the item back and clears the marks.
+- **Undo after the purge finished** (`remove_file`, then `forget_files`,
+  then undo) brings the entry back live. Its blob is tombstoned by then, so
+  the host restores it on the 410.
+- **`file_key` / `file_owner`** answer for live entries only.
+- **Events.** `ItemAdded` carries `files`; `ItemFilesChanged { id, files }`
+  carries the whole list after a change. Remote frames and undo are
+  translated to that one event, not a resync. An entry whose item is not in
+  the doc emits nothing and waits in the index, so it shows if the item
+  arrives later.
+- **Export.** `export_json()` lists `{id, name, mime, size}` per item;
+  `import_json()` ignores it. `export_items()` adds `key` (64 hex
+  characters), `createdAt` and `createdBy`, and `adopt_items()` writes the
+  entries from them, dropping one with no key, malformed fields or an id the
+  doc already holds. `move_items_across_docs` moves entries only: the blob
+  copy before and the tombstone after are the host's.
+- **Fingerprint** covers every well-formed entry, marked ones too: owner,
+  key and purge mark included.
+- **Wasm** (`core/web`): the `itemFilesChanged` event, and `files` on
+  `itemAdded` and on the item JSON. No mutation is bound yet; the web store
+  ignores the event until phase 3.
+- **Left for phase 3:** the purge loop in a host, the sweep's doc half
+  (removing live entries whose item is gone, origin `"sweep"`), and sealing
+  / opening blobs.
 
 ## Open
 

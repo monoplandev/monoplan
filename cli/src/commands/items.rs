@@ -1222,6 +1222,7 @@ mod tests {
             created_by: None,
             assignee: None,
             subtasks: Vec::new(),
+            files: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,

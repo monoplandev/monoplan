@@ -13,7 +13,7 @@
 //! Initial attachment materializes current state explicitly. After that,
 //! consumers receive live deltas or an occasional `FullResync` request.
 
-use crate::doc::{DefaultView, NotesDeltaOp, Place, Subtask, WorkflowState};
+use crate::doc::{DefaultView, ItemFile, NotesDeltaOp, Place, Subtask, WorkflowState};
 
 // `ItemAdded` carries every register and is intrinsically the fat variant;
 // events are pushed to a Vec and drained once, so the size gap is moot.
@@ -47,6 +47,9 @@ pub enum AppEvent {
         assignee: Option<String>,
         /// Subtasks in order; empty when the item has none.
         subtasks: Vec<Subtask>,
+        /// Attachments in order, without their keys; empty when the
+        /// item has none.
+        files: Vec<ItemFile>,
         /// Workflow register state (`spec/data-model.md` "Lifecycle").
         /// Masked by `binned_at` when that is set.
         state: WorkflowState,
@@ -158,6 +161,14 @@ pub enum AppEvent {
     ItemSubtasksChanged {
         id: String,
         subtasks: Vec<Subtask>,
+    },
+    /// Item's attachments changed (`spec/attachments.md`): one attached,
+    /// renamed or removed, here, on another device or by undo. The
+    /// payload is the whole list after the write, in order, without
+    /// keys.
+    ItemFilesChanged {
+        id: String,
+        files: Vec<ItemFile>,
     },
     /// Item's place changed. The payload is the canonical value after
     /// the write, `None` when cleared.

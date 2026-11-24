@@ -301,6 +301,7 @@ mod tests {
             created_by: None,
             assignee: None,
             subtasks: Vec::new(),
+            files: Vec::new(),
             when: None,
             when_zoned: None,
             when_suggested: None,

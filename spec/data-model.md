@@ -22,6 +22,10 @@ compatibility" below; v4 docs must never sync with v1/v2/v3 clients.
   list-by-reference of **encoded scalar FocusRef strings only** (never child
   containers). Its own element order *is* the Focus order. Additive within v2 —
   a focus-unaware client simply never projects it. See `spec/focus.md`.
+- `doc.get_map("files")` — the **attachments** of items (built 2026-11-24):
+  `LoroMap<FileId, entry>`, each entry one atomic plain map that names its
+  owner item and holds the file's name, size and key. Additive within v4. See
+  `spec/attachments.md`.
 
 There is **no document-wide item MovableList**. Reordering one list mutates
 only that list's order container.

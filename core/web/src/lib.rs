@@ -2628,7 +2628,7 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, subtasks? (JSON array, omitted when none), state, lifecycleAt, startedAt?, doneAt?, binnedAt?, when?, whenSuggested?, event?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, subtasks? (JSON array, omitted when none), files? (JSON array, omitted when none), state, lifecycleAt, startedAt?, doneAt?, binnedAt?, when?, whenSuggested?, event?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
@@ -2636,6 +2636,7 @@ impl From<CoreEvent> for ReplicaEvent {
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
 /// - `itemAssigneeChanged` — id, assignee? (undefined = unassigned)
 /// - `itemSubtasksChanged` — id, subtasks (JSON array of `{id, text, done?}`, the whole list in order)
+/// - `itemFilesChanged` — id, files (JSON array of `{id, name, mime, size, createdAt, createdBy?}`, the whole list in order, no keys)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, wall time on this device), whenZone? (the IANA zone it is fixed to; undefined = floating), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
 /// - `itemWhenSuggestedChanged` — id, whenSuggested? (undefined = none pending; same shape as `when`)
 /// - `itemEventChanged` — id, event
@@ -2706,6 +2707,10 @@ pub struct AppEventJs {
     /// Subtasks (`itemAdded` when the item has any, `itemSubtasksChanged`
     /// always) as JSON text of `[{id, text, done?}]`.
     subtasks: Option<String>,
+    /// Attachments (`itemAdded` when the item has any, `itemFilesChanged`
+    /// always) as JSON text of `[{id, name, mime, size, createdAt,
+    /// createdBy?}]`.
+    files: Option<String>,
     /// Reflection stamp: last entry into Done, if any.
     done_at: Option<i64>,
     binned_at: Option<i64>,
@@ -2782,6 +2787,10 @@ impl AppEventJs {
     #[wasm_bindgen(getter, js_name = subtasks)]
     pub fn subtasks(&self) -> Option<String> {
         self.subtasks.clone()
+    }
+    #[wasm_bindgen(getter, js_name = files)]
+    pub fn files(&self) -> Option<String> {
+        self.files.clone()
     }
     #[wasm_bindgen(getter, js_name = doneAt)]
     pub fn done_at(&self) -> Option<i64> {
@@ -2861,6 +2870,10 @@ fn subtasks_json(subtasks: &[monoplan_core::Subtask]) -> String {
     serde_json::to_string(subtasks).unwrap_or_else(|_| "[]".into())
 }
 
+fn files_json(files: &[monoplan_core::ItemFile]) -> String {
+    serde_json::to_string(files).unwrap_or_else(|_| "[]".into())
+}
+
 fn place_json(place: &monoplan_core::Place) -> String {
     serde_json::to_string(place).unwrap_or_else(|_| "{}".into())
 }
@@ -2896,6 +2909,7 @@ impl From<CoreAppEvent> for AppEventJs {
             created_by: None,
             assignee: None,
             subtasks: None,
+            files: None,
             done_at: None,
             binned_at: None,
             archived_at: None,
@@ -2923,6 +2937,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 created_by,
                 assignee,
                 subtasks,
+                files,
                 state,
                 lifecycle_at,
                 started_at,
@@ -2945,6 +2960,7 @@ impl From<CoreAppEvent> for AppEventJs {
                 created_by,
                 assignee,
                 subtasks: (!subtasks.is_empty()).then(|| subtasks_json(&subtasks)),
+                files: (!files.is_empty()).then(|| files_json(&files)),
                 state: Some(state.name()),
                 lifecycle_at: Some(lifecycle_at),
                 started_at,
@@ -2998,6 +3014,12 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemSubtasksChanged",
                 id,
                 subtasks: Some(subtasks_json(&subtasks)),
+                ..blank
+            },
+            CoreAppEvent::ItemFilesChanged { id, files } => AppEventJs {
+                kind: "itemFilesChanged",
+                id,
+                files: Some(files_json(&files)),
                 ..blank
             },
             CoreAppEvent::ItemWhenChanged {
@@ -3226,6 +3248,10 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     if !it.subtasks.is_empty() {
         s.push_str(",\"subtasks\":");
         s.push_str(&subtasks_json(&it.subtasks));
+    }
+    if !it.files.is_empty() {
+        s.push_str(",\"files\":");
+        s.push_str(&files_json(&it.files));
     }
     if let Some(t) = it.done_at {
         s.push_str(&format!(",\"doneAt\":{t}"));

@@ -242,6 +242,182 @@ fn normalize_subtask_text(text: &str) -> Result<String, DocError> {
     Ok(text.to_string())
 }
 
+/// Root container of attachments (`spec/attachments.md`): a `LoroMap`
+/// keyed by file id, each value one atomic plain `LoroValue` map
+/// `{item, name, mime, size, key, created_at, created_by?, to_purge?}`
+/// (the `place` pattern). The entry names its owner item; there is no per-item list
+/// of file ids. Additive within schema v4.
+const ROOT_FILES: &str = "files";
+/// Entry key of the purge mark: the unix millis an attachment was
+/// removed (by itself, or with its item). A marked entry is in no
+/// view; it stays in the doc as the durable instruction to tombstone
+/// its blob, so a removal made offline is acted on by whichever client
+/// is next online instead of waiting for the sweep.
+const KEY_TO_PURGE: &str = "to_purge";
+/// Upper bound on an attachment's name, in bytes.
+pub const MAX_FILE_NAME_BYTES: usize = 255;
+/// Upper bound on an attachment's media type, in bytes.
+pub const MAX_FILE_MIME_BYTES: usize = 255;
+/// Length of a file key: the XChaCha20-Poly1305 key its blob is sealed
+/// under.
+pub const FILE_KEY_LEN: usize = 32;
+
+/// One attachment as its item shows it (`spec/attachments.md`): the
+/// `files` entry without its key and its owner. `name` and `mime` are
+/// what the attaching client wrote: display and open-with only, never
+/// trusted (a host that saves the file sanitises the name itself).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemFile {
+    pub id: String,
+    pub name: String,
+    pub mime: String,
+    /// Plaintext bytes.
+    pub size: u64,
+    pub created_at: i64,
+    /// Account id of whoever attached it, when that client knew it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created_by: Option<String>,
+}
+
+/// An attachment in export form. `export_json` carries `{id, name, mime,
+/// size}` alone: the bytes are not in the dump, so `import_json` ignores
+/// the field. `export_items` (a cross-doc move) carries the rest too,
+/// the key included, which is what lets `adopt_items` write the entry
+/// in the doc the blob was copied to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportFile {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub mime: String,
+    pub size: u64,
+    /// The file key as 64 lowercase hex characters.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub created_by: Option<String>,
+}
+
+/// One whole `files` entry: the view, its owner item and its key.
+struct FileEntry {
+    item: String,
+    file: ItemFile,
+    key: [u8; FILE_KEY_LEN],
+    /// Unix millis the entry was marked for purge: removed as far as
+    /// any view goes, and waiting for a client to tombstone its blob
+    /// and then delete it (`Doc::files_to_purge`). `None` ≡ live.
+    to_purge: Option<i64>,
+}
+
+impl FileEntry {
+    fn to_loro_value(&self) -> LoroValue {
+        let mut m: Vec<(String, LoroValue)> = vec![
+            ("item".into(), self.item.as_str().into()),
+            ("name".into(), self.file.name.as_str().into()),
+            ("mime".into(), self.file.mime.as_str().into()),
+            ("size".into(), (self.file.size as i64).into()),
+            ("key".into(), LoroValue::Binary(self.key.to_vec().into())),
+            (KEY_CREATED_AT.into(), self.file.created_at.into()),
+        ];
+        if let Some(by) = &self.file.created_by {
+            m.push((KEY_CREATED_BY.into(), by.as_str().into()));
+        }
+        if let Some(t) = self.to_purge {
+            m.push((KEY_TO_PURGE.into(), t.into()));
+        }
+        LoroValue::Map(m.into())
+    }
+
+    /// Anything that is not a well-formed entry under a well-formed id
+    /// (a stray write, a newer shape) reads as absent.
+    fn from_loro_value(id: &str, value: &LoroValue) -> Option<FileEntry> {
+        if !is_well_formed_id(id) {
+            return None;
+        }
+        let LoroValue::Map(m) = value else {
+            return None;
+        };
+        let str_of = |k: &str| match m.get(k) {
+            Some(LoroValue::String(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        let int_of = |k: &str| match m.get(k) {
+            Some(LoroValue::I64(n)) => Some(*n),
+            _ => None,
+        };
+        let key = match m.get("key") {
+            Some(LoroValue::Binary(b)) => <[u8; FILE_KEY_LEN]>::try_from(b.as_slice()).ok()?,
+            _ => return None,
+        };
+        Some(FileEntry {
+            item: str_of("item").filter(|s| !s.is_empty())?,
+            file: ItemFile {
+                id: id.to_string(),
+                name: normalize_file_name(&str_of("name")?).ok()?,
+                mime: normalize_file_mime(&str_of("mime").unwrap_or_default()).ok()?,
+                size: u64::try_from(int_of("size")?).ok()?,
+                created_at: int_of(KEY_CREATED_AT)?,
+                created_by: str_of(KEY_CREATED_BY).filter(|s| !s.is_empty()),
+            },
+            key,
+            to_purge: int_of(KEY_TO_PURGE),
+        })
+    }
+}
+
+/// Trim and bound an attachment's name: empty, over
+/// `MAX_FILE_NAME_BYTES` or holding a control character is `Invalid`.
+fn normalize_file_name(name: &str) -> Result<String, DocError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(DocError::Invalid("file name is empty".into()));
+    }
+    if name.len() > MAX_FILE_NAME_BYTES {
+        return Err(DocError::Invalid(format!(
+            "file name must be at most {MAX_FILE_NAME_BYTES} bytes"
+        )));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(DocError::Invalid(
+            "file name holds a control character".into(),
+        ));
+    }
+    Ok(name.to_string())
+}
+
+/// Trim and bound an attachment's media type. Empty is fine (unknown).
+fn normalize_file_mime(mime: &str) -> Result<String, DocError> {
+    let mime = mime.trim();
+    if mime.len() > MAX_FILE_MIME_BYTES || mime.chars().any(char::is_control) {
+        return Err(DocError::Invalid("file media type is malformed".into()));
+    }
+    Ok(mime.to_string())
+}
+
+/// A file key from its export form (64 hex characters).
+fn parse_file_key(hex_key: &str) -> Option<[u8; FILE_KEY_LEN]> {
+    let mut key = [0u8; FILE_KEY_LEN];
+    hex::decode_to_slice(hex_key, &mut key).ok()?;
+    Some(key)
+}
+
+/// Disposable mirror of the live entries of the `files` container
+/// (one marked for purge is in neither map), rebuilt whole whenever it
+/// changes (attachments are few). What `ItemView.files` reads.
+#[derive(Default)]
+struct FileIndex {
+    /// item id → its attachments in `(created_at, id)` order. Keyed by
+    /// whatever the entry names, so an entry whose item is gone (or not
+    /// here yet) waits under that id.
+    by_item: HashMap<String, Vec<ItemFile>>,
+    /// file id → owner item id.
+    owner: HashMap<String, String>,
+}
+
 /// A named place, optionally pinned to coordinates. `label` is the
 /// user-facing name and the only required part; `lat` / `lon` are WGS84
 /// decimal degrees and come as a pair or not at all; `address` is a
@@ -674,6 +850,9 @@ pub struct ItemView {
     pub assignee: Option<String>,
     /// Subtasks in their own order (`spec/subtasks.md`); empty ≡ none.
     pub subtasks: Vec<Subtask>,
+    /// Attachments in `(created_at, id)` order, without their keys
+    /// (`spec/attachments.md`); empty ≡ none.
+    pub files: Vec<ItemFile>,
     /// Reflection stamp: first entry into In Progress (write-once).
     pub started_at: Option<i64>,
     /// Reflection stamp: last entry into Done; never cleared. The Done
@@ -1041,6 +1220,10 @@ pub struct ExportItem {
     /// stay byte-identical.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub subtasks: Vec<Subtask>,
+    /// Attachments (see [`ExportFile`]). Skipped when there are none so
+    /// older dumps stay byte-identical.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub files: Vec<ExportFile>,
     /// Reflection stamp (first entry into In Progress). Skipped when
     /// unset; v2 exports never carry it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -1733,6 +1916,9 @@ enum CapturedDiff {
     /// The `focus` container changed (`spec/focus.md`). Consumers
     /// re-derive the Focus projection; no positional translation needed.
     Focus,
+    /// Root `files` map changed: the ids of the entries written or
+    /// deleted (`spec/attachments.md`).
+    Files { ids: Vec<String> },
     /// A diff shape we don't translate — forces the full-resync
     /// fallback for the frame.
     Opaque,
@@ -1822,6 +2008,12 @@ fn classify_captured_diff(
         Some(name) if name == ROOT_LISTS => CapturedDiff::Lists,
         Some(name) if name == ROOT_SETTINGS => CapturedDiff::Settings,
         Some(name) if name == FOCUS_CONTAINER => CapturedDiff::Focus,
+        Some(name) if name == ROOT_FILES => match diff {
+            LoroDiff::Map(m) => CapturedDiff::Files {
+                ids: m.updated.keys().map(|k| k.to_string()).collect(),
+            },
+            _ => CapturedDiff::Opaque,
+        },
         Some(name) => {
             let Some(list_id) = name.strip_prefix(ORDER_PREFIX) else {
                 return CapturedDiff::Opaque;
@@ -1917,6 +2109,10 @@ pub struct Doc {
     /// from `inner` after boot replay / fallback and maintained
     /// incrementally otherwise.
     item_index: Mutex<ProjectionIndex>,
+    /// Disposable mirror of the `files` container — see [`FileIndex`].
+    /// Rebuilt with `item_index` and after every change to the
+    /// container.
+    file_index: Mutex<FileIndex>,
     /// Gated Loro diff capture used by remote import and undo/redo. The
     /// gate prevents ordinary local mutations from accumulating diffs;
     /// callers enable it only around the operation they will translate.
@@ -1988,6 +2184,7 @@ impl Doc {
             events: Mutex::new(VecDeque::new()),
             undo,
             item_index,
+            file_index: Mutex::new(FileIndex::default()),
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
@@ -2022,6 +2219,7 @@ impl Doc {
             events: Mutex::new(VecDeque::new()),
             undo,
             item_index,
+            file_index: Mutex::new(FileIndex::default()),
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
             search: Mutex::new(SearchIndex::new()),
@@ -2095,6 +2293,7 @@ impl Doc {
     /// translation fallback.
     fn rebuild_index(&self) {
         *self.item_index.lock().expect("item index mutex poisoned") = self.compute_index();
+        self.rebuild_file_index();
         // Whatever reached here changed more than any event names; the
         // search index rebuilds whole on its next query.
         self.search
@@ -2416,6 +2615,7 @@ impl Doc {
                 created_by: self.author.clone(),
                 assignee: None,
                 subtasks: Vec::new(),
+                files: Vec::new(),
                 state,
                 lifecycle_at: now,
                 started_at: (state == WorkflowState::InProgress).then_some(now),
@@ -3050,6 +3250,149 @@ impl Doc {
         list.delete(nodes[at].0, 1)?;
         self.subtasks_changed(item_id, &map);
         Ok(())
+    }
+
+    // ---------- attachments (`spec/attachments.md`) ----------
+
+    /// Record an attachment on an item: write the `files` entry for a
+    /// blob the host has **already uploaded** under `file_id` (upload
+    /// first, reference second, so no other device ever sees an entry
+    /// it cannot open). `file_id` is the host's random id (32 lowercase
+    /// hex characters), `size` the plaintext length, `key` the
+    /// `FILE_KEY_LEN`-byte key the blob is sealed under. The name is
+    /// trimmed; an empty, overlong or control-bearing one is `Invalid`,
+    /// as is an id this doc already holds. One commit, one undo step.
+    pub fn attach_file(
+        &self,
+        item_id: &str,
+        file_id: &str,
+        name: &str,
+        mime: &str,
+        size: u64,
+        key: &[u8],
+    ) -> Result<(), DocError> {
+        self.find_item(item_id)?;
+        if !is_well_formed_id(file_id) {
+            return Err(DocError::Invalid(format!("malformed file id: {file_id}")));
+        }
+        let files = self.files_map();
+        // Marked for purge counts: the id is still the server's.
+        if files.get(file_id).is_some() {
+            return Err(DocError::Invalid(format!(
+                "file already attached: {file_id}"
+            )));
+        }
+        let key = <[u8; FILE_KEY_LEN]>::try_from(key)
+            .map_err(|_| DocError::Invalid(format!("file key must be {FILE_KEY_LEN} bytes")))?;
+        if i64::try_from(size).is_err() {
+            return Err(DocError::Invalid("file size out of range".into()));
+        }
+        let entry = FileEntry {
+            item: item_id.to_string(),
+            file: ItemFile {
+                id: file_id.to_string(),
+                name: normalize_file_name(name)?,
+                mime: normalize_file_mime(mime)?,
+                size,
+                created_at: now_millis(),
+                created_by: self.author.clone(),
+            },
+            key,
+            to_purge: None,
+        };
+        files.insert(file_id, entry.to_loro_value())?;
+        self.inner.commit();
+        self.files_changed(item_id);
+        Ok(())
+    }
+
+    /// Rename an attachment. The entry is replaced whole (it is one
+    /// atomic value); nothing else about it changes. Writing the name it
+    /// already has is a no-op with no commit.
+    pub fn rename_file(&self, file_id: &str, name: &str) -> Result<(), DocError> {
+        let name = normalize_file_name(name)?;
+        let mut entry = self
+            .live_file_entry(file_id)
+            .ok_or_else(|| DocError::Invalid(format!("no such file: {file_id}")))?;
+        if entry.file.name == name {
+            return Ok(());
+        }
+        entry.file.name = name;
+        self.files_map().insert(file_id, entry.to_loro_value())?;
+        self.inner.commit();
+        self.files_changed(&entry.item);
+        Ok(())
+    }
+
+    /// Remove an attachment: mark its entry for purge. It leaves every
+    /// view at once and stays in the doc as the instruction to
+    /// tombstone its blob ([`files_to_purge`](Self::files_to_purge)),
+    /// which any client can act on, so a removal made offline needs no
+    /// later clean-up to find it. Undo clears the mark.
+    pub fn remove_file(&self, file_id: &str) -> Result<(), DocError> {
+        let mut entry = self
+            .live_file_entry(file_id)
+            .ok_or_else(|| DocError::Invalid(format!("no such file: {file_id}")))?;
+        entry.to_purge = Some(now_millis());
+        self.files_map().insert(file_id, entry.to_loro_value())?;
+        self.inner.commit();
+        self.files_changed(&entry.item);
+        Ok(())
+    }
+
+    /// The ids of the entries marked for purge, in id order: blobs some
+    /// client still has to tombstone on the server. A host that is
+    /// online sends the `DELETE` for each and passes the ones the
+    /// server answered (2xx, or 404 / 410: already gone) to
+    /// [`forget_files`](Self::forget_files).
+    pub fn files_to_purge(&self) -> Vec<String> {
+        self.file_entries()
+            .into_iter()
+            .filter(|e| e.to_purge.is_some())
+            .map(|e| e.file.id)
+            .collect()
+    }
+
+    /// Delete the entries of `file_ids` whose blobs the server has
+    /// tombstoned: the end of a purge. Only an entry still marked goes;
+    /// one that is live again (an undo, a concurrent edit) or already
+    /// gone (another device got there first) is skipped. A maintenance
+    /// commit, never an undo step. Returns how many entries it deleted.
+    pub fn forget_files(&self, file_ids: &[&str]) -> Result<usize, DocError> {
+        let files = self.files_map();
+        let mut forgotten = 0;
+        for file_id in file_ids {
+            if self
+                .file_entry(file_id)
+                .is_some_and(|e| e.to_purge.is_some())
+            {
+                files.delete(file_id)?;
+                forgotten += 1;
+            }
+        }
+        if forgotten > 0 {
+            self.inner
+                .commit_with(CommitOptions::new().origin(SWEEP_ORIGIN));
+        }
+        Ok(forgotten)
+    }
+
+    /// The key an attachment's blob is sealed under, for the host to
+    /// open what it downloads. `None` for an id with no live
+    /// well-formed entry.
+    pub fn file_key(&self, file_id: &str) -> Option<[u8; FILE_KEY_LEN]> {
+        self.live_file_entry(file_id).map(|e| e.key)
+    }
+
+    /// The item a live attachment belongs to. The item itself may not
+    /// exist: an entry can outlive its owner until the sweep.
+    pub fn file_owner(&self, file_id: &str) -> Option<String> {
+        self.file_index
+            .lock()
+            .expect("file index mutex poisoned")
+            .owner
+            .get(file_id)
+            .cloned()
     }
 
     /// Move an item. Same-list: a `mov` on the list's order container
@@ -3740,7 +4083,8 @@ impl Doc {
     /// Hard-delete the subset of binned items identified by `item_ids`
     /// in one commit. Errors if any id is not currently binned.
     /// Deletes the item map from `items` and best-effort removes the
-    /// item's entries from its located order container.
+    /// item's entries from its located order container. The items'
+    /// attachments are marked for purge (`files_to_purge`).
     pub fn delete_binned_items(&self, item_ids: &[&str]) -> Result<(), DocError> {
         if item_ids.is_empty() {
             return Ok(());
@@ -3775,8 +4119,8 @@ impl Doc {
         self.remove_items(item_ids, true)
     }
 
-    /// Shared removal path: remove item maps + their order entries in
-    /// one commit, then update the index and emit `ItemRemoved`s.
+    /// Shared removal path: remove item maps and their order entries
+    /// and mark their attachments for purge in one commit, then update the index and emit `ItemRemoved`s.
     /// `permanent` also drops the undo history (a hard delete); without
     /// it the commit is an ordinary undo step (`release_items`).
     /// Callers have already validated the ids.
@@ -3807,6 +4151,18 @@ impl Doc {
             }
             (acc, per_item)
         };
+        // The items' attachments are marked for purge in the same
+        // commit (`spec/attachments.md` "Mutations"): the entries stay
+        // as the instruction to tombstone their blobs.
+        let file_ids: Vec<String> = {
+            let guard = self.file_index.lock().expect("file index mutex poisoned");
+            item_ids
+                .iter()
+                .filter_map(|id| guard.by_item.get(*id))
+                .flatten()
+                .map(|f| f.id.clone())
+                .collect()
+        };
         let items = self.items();
         for item_id in item_ids {
             items.delete(item_id)?;
@@ -3817,7 +4173,18 @@ impl Doc {
                 order.delete(*p, 1)?;
             }
         }
+        let files = self.files_map();
+        let now = now_millis();
+        for file_id in &file_ids {
+            if let Some(mut entry) = self.file_entry(file_id) {
+                entry.to_purge = Some(now);
+                files.insert(file_id, entry.to_loro_value())?;
+            }
+        }
         self.inner.commit();
+        if !file_ids.is_empty() {
+            self.rebuild_file_index();
+        }
         // A hard delete is permanent: drop the session's undo / redo
         // history so neither the delete nor the steps before it can
         // resurrect the item.
@@ -4785,19 +5152,72 @@ impl Doc {
         Ok(state)
     }
 
+    /// Write the `files` entries of an adopted item, uncommitted. An
+    /// entry needs its key and well-formed fields, and an id this doc
+    /// does not hold live; anything else is dropped, not rejected.
+    fn adopt_files(&self, src: &ExportItem) -> Result<(), DocError> {
+        let files = self.files_map();
+        for f in &src.files {
+            let Some(key) = f.key.as_deref().and_then(parse_file_key) else {
+                continue;
+            };
+            let (Ok(name), Ok(mime)) = (normalize_file_name(&f.name), normalize_file_mime(&f.mime))
+            else {
+                continue;
+            };
+            if !is_well_formed_id(&f.id) || i64::try_from(f.size).is_err() {
+                continue;
+            }
+            // An entry marked for purge is one this doc let go of (the
+            // item is moving back): the arrival replaces it.
+            if files.get(&f.id).is_some()
+                && self.file_entry(&f.id).is_none_or(|e| e.to_purge.is_none())
+            {
+                continue;
+            }
+            let entry = FileEntry {
+                item: src.id.clone(),
+                file: ItemFile {
+                    id: f.id.clone(),
+                    name,
+                    mime,
+                    size: f.size,
+                    created_at: f.created_at.unwrap_or_else(now_millis),
+                    created_by: f.created_by.clone().filter(|a| !a.trim().is_empty()),
+                },
+                key,
+                to_purge: None,
+            };
+            files.insert(&f.id, entry.to_loro_value())?;
+        }
+        Ok(())
+    }
+
     // ---------- cross-doc move (`spec/sharing-plan.md` "Cross-doc move") ----------
 
     /// The export form of `item_ids`, in the given order: what
-    /// [`adopt_items`](Self::adopt_items) on another doc takes. Read
-    /// only. Errors on an unknown or repeated id.
+    /// [`adopt_items`](Self::adopt_items) on another doc takes. Unlike
+    /// `export_json`, each attachment carries its key. Read only.
+    /// Errors on an unknown or repeated id.
     pub fn export_items(&self, item_ids: &[&str]) -> Result<Vec<ExportItem>, DocError> {
         assert_unique_item_ids(item_ids)?;
         item_ids
             .iter()
             .map(|id| {
-                self.get_item(id)
+                let mut item = self
+                    .get_item(id)
                     .map(export_item)
-                    .ok_or_else(|| DocError::ItemNotFound((*id).to_string()))
+                    .ok_or_else(|| DocError::ItemNotFound((*id).to_string()))?;
+                // The whole entry travels, key included: the target doc
+                // gets a server-side copy of the blob under the same id.
+                for file in &mut item.files {
+                    if let Some(entry) = self.live_file_entry(&file.id) {
+                        file.key = Some(hex::encode(entry.key));
+                        file.created_at = Some(entry.file.created_at);
+                        file.created_by = entry.file.created_by;
+                    }
+                }
+                Ok(item)
             })
             .collect()
     }
@@ -4815,6 +5235,12 @@ impl Doc {
     /// assignee travels only when it is this doc's author. The mover is
     /// the one account known to be a member here; anyone else may not
     /// be, so their assignment is dropped rather than left dangling.
+    ///
+    /// Attachments travel as entries under their own ids and keys
+    /// (`spec/attachments.md` "Cross-doc move"). The host copies each
+    /// blob to this doc on the server **before** calling, so the entries
+    /// never name bytes that are not there. An attachment with no key
+    /// (a JSON export) or a malformed one is dropped.
     pub fn adopt_items(
         &self,
         items: &[ExportItem],
@@ -4865,6 +5291,7 @@ impl Doc {
                 },
                 None,
             )?;
+            self.adopt_files(src)?;
             if queued {
                 continue;
             }
@@ -4887,7 +5314,8 @@ impl Doc {
     }
 
     /// The giving half of a cross-doc move: remove `item_ids` and their
-    /// order entries in one commit, whatever their lifecycle. Unlike
+    /// order entries and mark their attachments for purge in one
+    /// commit, whatever their lifecycle. Unlike
     /// the Bin's hard delete this is an ordinary undo step (undo puts
     /// the items back), because the items live on in the doc that
     /// adopted them; the host undoes both halves together. Errors on an
@@ -4972,7 +5400,8 @@ impl Doc {
 
     /// [`item_view`] with an orphan's `list_id` resolved to `inbox`
     /// (`spec/inbox-plan.md` "Membership"), so every view agrees with
-    /// the projection the item sits in.
+    /// the projection the item sits in, and with its attachments (they
+    /// live outside the item map).
     fn resolved_view(&self, map: &LoroMap) -> Option<ItemView> {
         let mut view = item_view(map)?;
         if !is_reserved_list(&view.list_id) {
@@ -4981,6 +5410,7 @@ impl Doc {
                 view.list_id = LIST_INBOX.to_string();
             }
         }
+        view.files = self.files_of(&view.id);
         Some(view)
     }
 
@@ -5445,6 +5875,7 @@ impl Doc {
         let mut lists_dirty = false;
         let mut settings_dirty = false;
         let mut focus_dirty = false;
+        let mut files_dirty = HashSet::<String>::new();
         let mut upserts = HashSet::<String>::new();
         let mut removals = HashSet::<String>::new();
         let mut map_dirty = HashMap::<ContainerID, HashSet<String>>::new();
@@ -5466,6 +5897,7 @@ impl Doc {
                     CapturedDiff::Lists => lists_dirty = true,
                     CapturedDiff::Settings => settings_dirty = true,
                     CapturedDiff::Focus => focus_dirty = true,
+                    CapturedDiff::Files { ids } => files_dirty.extend(ids),
                     CapturedDiff::ItemsRoot { upserted, removed } => {
                         upserts.extend(upserted);
                         removals.extend(removed);
@@ -5737,6 +6169,22 @@ impl Doc {
             }
             (pre, post)
         };
+        // The items whose attachments this frame changed: the owners
+        // of the touched entries before and after it.
+        let mut file_items = HashSet::<String>::new();
+        if !files_dirty.is_empty() {
+            let owners = |doc: &Self, into: &mut HashSet<String>| {
+                let guard = doc.file_index.lock().expect("file index mutex poisoned");
+                into.extend(
+                    files_dirty
+                        .iter()
+                        .filter_map(|f| guard.owner.get(f).cloned()),
+                );
+            };
+            owners(self, &mut file_items);
+            self.rebuild_file_index();
+            owners(self, &mut file_items);
+        }
 
         // ---- Phase 3: events ----
         let view_of = |id: &str| -> Result<ItemView, ()> {
@@ -5878,6 +6326,7 @@ impl Doc {
                     created_by: view.created_by,
                     assignee: view.assignee,
                     subtasks: view.subtasks,
+                    files: view.files,
                     state: view.state,
                     lifecycle_at: view.lifecycle_at,
                     started_at: view.started_at,
@@ -5911,6 +6360,25 @@ impl Doc {
                     open_index: None,
                 });
             }
+        }
+
+        // Attachments. An item this frame brought in carries its files
+        // on its `ItemAdded`; one it removed, or that is not here, has
+        // no row to update.
+        let mut file_items: Vec<&String> = file_items.iter().collect();
+        file_items.sort();
+        for id in file_items {
+            if changes
+                .get(id)
+                .is_some_and(|c| c.brand_new || c.new.is_none())
+                || self.find_item(id).is_err()
+            {
+                continue;
+            }
+            self.push_event(AppEvent::ItemFilesChanged {
+                id: id.clone(),
+                files: self.files_of(id),
+            });
         }
 
         // Per-list open walk: minimal ascending remove+insert event
@@ -5948,6 +6416,7 @@ impl Doc {
                             created_by: view.created_by,
                             assignee: view.assignee,
                             subtasks: view.subtasks,
+                            files: view.files,
                             state: view.state,
                             lifecycle_at: view.lifecycle_at,
                             started_at: view.started_at,
@@ -6242,6 +6711,7 @@ impl Doc {
                 created_by: item.created_by,
                 assignee: item.assignee,
                 subtasks: item.subtasks,
+                files: item.files,
                 state: item.state,
                 lifecycle_at: item.lifecycle_at,
                 started_at: item.started_at,
@@ -6300,6 +6770,7 @@ impl Doc {
             last_persisted_vv,
             events: Mutex::new(VecDeque::new()),
             item_index,
+            file_index: Mutex::new(FileIndex::default()),
             undo,
             diff_capture,
             notes_shadows: Mutex::new(HashMap::new()),
@@ -6376,6 +6847,23 @@ impl Doc {
                 hasher.update([u8::from(sub.done)]);
             }
         }
+        // Attachments: every well-formed entry in id order, its owner,
+        // key and purge mark included, whether or not the owner item
+        // exists.
+        let files = self.file_entries();
+        hasher.update(b"A");
+        hasher.update((files.len() as u32).to_be_bytes());
+        for f in &files {
+            hash_str(&mut hasher, &f.file.id);
+            hash_str(&mut hasher, &f.item);
+            hash_str(&mut hasher, &f.file.name);
+            hash_str(&mut hasher, &f.file.mime);
+            hasher.update(f.file.size.to_be_bytes());
+            hasher.update(f.key);
+            hasher.update(f.file.created_at.to_be_bytes());
+            hash_opt_str(&mut hasher, f.file.created_by.as_deref());
+            hash_opt_i64(&mut hasher, f.to_purge);
+        }
         // Focus: the curated order fixes logical state (`spec/focus.md`),
         // exactly as each list's resolved order does. Hash the raw
         // container contents in order so converged replicas match and a
@@ -6401,6 +6889,71 @@ impl Doc {
 
     fn settings_map(&self) -> LoroMap {
         self.inner.get_map(ROOT_SETTINGS)
+    }
+
+    fn files_map(&self) -> LoroMap {
+        self.inner.get_map(ROOT_FILES)
+    }
+
+    /// One well-formed `files` entry, marked for purge or not.
+    fn file_entry(&self, file_id: &str) -> Option<FileEntry> {
+        let v = self.files_map().get(file_id)?;
+        FileEntry::from_loro_value(file_id, v.as_value()?)
+    }
+
+    /// As [`file_entry`](Self::file_entry), for an entry not marked
+    /// for purge: the only kind a view or a host's open path sees.
+    fn live_file_entry(&self, file_id: &str) -> Option<FileEntry> {
+        self.file_entry(file_id).filter(|e| e.to_purge.is_none())
+    }
+
+    /// Every well-formed `files` entry, marked ones included, in id
+    /// order.
+    fn file_entries(&self) -> Vec<FileEntry> {
+        let map = self.files_map();
+        let mut ids: Vec<String> = map.keys().map(|k| k.to_string()).collect();
+        ids.sort();
+        ids.iter().filter_map(|id| self.file_entry(id)).collect()
+    }
+
+    /// Recompute the [`FileIndex`] from the `files` container.
+    fn rebuild_file_index(&self) {
+        let mut idx = FileIndex::default();
+        for entry in self.file_entries() {
+            if entry.to_purge.is_some() {
+                continue;
+            }
+            idx.owner.insert(entry.file.id.clone(), entry.item.clone());
+            idx.by_item.entry(entry.item).or_default().push(entry.file);
+        }
+        for files in idx.by_item.values_mut() {
+            files.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        }
+        *self.file_index.lock().expect("file index mutex poisoned") = idx;
+    }
+
+    /// The attachments of `item_id`, in order; empty when it has none.
+    fn files_of(&self, item_id: &str) -> Vec<ItemFile> {
+        self.file_index
+            .lock()
+            .expect("file index mutex poisoned")
+            .by_item
+            .get(item_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Rebuild the file index after a local write to `files` and tell
+    /// consumers the owner's attachments changed. An owner that is not
+    /// an item of this doc gets no event: nothing shows its files.
+    fn files_changed(&self, item_id: &str) {
+        self.rebuild_file_index();
+        if self.find_item(item_id).is_ok() {
+            self.push_event(AppEvent::ItemFilesChanged {
+                id: item_id.to_string(),
+                files: self.files_of(item_id),
+            });
+        }
     }
 
     fn order_list(&self, list_id: &str) -> LoroMovableList {
@@ -6651,6 +7204,19 @@ fn export_item(item: ItemView) -> ExportItem {
         created_by: item.created_by,
         assignee: item.assignee,
         subtasks: item.subtasks,
+        files: item
+            .files
+            .into_iter()
+            .map(|f| ExportFile {
+                id: f.id,
+                name: f.name,
+                mime: f.mime,
+                size: f.size,
+                key: None,
+                created_at: None,
+                created_by: None,
+            })
+            .collect(),
         started_at: item.started_at,
         done_at: item.done_at,
         binned_at: item.binned_at,
@@ -6675,7 +7241,10 @@ pub struct FocusRetarget<'a> {
 /// releases them. There is no atomicity across docs, so the order is
 /// the safe one: a failure or crash part-way leaves a duplicate, never
 /// a loss. Each doc gets one commit (one undo step); undoing the move
-/// means undoing all of them, which is the host's job.
+/// means undoing all of them, which is the host's job. So are the
+/// items' attachment blobs (`spec/attachments.md` "Cross-doc move"):
+/// copied to `dst` on the server before this call. The release marks
+/// `src`'s entries for purge, so their blobs go the ordinary way.
 pub fn move_items_across_docs(
     src: &Doc,
     dst: &Doc,
@@ -7246,6 +7815,8 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         created_by: read_string(map, KEY_CREATED_BY).filter(|s| !s.is_empty()),
         assignee: read_string(map, KEY_ASSIGNEE).filter(|s| !s.is_empty()),
         subtasks: read_subtasks(map),
+        // Filled by `Doc::resolved_view`: the entries are not in the map.
+        files: Vec::new(),
         started_at: read_i64(map, KEY_STARTED_AT),
         done_at: read_i64(map, KEY_DONE_AT),
         binned_at: read_i64(map, KEY_BINNED_AT),
@@ -7527,6 +8098,7 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     created_by: post_it.created_by.clone(),
                     assignee: post_it.assignee.clone(),
                     subtasks: post_it.subtasks.clone(),
+                    files: post_it.files.clone(),
                     state: post_it.state,
                     lifecycle_at: post_it.lifecycle_at,
                     started_at: post_it.started_at,
@@ -7564,6 +8136,12 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemSubtasksChanged {
                         id: post_it.id.clone(),
                         subtasks: post_it.subtasks.clone(),
+                    });
+                }
+                if pre_it.files != post_it.files {
+                    out.push(AppEvent::ItemFilesChanged {
+                        id: post_it.id.clone(),
+                        files: post_it.files.clone(),
                     });
                 }
                 if pre_it.when != post_it.when || pre_it.when_zoned != post_it.when_zoned {
@@ -11233,6 +11811,7 @@ mod tests {
             created_by: None,
             assignee: None,
             subtasks: Vec::new(),
+            files: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -11332,6 +11911,7 @@ mod tests {
             created_by: None,
             assignee: None,
             subtasks: Vec::new(),
+            files: Vec::new(),
             started_at: None,
             done_at: None,
             binned_at: None,
@@ -11736,6 +12316,352 @@ mod tests {
             e,
             AppEvent::ItemAdded { id: eid, subtasks, .. } if eid == &fresh && subtasks.len() == 1
         )));
+    }
+
+    fn file_id(n: u8) -> String {
+        format!("{n:032x}")
+    }
+
+    fn file_names(doc: &Doc, item_id: &str) -> Vec<String> {
+        doc.get_item(item_id)
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.name)
+            .collect()
+    }
+
+    #[test]
+    fn files_attach_rename_remove_and_undo() {
+        let mut doc = Doc::new().unwrap();
+        doc.set_author(Some("acct-1"));
+        let id = doc.add_item(LIST_INBOX, "trip").unwrap();
+        let _ = doc.drain_events();
+        assert!(doc.get_item(&id).unwrap().files.is_empty());
+
+        let (ticket, map) = (file_id(2), file_id(1));
+        doc.attach_file(
+            &id,
+            &ticket,
+            "  ticket.pdf ",
+            "application/pdf",
+            1234,
+            &[7; 32],
+        )
+        .unwrap();
+        doc.attach_file(&id, &map, "map.png", "", 0, &[9; 32])
+            .unwrap();
+        let files = doc.get_item(&id).unwrap().files;
+        assert_eq!(files.len(), 2);
+        let pdf = files.iter().find(|f| f.id == ticket).unwrap();
+        assert_eq!(
+            (pdf.name.as_str(), pdf.mime.as_str(), pdf.size),
+            ("ticket.pdf", "application/pdf", 1234)
+        );
+        assert_eq!(pdf.created_by.as_deref(), Some("acct-1"));
+        // `(created_at, id)` order, whatever order they were attached in.
+        let mut sorted = files.clone();
+        sorted.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        assert_eq!(files, sorted);
+        assert_eq!(doc.file_key(&ticket), Some([7; 32]));
+        assert_eq!(doc.file_owner(&map).as_deref(), Some(id.as_str()));
+        let events = doc.drain_events();
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(matches!(
+            &events[1],
+            AppEvent::ItemFilesChanged { id: eid, files } if eid == &id && files.len() == 2
+        ));
+
+        doc.rename_file(&ticket, "boarding pass.pdf").unwrap();
+        assert_eq!(doc.drain_events().len(), 1);
+        // The same name again writes nothing.
+        doc.rename_file(&ticket, "boarding pass.pdf").unwrap();
+        assert!(doc.drain_events().is_empty());
+        assert!(file_names(&doc, &id).contains(&"boarding pass.pdf".to_string()));
+        // A rename replaces the entry whole and keeps the rest of it.
+        assert_eq!(doc.file_key(&ticket), Some([7; 32]));
+
+        doc.remove_file(&map).unwrap();
+        assert_eq!(file_names(&doc, &id), vec!["boarding pass.pdf"]);
+        assert_eq!(doc.file_key(&map), None);
+        let _ = doc.drain_events();
+
+        // Undo brings the entry back, as one surgical event.
+        assert!(doc.undo().unwrap());
+        assert_eq!(doc.get_item(&id).unwrap().files.len(), 2);
+        assert_eq!(doc.file_key(&map), Some([9; 32]));
+        let events = doc.drain_events();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(matches!(
+            &events[0],
+            AppEvent::ItemFilesChanged { id: eid, files } if eid == &id && files.len() == 2
+        ));
+
+        // Rejected input.
+        let fresh = file_id(3);
+        let key = [1u8; 32];
+        for (item, fid, name, mime, key) in [
+            (id.as_str(), ticket.as_str(), "again.pdf", "", &key[..]),
+            (id.as_str(), "nope", "a.pdf", "", &key[..]),
+            (id.as_str(), fresh.as_str(), "   ", "", &key[..]),
+            (id.as_str(), fresh.as_str(), "a\nb.pdf", "", &key[..]),
+            (id.as_str(), fresh.as_str(), "a.pdf", "", &key[..31]),
+            (
+                "0".repeat(32).as_str(),
+                fresh.as_str(),
+                "a.pdf",
+                "",
+                &key[..],
+            ),
+        ] {
+            assert!(
+                doc.attach_file(item, fid, name, mime, 1, key).is_err(),
+                "{fid} {name:?}"
+            );
+        }
+        assert!(
+            doc.attach_file(&id, &fresh, &"x".repeat(256), "", 1, &key)
+                .is_err()
+        );
+        assert!(doc.rename_file(&fresh, "a.pdf").is_err());
+        assert!(doc.rename_file(&ticket, "").is_err());
+        assert!(doc.remove_file(&fresh).is_err());
+        assert!(doc.drain_events().is_empty());
+    }
+
+    #[test]
+    fn files_follow_the_item_through_bin_delete_export_and_move() {
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "trip").unwrap();
+        let keep = src.add_item(LIST_INBOX, "other").unwrap();
+        let (a, b, c) = (file_id(1), file_id(2), file_id(3));
+        src.attach_file(&id, &a, "a.pdf", "application/pdf", 10, &[1; 32])
+            .unwrap();
+        src.attach_file(&id, &b, "b.txt", "text/plain", 20, &[2; 32])
+            .unwrap();
+        src.attach_file(&keep, &c, "c.txt", "text/plain", 30, &[3; 32])
+            .unwrap();
+
+        // A duplicate takes no attachments.
+        let copy = src.duplicate_item(&id).unwrap();
+        assert!(src.get_item(&copy).unwrap().files.is_empty());
+
+        // The JSON export names the files without their keys, and an
+        // import ignores them: the bytes are not in the dump.
+        let export = src.export_json();
+        let exported = export.items.iter().find(|i| i.id == id).unwrap();
+        assert_eq!(exported.files.len(), 2);
+        assert!(exported.files.iter().all(|f| f.key.is_none()));
+        let json = src.export_json_string();
+        assert!(
+            json.contains("\"a.pdf\"") && !json.contains("\"key\""),
+            "{json}"
+        );
+        let imported = Doc::new().unwrap();
+        imported.import_json(&export).unwrap();
+        assert!(imported.get_item(&id).unwrap().files.is_empty());
+        assert_eq!(imported.file_key(&a), None);
+
+        // A cross-doc move carries the entries, keys included.
+        let dst = Doc::new().unwrap();
+        let _ = (src.drain_events(), dst.drain_events());
+        move_items_across_docs(&src, &dst, &[&id], LIST_INBOX, 0, None).unwrap();
+        assert_eq!(
+            file_names(&dst, &id),
+            file_names_sorted(&["a.pdf", "b.txt"])
+        );
+        assert_eq!(dst.file_key(&a), Some([1; 32]));
+        assert_eq!(dst.file_key(&b), Some([2; 32]));
+        assert!(dst.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAdded { id: eid, files, .. } if eid == &id && files.len() == 2
+        )));
+        // The source let go of the item's entries and of nothing else.
+        assert_eq!(src.file_key(&a), None);
+        assert_eq!(src.file_key(&b), None);
+        assert_eq!(src.file_key(&c), Some([3; 32]));
+        // Undoing the release puts the item and its entries back.
+        assert!(src.undo().unwrap());
+        assert_eq!(src.get_item(&id).unwrap().files.len(), 2);
+        assert_eq!(src.file_key(&a), Some([1; 32]));
+
+        // The Bin keeps attachments; a hard delete takes them along.
+        src.set_item_binned(&id, true).unwrap();
+        assert_eq!(src.get_item(&id).unwrap().files.len(), 2);
+        src.delete_binned(&id).unwrap();
+        assert_eq!(src.file_key(&a), None);
+        assert_eq!(src.file_owner(&b), None);
+        assert_eq!(file_names(&src, &keep), vec!["c.txt"]);
+    }
+
+    #[test]
+    fn files_removed_wait_marked_for_purge() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "trip").unwrap();
+        let gone = a.add_item(LIST_INBOX, "going").unwrap();
+        let (one, two, three) = (file_id(1), file_id(2), file_id(3));
+        a.attach_file(&id, &one, "one.pdf", "", 1, &[1; 32])
+            .unwrap();
+        a.attach_file(&id, &two, "two.pdf", "", 2, &[2; 32])
+            .unwrap();
+        a.attach_file(&gone, &three, "three.pdf", "", 3, &[3; 32])
+            .unwrap();
+        assert!(a.files_to_purge().is_empty());
+
+        // A removal and a hard delete both leave the entry behind,
+        // marked: out of every view, listed for purge.
+        a.remove_file(&one).unwrap();
+        a.set_item_binned(&gone, true).unwrap();
+        assert_eq!(a.files_to_purge(), vec![one.clone()]);
+        a.delete_binned(&gone).unwrap();
+        assert_eq!(a.files_to_purge(), vec![one.clone(), three.clone()]);
+        assert_eq!(file_names(&a, &id), vec!["two.pdf"]);
+        assert!(a.remove_file(&one).is_err());
+        assert!(a.rename_file(&one, "x.pdf").is_err());
+        // The id is still the server's until the purge is done.
+        assert!(
+            a.attach_file(&id, &one, "again.pdf", "", 1, &[1; 32])
+                .is_err()
+        );
+
+        // The marks sync: another device can do the purge.
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        assert_eq!(b.files_to_purge(), vec![one.clone(), three.clone()]);
+        assert_eq!(file_names(&b, &id), vec!["two.pdf"]);
+
+        // Forgetting deletes marked entries only, with no event and no
+        // undo step, and is idempotent across devices.
+        let undo_steps = b.undo_count();
+        assert_eq!(b.forget_files(&[&one, &two, &three, "nope"]).unwrap(), 2);
+        assert!(b.files_to_purge().is_empty());
+        assert_eq!(b.file_key(&two), Some([2; 32]));
+        assert_eq!(b.undo_count(), undo_steps);
+        assert!(b.drain_events().is_empty());
+        assert_eq!(a.forget_files(&[&three]).unwrap(), 1);
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        a.apply_remote(&dek, &fb).unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(a.files_to_purge().is_empty());
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_eq!(b.forget_files(&[&one]).unwrap(), 0);
+    }
+
+    #[test]
+    fn files_undo_of_a_removal_clears_the_mark() {
+        let doc = Doc::new().unwrap();
+        let id = doc.add_item(LIST_INBOX, "trip").unwrap();
+        let (one, two) = (file_id(1), file_id(2));
+        doc.attach_file(&id, &one, "one.pdf", "", 1, &[1; 32])
+            .unwrap();
+        doc.attach_file(&id, &two, "two.pdf", "", 2, &[2; 32])
+            .unwrap();
+
+        doc.remove_file(&one).unwrap();
+        assert!(doc.undo().unwrap());
+        assert!(doc.files_to_purge().is_empty());
+        assert_eq!(doc.file_key(&one), Some([1; 32]));
+        // A stale purge of a file that is live again does nothing.
+        assert_eq!(doc.forget_files(&[&one]).unwrap(), 0);
+
+        // Undone after the purge finished: the entry comes back live
+        // (its blob is tombstoned, which the host restores on a 410).
+        doc.remove_file(&two).unwrap();
+        assert_eq!(doc.forget_files(&[&two]).unwrap(), 1);
+        assert!(doc.undo().unwrap());
+        assert_eq!(doc.file_key(&two), Some([2; 32]));
+        assert!(doc.files_to_purge().is_empty());
+        assert_eq!(doc.get_item(&id).unwrap().files.len(), 2);
+    }
+
+    fn file_names_sorted(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn files_converge_between_peers() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        let _ = (a.drain_events(), b.drain_events());
+
+        // A remote attach is one surgical event, not a resync.
+        let (one, two) = (file_id(1), file_id(2));
+        a.attach_file(&id, &one, "one.pdf", "application/pdf", 5, &[1; 32])
+            .unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &fa).unwrap();
+        let events = b.drain_events();
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(matches!(
+            &events[0],
+            AppEvent::ItemFilesChanged { id: eid, files } if eid == &id && files.len() == 1
+        ));
+        assert_eq!(b.file_key(&one), Some([1; 32]));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+
+        // Concurrent attaches to one item both land.
+        b.attach_file(&id, &two, "two.txt", "text/plain", 6, &[2; 32])
+            .unwrap();
+        a.rename_file(&one, "uno.pdf").unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        let fb = b.pending_export(&dek).unwrap().unwrap();
+        b.mark_persisted();
+        a.apply_remote(&dek, &fb).unwrap();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert_eq!(
+            a.get_item(&id).unwrap().files,
+            b.get_item(&id).unwrap().files
+        );
+        let mut names = file_names(&a, &id);
+        names.sort();
+        assert_eq!(names, vec!["two.txt", "uno.pdf"]);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        let _ = (a.drain_events(), b.drain_events());
+
+        // A remote item arriving with a file carries it on the add.
+        let fresh = a.add_item(LIST_INBOX, "new").unwrap();
+        let three = file_id(3);
+        a.attach_file(&fresh, &three, "three.txt", "", 7, &[3; 32])
+            .unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(b.drain_events().iter().any(|e| matches!(
+            e,
+            AppEvent::ItemAdded { id: eid, files, .. } if eid == &fresh && files.len() == 1
+        )));
+
+        // A remote hard delete takes the entries with the item.
+        a.set_item_binned(&fresh, true).unwrap();
+        a.delete_binned(&fresh).unwrap();
+        let fa = a.pending_export(&dek).unwrap().unwrap();
+        a.mark_persisted();
+        b.apply_remote(&dek, &fa).unwrap();
+        assert!(b.get_item(&fresh).is_none());
+        assert_eq!(b.file_key(&three), None);
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert!(
+            !b.drain_events()
+                .iter()
+                .any(|e| matches!(e, AppEvent::FullResync))
+        );
+
+        // A device booting from the synced state sees the attachments.
+        let mut c = Doc::empty();
+        c.apply_remote(&dek, &a.snapshot_blob(&dek).unwrap())
+            .unwrap();
+        assert_eq!(
+            c.get_item(&id).unwrap().files,
+            a.get_item(&id).unwrap().files
+        );
+        assert_eq!(c.fingerprint(), a.fingerprint());
     }
 
     #[test]
@@ -12865,6 +13791,7 @@ mod tests {
                 created_by: None,
                 assignee: None,
                 subtasks: Vec::new(),
+                files: Vec::new(),
                 started_at: None,
                 done_at: None,
                 binned_at: None,
@@ -12979,6 +13906,7 @@ mod tests {
             inner: restored_inner,
             last_persisted_vv: VersionVector::default(),
             item_index: Mutex::new(ProjectionIndex::default()),
+            file_index: Mutex::new(FileIndex::default()),
             events: Mutex::new(VecDeque::new()),
             undo,
             diff_capture,

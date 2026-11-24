@@ -11,9 +11,10 @@ pub mod zone;
 
 pub use crypto::*;
 pub use doc::{
-    DefaultView, DeleteListMode, Doc, DocError, ExportItem, ExportLifecycle, ExportList,
-    ExportSettings, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary, ItemLifecycle, ItemView,
-    JsonExport, LIST_INBOX, LaneSet, ListView, MAX_DURATION_MINUTES, MAX_PLACE_DETAIL_CHARS,
+    DefaultView, DeleteListMode, Doc, DocError, ExportFile, ExportItem, ExportLifecycle,
+    ExportList, ExportSettings, FILE_KEY_LEN, FocusRef, FocusRetarget, INBOX_NAME, ImportSummary,
+    ItemFile, ItemLifecycle, ItemView, JsonExport, LIST_INBOX, LaneSet, ListView,
+    MAX_DURATION_MINUTES, MAX_FILE_MIME_BYTES, MAX_FILE_NAME_BYTES, MAX_PLACE_DETAIL_CHARS,
     MAX_PLACE_LABEL_CHARS, MAX_SUBTASK_TEXT_CHARS, MAX_SUBTASKS, NOTES_ORIGIN_PREFIX, NotesDeltaOp,
     Place, SettingsView, Subtask, VIEW_ORIGIN, WELCOME_ITEM, WorkflowState, move_items_across_docs,
 };
