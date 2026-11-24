@@ -447,12 +447,12 @@ export function Settings(props: {
                   </div>
                 </Show>
                 {/* Danger zone: its own heading and group under Account,
-                    so the destructive action never sits beside Log out. */}
+                    so the destructive action never sits beside Sign out. */}
                 <Show when={!props.session.anonymous}>
                   <h2 class="settings-section-title settings-danger-title">
                     {m().settings.dangerZone}
                   </h2>
-                  <div class="settings-group settings-danger-group">
+                  <div class="settings-group">
                     <div class="settings-row settings-row-danger">
                       <div class="settings-row-label">
                         {m().settings.deleteAccountHint}

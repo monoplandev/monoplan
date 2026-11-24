@@ -63,10 +63,12 @@
   /* Divider under a selected row: a blue-grey a step darker than the
      selection fill so the row's edge still reads against it. */
   --dnd-select-border: #c8d7ef;
-  /* The blue pair again, under a stable name: the listbox re-points
-     `--dnd-select-*` to a neutral grey when it lacks focus and needs a
-     way back to blue when it regains it (see the listbox rules). */
-  --dnd-select-live-bg: #dbeafe;
+  /* The selection pair of a focused list, under a stable name: the
+     listbox re-points `--dnd-select-*` to a neutral grey when it lacks
+     focus and to this pair when it regains it (see the listbox rules).
+     The fill is paler than `--dnd-select-bg`, which stays the stronger
+     blue for the focus rings and drop highlights that read it bare. */
+  --dnd-select-live-bg: #e6ecfa;
   --dnd-select-live-border: #c8d7ef;
   /* Neutral highlight for palette / picker rows (no blue). */
   --palette-select-bg: #eceff3;
@@ -107,7 +109,7 @@
   --calendar-today-bg: #fdffb3;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
-  --dnd-select-live-bg: #293a5b;
+  --dnd-select-live-bg: #2d374d;
   --dnd-select-live-border: #33466e;
   --palette-select-bg: #26262a;
   --dnd-placeholder-color: #475569;
@@ -235,7 +237,7 @@ body {
 
 .nav {
   background: var(--bg);
-  padding: 12px 0 4px;
+  padding: 8px 0 4px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1344,7 +1346,7 @@ body {
 }
 
 .main-header {
-  padding: 12px 12px 8px;
+  padding: 8px 12px 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4911,7 +4913,7 @@ button.file-name:hover {
   background: var(--bg-hover);
 }
 
-/* Account deletion: the row sits apart from Log out and its button reads
+/* Account deletion: the row sits apart from Sign out and its button reads
    as destructive; the dialog lists each workspace with an export button
    above the email + password gate. */
 .settings-danger-title {
@@ -4919,21 +4921,19 @@ button.file-name:hover {
   color: var(--error-text);
 }
 
-.settings-danger-group {
-  border: 1px solid var(--error-text);
-}
-
 .settings-row-danger {
   gap: 12px;
 }
 
+/* A red-shaded button, no outline: the fill carries the warning. */
 .settings-danger {
   color: var(--error-text);
-  border-color: var(--error-text);
+  background: var(--error-bg);
+  border-color: transparent;
 }
 
 .settings-danger:hover {
-  background: var(--error-bg);
+  background: color-mix(in srgb, var(--error-text) 12%, var(--error-bg));
 }
 
 .delete-account-docs {
@@ -5588,6 +5588,13 @@ button.file-name:hover {
 
 .place-badge[data-tone="muted"] {
   color: var(--text-badge-faint);
+}
+
+/* List rows carry their badges as bare glyphs and text, no pill fill
+   (board cards keep it). After the tone rules above, so today's date
+   loses its orange ground too and keeps only the orange glyph. */
+.row-badges > .badge {
+  background: none;
 }
 
 /* A row of the item dialog's activity log: the label at its start, the

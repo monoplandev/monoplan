@@ -30,14 +30,14 @@ pub async fn run() -> anyhow::Result<()> {
     match Profile::active()? {
         Some(p) if p.has_account()? => match logout(&p).await? {
             Revocation::Unreached(why) => {
-                println!("Logged out (local state wiped).");
+                println!("Signed out (local state wiped).");
                 eprintln!(
                     "warning: could not reach the server to revoke this device ({why}). \
                      Its token is gone from this machine, but the device stays listed on \
                      the account; remove it from another device's Settings › Devices."
                 );
             }
-            _ => println!("Logged out (device revoked, local state wiped)."),
+            _ => println!("Signed out (device revoked, local state wiped)."),
         },
         // A local-only workspace has nothing to log out of, and
         // nothing a sign-out should destroy.

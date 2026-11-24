@@ -617,22 +617,6 @@ export function Row(props: {
             gap still separates the group from the title. */}
         <Show when={showInlineBadges()}>
           <div class="row-badges">
-            {/* Focus-membership badge — a static, non-interactive star glyph
-                shown only when the item is pinned to Focus; nothing otherwise.
-                There is no hover toggle: adding / removing goes through the row
-                context menu (spec/focus.md). */}
-            <Show
-              when={
-                !props.badgesInFooter && canPinToFocus() && focused() && !props.expanded()
-              }
-            >
-              <span
-                class="badge row-focus-badge"
-                title={m().focus.badge}
-                aria-label={m().focus.badge}
-                innerHTML={starFilledSvg}
-              />
-            </Show>
             <Show
               when={
                 !props.badgesInFooter &&
@@ -696,6 +680,23 @@ export function Row(props: {
                   {formatRelative(ts(), nowMs(), locale())}
                 </span>
               )}
+            </Show>
+            {/* Focus-membership badge — a static, non-interactive star glyph
+                shown only when the item is pinned to Focus; nothing otherwise.
+                Last in the group, so it always sits at the row's end.
+                There is no hover toggle: adding / removing goes through the row
+                context menu (spec/focus.md). */}
+            <Show
+              when={
+                !props.badgesInFooter && canPinToFocus() && focused() && !props.expanded()
+              }
+            >
+              <span
+                class="badge row-focus-badge"
+                title={m().focus.badge}
+                aria-label={m().focus.badge}
+                innerHTML={starFilledSvg}
+              />
             </Show>
           </div>
         </Show>

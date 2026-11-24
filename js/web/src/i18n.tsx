@@ -1196,7 +1196,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       settings: "Settings",
       website: "Monoplan website",
       privacy: "Privacy policy",
-      logOut: "Log out",
+      logOut: "Sign out",
       logOutTitle: "Sign out of Monoplan?",
       logOutConfirm:
         "Signing out removes this device's local copy of your data.",
