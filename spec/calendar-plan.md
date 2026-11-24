@@ -418,6 +418,12 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   `agendaHideEmptyDays` device preference; iOS 2026-11-23, a filter
   menu in the page's toolbar holding only that tick), the empty line
   reading "Nothing scheduled" (Today's "Nothing today").
+- **Past days** (web, 2026-11-25, not browser-checked): "Hide past
+  days" under "Hide empty days" in the filter menu (a device
+  preference, unchecked by default, not counted and not cleared, as
+  that one) leaves out the days gone by, so the agenda starts at
+  Overdue / Today. Overdue stays. A past day picked on the mini
+  calendar still shows, alone, until the agenda is left. Web only.
 - **Week breaks** (web, 2026-11-22): the day that opens a week (the
   locale's first day from `Intl.Locale` week info, else Monday; with
   days missing, the first day group of a new week) has "Week N" at the

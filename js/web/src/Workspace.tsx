@@ -64,6 +64,7 @@ import {
   type DayGroup,
 } from "./dayGroups.ts";
 import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
+import { loadHidePastDays, saveHidePastDays } from "./agendaHidePastDays.ts";
 import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
 
 import { addDaysToStamp, nowMs, todayStamp, whenDay } from "./format.tsx";
@@ -859,6 +860,7 @@ export function Workspace(props: {
   // Every day gets a section unless "Hide empty days" (the agenda's
   // filter menu, a device preference, off by default) is checked.
   const [hideEmptyDays, setHideEmptyDays] = createSignal(loadHideEmptyDays());
+  const [hidePastDays, setHidePastDays] = createSignal(loadHidePastDays());
   // Which agenda view the header's switch shows: the agenda list (days
   // down the page) or the agenda columns (a column per day), both
   // `Upcoming`. A device preference (`agendaMode.ts`).
@@ -901,7 +903,7 @@ export function Workspace(props: {
     const picked = agendaPicked();
     let floor = addDaysToStamp(today, -AGENDA_PAST_DAYS);
     if (picked !== null && picked < floor) floor = picked;
-    const groups = groupByDay(
+    const all = groupByDay(
       docs.calendarItems(),
       today,
       labels,
@@ -909,6 +911,11 @@ export function Workspace(props: {
       floor,
       (it) => lingering.has(it.id),
     );
+    // "Hide past days": the days gone by are left out, all but one the
+    // mini calendar jumped to. Overdue is not one of them.
+    const groups = hidePastDays()
+      ? all.filter((g) => g.urgency !== "past" || g.key === picked)
+      : all;
     const days = hideEmptyDays()
       ? groups
       : fillEmptyDays(groups, today, labels, locale(), undefined, agendaReach());
@@ -4099,8 +4106,9 @@ export function Workspace(props: {
                 hidden set on the Home doc (`spec/sharing-plan.md`), so
                 the checked workspaces are the ones not hidden, once any
                 is hidden. The workspace rows only show once there is
-                more than one doc; "Hide empty days" leads the menu
-                either way (a view option: not counted, not cleared). */}
+                more than one doc; "Hide empty days" and "Hide past days"
+                lead the menu either way (view options: not counted,
+                not cleared). */}
             <Show when={view().kind === "upcoming"}>
               <DoneFilterMenu
                 options={[
@@ -4110,6 +4118,14 @@ export function Workspace(props: {
                     onChange: (hide) => {
                       setHideEmptyDays(hide);
                       saveHideEmptyDays(hide);
+                    },
+                  },
+                  {
+                    label: m().upcoming.hidePastDays,
+                    checked: hidePastDays(),
+                    onChange: (hide) => {
+                      setHidePastDays(hide);
+                      saveHidePastDays(hide);
                     },
                   },
                 ]}

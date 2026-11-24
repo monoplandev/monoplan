@@ -501,6 +501,7 @@ export type Messages = {
     week: (n: number) => string;
     /** Filter-menu option: leave out the days nothing is on. */
     hideEmptyDays: string;
+    hidePastDays: string;
     /** Calendar header switch: the agenda list view, days down the page. */
     modeList: string;
     /** Calendar header switch: the agenda column view, a column per day. */
@@ -948,6 +949,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addOnDay: (day) => `Añadir elemento: ${day}`,
       week: (n) => `Semana ${n}`,
       hideEmptyDays: "Ocultar días vacíos",
+      hidePastDays: "Ocultar días pasados",
       modeList: "Lista",
       modeColumns: "Columnas",
       event: "Evento",
@@ -1366,6 +1368,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       addOnDay: (day) => `Add item on ${day}`,
       week: (n) => `Week ${n}`,
       hideEmptyDays: "Hide empty days",
+      hidePastDays: "Hide past days",
       modeList: "List",
       modeColumns: "Columns",
       event: "Event",
