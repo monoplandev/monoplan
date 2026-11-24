@@ -280,8 +280,8 @@ export function Nav(props: {
    *  current view). */
   assignedCount: number | null;
   /** The device's list-counts preference (`listCounts.ts`); when true, render the live-item count
-   *  badge beside each non-Inbox list in every section (showing "-" when
-   *  the list is empty). Inbox badges are always shown regardless. */
+   *  badge beside each non-Inbox list in every section (none when the
+   *  list is empty). Inbox badges are always shown regardless. */
   showListCounts: boolean;
   view: ViewKey;
   setView: (v: ViewKey) => void;
@@ -684,10 +684,6 @@ function DocSection(props: {
   createEffect(() => setDndLists(lists()));
   // Open-item count per list, read straight off the projection arrays.
   const openCount = (listId: string): number => app.state.listOpen[listId]?.length ?? 0;
-  const countLabel = (listId: string): string => {
-    const n = openCount(listId);
-    return n > 0 ? String(n) : "-";
-  };
   const isActive = (listId: string): boolean =>
     props.view.kind === "list" &&
     props.view.id === listId &&
@@ -1171,7 +1167,9 @@ function DocSection(props: {
       >
         <span class="nav-item-icon" innerHTML={archiveSvg} />
         {m().nav.inbox}
-        <span class="nav-item-count">{countLabel("inbox")}</span>
+        <Show when={openCount("inbox") > 0}>
+          <span class="nav-item-count">{openCount("inbox")}</span>
+        </Show>
       </button>
       <Show when={lists().length > 0}>
         <Dnd
@@ -1239,8 +1237,8 @@ function DocSection(props: {
                     onSave={(next) => app.renameList(l().id, next)}
                     registerStart={(fn) => (startListRename = fn)}
                   />
-                  <Show when={props.showListCounts}>
-                    <span class="nav-item-count">{countLabel(l().id)}</span>
+                  <Show when={props.showListCounts && openCount(l().id) > 0}>
+                    <span class="nav-item-count">{openCount(l().id)}</span>
                   </Show>
                 </ContextMenu.Trigger>
                 {/* Rename + Archive are single-list actions. Multi-select

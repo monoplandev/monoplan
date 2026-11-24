@@ -758,7 +758,7 @@ private extension View {
 
 extension View {
     /// The small navigation title drawn by hand, for a count beside it
-    /// in a regular weight: "-" for none, nothing while `count` is
+    /// in a regular weight: nothing for none, or while `count` is
     /// nil (not loaded). Goes with `navigationTitle`, which still names the
     /// page for the back button. `icon` goes before the title: the
     /// page's icon from the Home menu, in the menu's tint. `workspace`
@@ -799,8 +799,8 @@ extension View {
                             Text(title)
                                 .font(.headline)
                                 .lineLimit(1)
-                            if let count {
-                                Text(count == 0 ? "-" : "\(count)")
+                            if let count, count > 0 {
+                                Text("\(count)")
                                     .font(.body.monospacedDigit())
                                     .foregroundStyle(.secondary)
                                     .layoutPriority(1)
