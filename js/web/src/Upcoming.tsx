@@ -1401,8 +1401,8 @@ export function Upcoming(props: {
     return m().upcoming.spanDay(r.span.day);
   };
 
-  // "in 2h 15m" beside a timed row later today: how soon it starts, read
-  // off the shared minute tick so it counts down in place. Only today's
+  // "in 2h 15m" under a timed row's time later today: how soon it
+  // starts, read off the shared minute tick so it counts down in place. Only today's
   // open rows with a start still ahead; the minute is rounded up so a
   // row never reads "in 0m" before its time.
   const startsIn = (r: DayRow): string | null => {
@@ -1556,7 +1556,12 @@ export function Upcoming(props: {
                       class="upcoming-row-time"
                       data-empty={timeLabel(r) === "" ? "" : undefined}
                     >
-                      {timeLabel(r)}
+                      <span class="upcoming-row-clock">{timeLabel(r)}</span>
+                      <Show when={startsIn(r)}>
+                        {(label) => (
+                          <span class="upcoming-row-soon">{label()}</span>
+                        )}
+                      </Show>
                     </span>
                     <span class="upcoming-row-body">
                       <span class="upcoming-row-title">
@@ -1664,13 +1669,6 @@ export function Upcoming(props: {
                             )}
                           </Show>
                         </span>
-                      </Show>
-                    </span>
-                    <span class="upcoming-row-meta">
-                      <Show when={startsIn(r)}>
-                        {(label) => (
-                          <span class="upcoming-row-soon">{label()}</span>
-                        )}
                       </Show>
                     </span>
                   </ContextMenu.Trigger>
