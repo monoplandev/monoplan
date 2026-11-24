@@ -460,12 +460,16 @@ body {
 .task-panel .task-dialog-notes,
 .task-modal .task-dialog-notes {
   padding: 2px 8px;
+  background: transparent;
+  border-radius: 3px;
 }
 
-/* Editing state: a light field surface so the pane title reads as
-   editable while it holds focus. */
+/* Editing state: a light field surface so the pane title and notes read
+   as editable while they hold focus. */
 .task-panel .task-dialog-title:focus,
-.task-modal .task-dialog-title:focus {
+.task-modal .task-dialog-title:focus,
+.task-panel .task-dialog-notes:focus,
+.task-modal .task-dialog-notes:focus {
   background: var(--bg-badge);
 }
 
@@ -1671,11 +1675,6 @@ input.task-check:hover {
   line-height: var(--lh-compact);
 }
 
-.row .row-text[contenteditable="true"] a {
-  color: var(--link);
-  text-decoration: underline;
-  cursor: pointer;
-}
 
 .row-description {
   color: var(--text-empty);
@@ -3598,10 +3597,20 @@ input.task-check:hover {
   pointer-events: none;
 }
 
-.task-dialog-title a,
-.task-dialog-notes a {
+/* URLs in the editors (linkify.ts): painted by the Custom Highlight API
+   over plain text, never anchors. Text with a faint underline; the one
+   under the pointer while ⌘ / ⌥ is held turns link blue, and its editor
+   takes the pointer cursor. */
+::highlight(link) {
+  text-decoration: underline color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+::highlight(link-hot) {
   color: var(--link);
-  text-decoration: underline;
+  text-decoration: underline var(--link);
+}
+
+.link-hot {
   cursor: pointer;
 }
 

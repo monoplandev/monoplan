@@ -21,7 +21,7 @@ import {
 } from "./format.tsx";
 import { laneLabel, useAppI18n } from "./i18n.tsx";
 import { pasteAsPlainText } from "./plainTextPaste.ts";
-import { openLinkOnClick, setLinkifiedText } from "./linkify.ts";
+import { clearLinks, openLinkOnClick, refreshLinks, setLinkifiedText } from "./linkify.ts";
 import { applySuggestionChange, titleDate } from "./whenSuggest.ts";
 import type { ViewKey } from "./prefs.ts";
 import {
@@ -238,9 +238,8 @@ export function Row(props: {
           // items open the dialog instead), so the caret always lands at
           // the end of the text — typing appends rather than overwriting
           // a select-all.
-          // Swap plain text for linkified anchors so URLs become clickable
-          // while the row is editable. The collapse path & mirror effect
-          // restore plain text, so anchors only exist in expanded rows.
+          // Mark the URLs so they become links while the row is
+          // editable; the mirror effect unmarks them on collapse.
           setLinkifiedText(textRef, props.item().text);
           queueMicrotask(() => {
             // No focus-time reveal: the dnd controller scrolls the row
@@ -318,10 +317,12 @@ export function Row(props: {
 
   // Mirror the model into the DOM while not expanded. While expanded
   // we leave the DOM alone so live edits aren't clobbered by reactive
-  // updates from peer text changes. Plain text only — the expand path
-  // swaps in linkified anchors so URLs are only clickable while editing.
+  // updates from peer text changes. URLs unmarked — the expand path
+  // marks them, so they're only links while editing.
   createEffect(() => {
-    if (!props.expanded()) textRef.textContent = props.item().text;
+    if (props.expanded()) return;
+    clearLinks(textRef);
+    textRef.textContent = props.item().text;
   });
 
   return (
@@ -415,10 +416,9 @@ export function Row(props: {
             data-placeholder={m().workspace.newItemPlaceholder}
             onClick={(e) => {
               if (!props.expanded()) return;
-              // Plain clicks on links open them (a new tab, or an in-app
-              // jump for the app's own item / list links); modifier-clicks
-              // fall through so the user can still place the caret inside
-              // a link to edit it. See `openLinkOnClick`.
+              // ⌘ / ⌥ clicks on links open them (a new tab, or an in-app
+              // jump for the app's own item / list links); plain clicks
+              // place the caret. See `openLinkOnClick`.
               openLinkOnClick(e, textRef);
               e.stopPropagation();
             }}
@@ -440,6 +440,7 @@ export function Row(props: {
               if (textRef.textContent === "" && textRef.firstChild) {
                 textRef.replaceChildren();
               }
+              if (props.expanded()) refreshLinks(textRef);
               if (isDraftId(props.item().id)) {
                 props.onDraftInput?.(textRef.textContent ?? "");
               }

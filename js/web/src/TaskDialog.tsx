@@ -49,6 +49,7 @@ import { useAppI18n, statusLabel } from "./i18n.tsx";
 import {
   collapsedCaretOffset,
   openLinkOnClick,
+  refreshLinks,
   placeCaretAtEnd,
   placeCaretAtOffset,
   placeCaretAtStart,
@@ -548,7 +549,7 @@ export function TaskDialog(props: {
   };
   // Apply an inbound delta to the buffer and the DOM, moving the caret
   // with it. The DOM is re-rendered wholesale (notes are short and the
-  // linkifier owns the markup); the caret survives via its offset.
+  // URL marks are recomputed with it); the caret survives via its offset.
   const applyInboundToEditor = (ops: readonly NotesDeltaOp[]) => {
     const caret = notesRef ? collapsedCaretOffset(notesRef) : null;
     const next = applyDelta(synced, ops);
@@ -586,6 +587,7 @@ export function TaskDialog(props: {
   const onNotesInput = () => {
     setNotes(editorText(notesRef));
     commitLocalEdit();
+    if (notesRef) refreshLinks(notesRef);
   };
   const onNotesCompositionStart = () => {
     if (!subscribedId) return;
@@ -1583,6 +1585,7 @@ export function TaskDialog(props: {
               onInput={() => {
                 const v = editorText(titleRef);
                 setText(v);
+                if (titleRef) refreshLinks(titleRef);
                 // The row overlay mirrors an open item's edit live; a
                 // capture has no row yet.
                 if (!isNew()) props.onLiveText?.(v);
