@@ -120,7 +120,7 @@ export type Messages = {
      *  calendar at the top of the sidebar. */
     showMiniCalendar: string;
     focus: string;
-    /** The Upcoming view: every open item with a deadline, by day. */
+    /** The Upcoming view: every open item with a date, by day. */
     upcoming: string;
     /** The Assigned view: every open item assigned to this account,
      *  across workspaces. */
@@ -221,7 +221,7 @@ export type Messages = {
   };
   workspace: {
     /** Accessible name of the task dialog's "+" chip: the menu of
-     *  registers (date, deadline, place) the item does not carry yet. */
+     *  registers (date, place) the item does not carry yet. */
     emptyBin: string;
     /** Title of the empty-bin confirmation dialog. */
     emptyBinTitle: string;
@@ -393,24 +393,13 @@ export type Messages = {
      *  list, back to its saved default view. */
     restoreDefaults: string;
   };
-  deadline: {
-    /** Section label / accessible name for the deadline control. */
-    label: string;
-    /** Task-dialog deadline input placeholder when no deadline is set. */
-    unset: string;
-    /** Badge label when the deadline is before today. */
+  calendar: {
+    /** The agenda's Overdue group: Open tasks whose date has passed. */
     overdue: string;
-    /** Badge + quick-action label for today's date. */
+    /** Today's name: the agenda's day heading, the calendar's Today button. */
     today: string;
-    /** Badge + quick-action label for tomorrow's date. */
+    /** Tomorrow's name on the agenda's day heading. */
     tomorrow: string;
-    /** Quick action that removes the deadline. */
-    clear: string;
-    /** Context-menu action that removes the deadline. */
-    remove: string;
-    /** Menu action (row context menu, the task surface's "…" menu) that
-     *  opens the item on its deadline band, calendar showing. */
-    setDate: string;
     /** Accessible label for the calendar's previous-month button. */
     prevMonth: string;
     /** Accessible label for the calendar's next-month button. */
@@ -505,8 +494,6 @@ export type Messages = {
     fixedEvent: string;
     /** Tooltip of the event switch: what turning it on changes. */
     eventHint: string;
-    /** Time-lane label for a row placed on its day by its deadline. */
-    due: string;
     /** Beside a timed row later today: how long until it starts,
      *  `span` already formatted ("2h 15m"). */
     startsIn: (span: string) => string;
@@ -884,15 +871,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       savedAsDefault: "Vista predeterminada",
       restoreDefaults: "Restaurar valores predeterminados",
     },
-    deadline: {
-      label: "Fecha límite",
-      unset: "Fecha límite",
+    calendar: {
       overdue: "Vencido",
       today: "Hoy",
       tomorrow: "Mañana",
-      clear: "Borrar",
-      remove: "Quitar fecha límite",
-      setDate: "Elegir fecha límite",
       prevMonth: "Mes anterior",
       nextMonth: "Mes siguiente",
     },
@@ -937,7 +919,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Evento",
       fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
-      due: "Plazo",
       startsIn: (span) => `en ${span}`,
       spanDay: (day) => `Día ${day}`,
       spanUntil: (time) => `hasta ${time}`,
@@ -1294,15 +1275,10 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       savedAsDefault: "Default view",
       restoreDefaults: "Restore defaults",
     },
-    deadline: {
-      label: "Deadline",
-      unset: "Deadline",
+    calendar: {
       overdue: "Overdue",
       today: "Today",
       tomorrow: "Tomorrow",
-      clear: "Clear",
-      remove: "Remove deadline",
-      setDate: "Set deadline",
       prevMonth: "Previous month",
       nextMonth: "Next month",
     },
@@ -1347,7 +1323,6 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Event",
       fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
-      due: "Deadline",
       startsIn: (span) => `in ${span}`,
       spanDay: (day) => `Day ${day}`,
       spanUntil: (time) => `until ${time}`,

@@ -4,14 +4,14 @@ import XCTest
 final class AgendaSnapshotTests: XCTestCase {
     let sample = """
     [{"day":"2026-10-26","today":true,"rows":[
-      {"id":"a","text":"Overdue report","list_id":"work","state":"todo","deadline":"2026-10-20","placed_by":"deadline","tone":"overdue"},
-      {"id":"b","text":"Standup","list_id":"inbox","state":"backlog","event":true,"when":"2026-10-26T09:00","duration":15,"placed_by":"when","tone":"neutral"},
-      {"id":"d","text":"Groceries","list_id":"inbox","state":"done","when":"2026-10-26","placed_by":"when","tone":"neutral"}
+      {"id":"a","text":"Overdue report","list_id":"work","state":"todo","when":"2026-10-20","tone":"overdue"},
+      {"id":"b","text":"Standup","list_id":"inbox","state":"backlog","event":true,"when":"2026-10-26T09:00","duration":15,"tone":"neutral"},
+      {"id":"d","text":"Groceries","list_id":"inbox","state":"done","when":"2026-10-26","tone":"neutral"}
     ]},
     {"day":"2026-10-27","today":false,"rows":[]},
     {"day":"2026-10-28","today":false,"rows":[
-      {"id":"x","text":"Dentist","list_id":"errands","state":"backlog","event":true,"when":"2026-10-28T14:30","placed_by":"when","tone":"neutral"},
-      {"id":"y","text":"Cancelled thing","list_id":"inbox","state":"cancelled","event":true,"when":"2026-10-28","placed_by":"when","tone":"neutral"}
+      {"id":"x","text":"Dentist","list_id":"errands","state":"backlog","event":true,"when":"2026-10-28T14:30","tone":"neutral"},
+      {"id":"y","text":"Cancelled thing","list_id":"inbox","state":"cancelled","event":true,"when":"2026-10-28","tone":"neutral"}
     ]}]
     """
 

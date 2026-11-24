@@ -18,19 +18,16 @@ pub struct AssignedEntry {
     pub doc_id: Option<String>,
 }
 
-/// The earlier of the item's two dates (`when`, deadline), when it has
-/// one. Both are `YYYY-MM-DD…`, so they order as text.
+/// The item's `when`, when it has one. `YYYY-MM-DD…`, so it orders as
+/// text.
 fn date(item: &Item) -> Option<&str> {
-    match (item.when.as_deref(), item.deadline.as_deref()) {
-        (Some(w), Some(d)) => Some(w.min(d)),
-        (w, d) => w.or(d),
-    }
+    item.when.as_deref()
 }
 
 /// Every open workspace's Open items (any open workflow state, not
 /// binned) whose assignee is the doc's own account, tasks and events
 /// alike, each tagged with its workspace. Dated items first by their
-/// earliest date, then the rest newest first. A doc with no account
+/// `when`, then the rest newest first. A doc with no account
 /// (an accountless profile) has none.
 pub fn assigned(cx: &Ctx) -> anyhow::Result<Vec<AssignedEntry>> {
     let mut rows: Vec<AssignedEntry> = cx
@@ -91,9 +88,7 @@ mod tests {
         add(&work, "nobody's", None);
         let closed = add(&work, "closed", Some("me"));
         let binned = add(&work, "binned", Some("me"));
-        work.set_item_deadline(&dated, Some("2026-12-05")).unwrap();
-        // The earlier of the two dates places the row.
-        work.set_item_deadline(&sooner, Some("2026-12-20")).unwrap();
+        work.set_item_when(&dated, Some("2026-12-05")).unwrap();
         work.set_item_when(&sooner, Some("2026-12-01T09:00"))
             .unwrap();
         work.set_item_done(&closed, true).unwrap();

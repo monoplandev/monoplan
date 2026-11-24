@@ -169,7 +169,7 @@ enum ItemCmd {
     Ls(items::LsArgs),
     /// Show one item: its row, then its notes.
     Show(items::ShowArgs),
-    /// Set one or more fields on an item: --text, --list, --lifecycle, --when, --duration, --deadline, --place, --star, --unstar.
+    /// Set one or more fields on an item: --text, --list, --lifecycle, --when, --duration, --place, --star, --unstar.
     Set(Box<items::SetArgs>),
     /// Send an item to the bin (its workflow state is preserved).
     Bin(items::IdArg),

@@ -29,7 +29,7 @@ Companion to `calendar-plan.md` (the `when` register, the agenda),
 | What does the flag change? | **What a passed `when` means** (it went by, not overdue) **and how the status reads** (Event / Done / Cancelled). Nothing about where the item shows. |
 | Where is the flag in the UI? | **A checkbox under the date**, shown once the item has one. Off by default; the calendar's Add ticks it. |
 | Where do events show? | **Where any dated item does:** on the calendar, and as a row in their list when they have one. One with no list is not in Inbox, like every dated item. |
-| Do events have a checkbox? | **Not on the calendar while open** (2026-11-17): nothing asks for the tick, so the row leads with a dot in the box's place (an upright pill, a calendar's event bar, as tall as the row, since 2026-11-18 on the web, iOS and macOS; it is back in the box's place once the event's day has gone by, done or not). Marked done or cancelled (item surface, row menu), the row shows the box, ticked or crossed, and unticking it there reopens the event. A deadline's own row keeps its box (it is owed), and so does the event's row in a user list, where the tick is how a passed event is cleared. |
+| Do events have a checkbox? | **Not on the calendar while open** (2026-11-17): nothing asks for the tick, so the row leads with a dot in the box's place (an upright pill, a calendar's event bar, as tall as the row, since 2026-11-18 on the web, iOS and macOS; it is back in the box's place once the event's day has gone by, done or not). Marked done or cancelled (item surface, row menu), the row shows the box, ticked or crossed, and unticking it there reopens the event. The event's row in a user list keeps its box, where the tick is how a passed event is cleared. |
 | What happens when the day passes? | **Nothing.** No write, no state change, no nag. It leaves the agenda. In a user list its row stays until it is ticked, moved or binned (see "Deferred"). |
 | An event with no `when`? | **Cannot be seen as one.** `is_event` requires both, so there is no Unscheduled section. Something with no date yet is an ordinary item. |
 | Why a separate register, not a marker inside `when`? | The `when` grammar stays 10 or 16 characters and a plain string sort, and independent edits merge: one device toggling Event while another changes the time keeps both. |
@@ -41,9 +41,7 @@ An event is an ordinary item. Every other register keeps its meaning.
 - **Lifecycle is untouched.** The open ladder is not offered on an event:
   the four open states read as one status, "Event". The value underneath
   is preserved and takes effect again when the flag goes.
-- **`deadline`, `duration`, `place`, Starred are untouched.** A deadline
-  on an event is legitimate ("tickets by the 3rd") and places and tones
-  the row by the agenda's rules.
+- **`duration`, `place`, Starred are untouched.**
 - **Overdue.** An Open task's past `when` is overdue; an event's is not
   judged (`calendar-plan.md` "Semantics"). `is_event` is what tells the
   two apart.

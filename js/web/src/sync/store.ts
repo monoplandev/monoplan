@@ -126,13 +126,10 @@ export interface ItemView {
   /** The register's transition timestamp (unix millis) — the Done view's
    *  sort key. Equals `createdAt` while the register is unwritten. */
   lifecycleAt: number;
-  /** Optional date-only deadline as a raw `YYYY-MM-DD` string (floating
-   *  local calendar date — never parse it with `new Date("YYYY-MM-DD")`,
-   *  which reads as UTC midnight). Absent means no deadline. */
-  deadline?: string;
   /** Optional planned date: raw `YYYY-MM-DD` (all-day) or
    *  `YYYY-MM-DDTHH:MM` (timed), floating (`spec/calendar-plan.md`).
-   *  Same never-`new Date()` rule as `deadline`. Absent means unset. */
+   *  A floating local calendar date: never parse it with `new Date()`,
+   *  which reads a bare date as UTC midnight. Absent means unset. */
   when?: string;
   /** The IANA zone a timed `when` is fixed to ("Fixed instants" in
    *  `spec/calendar-plan.md`). `when` stays wall time on this device
@@ -349,7 +346,6 @@ export interface DocItemActions {
   getItem(id: string): ItemView | undefined;
   editItemText(id: string, text: string): void;
   setItemNotes(id: string, notes: string): void;
-  setItemDeadline(id: string, deadline: string | null): void;
   setItemAssignee(id: string, assignee: string | null): void;
   /** Add a subtask to an item at `index` of its subtasks (omitted
    *  appends) and return its id; blank text is ignored (`undefined`).
@@ -500,10 +496,6 @@ export interface DocApp extends DocItemActions {
    *  `fullResync`: the subscriber must reload the text. Returns the
    *  unsubscribe function. */
   onNotesDelta(cb: (id: string, ops: readonly NotesDeltaOp[] | null) => void): () => void;
-  /** Set (`YYYY-MM-DD`) or clear (`null`) an item's date-only deadline.
-   *  The value is a floating local calendar date; a malformed string is
-   *  rejected by the core. */
-  setItemDeadline(id: string, deadline: string | null): void;
   /** Assign the item to one member by account id, or unassign it
    *  (`null`). Writing the assignee it already has is a no-op. */
   setItemAssignee(id: string, assignee: string | null): void;
@@ -950,7 +942,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           notes: ev.notes ?? "",
           state: parseWorkflowState(ev.state),
           lifecycleAt: Number(ev.lifecycleAt ?? ev.createdAt ?? 0),
-          deadline: ev.deadline ?? undefined,
           when: ev.when ?? undefined,
           whenZone: ev.whenZone ?? undefined,
           whenSuggested: ev.whenSuggested ?? undefined,
@@ -1073,12 +1064,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
           binnedAt,
         });
         adjustBinCount((binnedAt != null ? 1 : 0) - (wasBinned ? 1 : 0));
-        break;
-      }
-      case "itemDeadlineChanged": {
-        if (state.itemsById[ev.id]) {
-          setState("itemsById", ev.id, "deadline", ev.deadline ?? undefined);
-        }
         break;
       }
       case "itemAssigneeChanged": {
@@ -1584,9 +1569,6 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
       return () => {
         notesListeners.delete(cb);
       };
-    },
-    setItemDeadline(id, deadline) {
-      mutate(() => replica.setItemDeadline(id, deadline ?? undefined));
     },
     setItemAssignee(id, assignee) {
       mutate(() => replica.setItemAssignee(id, assignee ?? undefined));

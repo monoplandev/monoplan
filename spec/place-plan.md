@@ -216,7 +216,7 @@ anything the web client has looked up once.
 
 ## Web
 
-- **Field.** `PlaceField` in the task dialog, under the deadline band,
+- **Field.** `PlaceField` in the task dialog, under the date band,
   with two faces (revised 2026-10-15). With a place set, the band shows
   the label as a link that opens the map in a new tab: the pin on
   openstreetmap.org when the place has coordinates, the map's search for

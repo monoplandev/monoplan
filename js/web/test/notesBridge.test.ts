@@ -179,7 +179,7 @@ test("notes written inside an action batch ride the batch's undo step", () => {
   expect(app.state.itemsById[b]?.notes).toBe("hello");
 });
 
-// The capture form's shape: add, notes, deadline, focus, done inside one
+// The capture form's shape: add, notes, date, focus, done inside one
 // batch. One undo removes the item; one redo restores every field.
 test("a full capture is one undo step and redo restores its fields", () => {
   const replica = new Replica(
@@ -193,11 +193,11 @@ test("a full capture is one undo step and redo restores its fields", () => {
   const id = app.withActionBatch(() => {
     const id = app.addItemAt("inbox", "capture", 0);
     app.setItemNotes(id, "some notes");
-    app.setItemDeadline(id, "2026-10-01");
+    app.setItemWhen(id, "2026-10-01");
     app.addToFocus(id);
     return id;
   });
-  expect(app.state.itemsById[id]?.deadline).toBe("2026-10-01");
+  expect(app.state.itemsById[id]?.when).toBe("2026-10-01");
   expect(app.undo()).toBe(true);
   expect(app.state.itemsById[id]).toBeUndefined();
   expect(app.canUndo()).toBe(false);
@@ -205,6 +205,6 @@ test("a full capture is one undo step and redo restores its fields", () => {
   const it = app.state.itemsById[id];
   expect(it?.text).toBe("capture");
   expect(it?.notes).toBe("some notes");
-  expect(it?.deadline).toBe("2026-10-01");
+  expect(it?.when).toBe("2026-10-01");
   expect(app.state.focusEntries).toContainEqual({ docId: null, itemId: id });
 });

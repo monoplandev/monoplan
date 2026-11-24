@@ -122,8 +122,7 @@ pub(super) fn item_json(item: &ItemView) -> Item {
 /// glued on when a timed `when` carries one, e.g. `@2026-09-12T14:00+1h30m`,
 /// or an all-day one spans more than a day, in whole days: `@2026-09-12+3d`)
 /// then ` tz:<zone>` when the `when` is fixed to a zone (the time shown
-/// is this device's), ` !<deadline>` and ` at:<place label>`, each only
-/// when set. Shared by `ls` and `agenda`.
+/// is this device's) and ` at:<place label>`, each only when set. Shared by `ls` and `agenda`.
 pub fn date_tags(item: &ItemView) -> String {
     let mut s = String::new();
     if let Some(w) = &item.when {
@@ -143,10 +142,6 @@ pub fn date_tags(item: &ItemView) -> String {
     if let Some(z) = item.when_zone() {
         s.push_str(" tz:");
         s.push_str(z);
-    }
-    if let Some(d) = &item.deadline {
-        s.push_str(" !");
-        s.push_str(d);
     }
     if let Some(p) = &item.place {
         s.push_str(" at:");
@@ -437,9 +432,6 @@ pub struct SetArgs {
     /// Duration: minutes, or `1h30m` / `2h` / `45m` / `3d` / `1d2h`; `-` clears.
     #[arg(long, group = "field", value_name = "LEN|-")]
     pub duration: Option<String>,
-    /// Deadline, `YYYY-MM-DD`; `-` clears.
-    #[arg(long, group = "field", value_name = "DATE|-")]
-    pub deadline: Option<String>,
     /// Assign to one member of the workspace by account id (`share
     /// members` lists them), or `me`; `-` unassigns.
     #[arg(long, group = "field", value_name = "ACCOUNT|me|-")]
@@ -516,9 +508,6 @@ pub fn set(cx: &Ctx, args: SetArgs, out: &mut dyn Write) -> anyhow::Result<()> {
     }
     if let Some(duration) = duration {
         write::set_duration(cx, id, duration)?;
-    }
-    if let Some(deadline) = &args.deadline {
-        write::set_deadline(cx, id, clear_or(deadline))?;
     }
     if let Some(assign) = &args.assign {
         let who = match clear_or(assign) {
@@ -668,7 +657,6 @@ mod tests {
             event: false,
             task: false,
             duration: None,
-            deadline: None,
             assign: None,
             place: None,
             coords: None,
@@ -1052,7 +1040,6 @@ mod tests {
                 lifecycle: Some(LifecycleState::InProgress),
                 when: Some("2026-11-02T09:00".into()),
                 duration: Some("1h30m".into()),
-                deadline: Some("2026-11-05".into()),
                 place: Some("Office".into()),
                 coords: Some("-33.87,151.21".into()),
                 star: Some(StarPos::Append),
@@ -1067,7 +1054,6 @@ mod tests {
         assert_eq!(item.state, WorkflowState::InProgress);
         assert_eq!(item.when.as_deref(), Some("2026-11-02T09:00"));
         assert_eq!(item.duration, Some(90));
-        assert_eq!(item.deadline.as_deref(), Some("2026-11-05"));
         let place = item.place.unwrap();
         assert_eq!(place.label, "Office");
         assert_eq!((place.lat, place.lon), (Some(-33.87), Some(151.21)));
@@ -1079,7 +1065,6 @@ mod tests {
             &Ctx::bare(&doc, &[&doc], &Lens::home(&doc)),
             SetArgs {
                 when: Some("-".into()),
-                deadline: Some("-".into()),
                 place: Some("-".into()),
                 unstar: true,
                 ..set_args(&id)
@@ -1090,7 +1075,6 @@ mod tests {
         let item = doc.get_item(&id).unwrap();
         assert_eq!(item.when, None);
         assert_eq!(item.duration, None, "clearing when clears the duration");
-        assert_eq!(item.deadline, None);
         assert_eq!(item.place, None);
         assert!(doc.focus_view().is_empty());
     }
@@ -1228,7 +1212,6 @@ mod tests {
             list_id: "l".into(),
             state: WorkflowState::Backlog,
             lifecycle_at: 0,
-            deadline: None,
             when: Some("2026-10-06".into()),
             when_zoned: None,
             when_suggested: None,

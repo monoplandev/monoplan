@@ -14,7 +14,7 @@ final class AgendaDragTests: XCTestCase {
     private func entry(_ id: String, when: String) -> AgendaEntry {
         AgendaEntry(
             id: id, text: id, listId: "inbox", listName: nil, listIcon: nil, state: .todo, event: false,
-            when: when, duration: nil, deadline: nil, place: nil, assignee: nil, placedBy: .when,
+            when: when, duration: nil, place: nil, assignee: nil,
             tone: .neutral, docId: nil, docName: nil)
     }
 

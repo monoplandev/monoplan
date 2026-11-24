@@ -1,6 +1,6 @@
 // An item's page: the web client's task dialog (js/web/src/TaskDialog.tsx)
 // laid out top to bottom in the same order: status, title, list, planned
-// date, deadline, place, notes, then the activity log. Read from
+// date, place, notes, then the activity log. Read from
 // `Engine.item` and reread on every doc change while shown.
 // It comes up as a page sheet over whatever list the row was in (full
 // height only), as the dialog floats over the web's lists, rather
@@ -439,10 +439,10 @@ struct ItemView: View {
         return list
     }
 
-    /// List, planned date, deadline (only when set, as on the web) and
-    /// place. The date and place rows are always there, muted when
-    /// empty: they are where setting one will happen. A pending date
-    /// suggestion stands in the date row's place until it is answered.
+    /// List, planned date and place. The date and place rows are
+    /// always there, muted when empty: they are where setting one will
+    /// happen. A pending date suggestion stands in the date row's place
+    /// until it is answered.
     private func fields(_ item: ItemInfo) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             listField(item)
@@ -457,9 +457,6 @@ struct ItemView: View {
                         model.setWhenSuggested(ref, when: nil)
                     }
                 })
-            if let deadline = item.deadline {
-                FieldRow("timer", text: String(localized: "Due \(Self.dayText(deadline))"))
-            }
             Divider()
             // As the date: a row with the round button that opens the
             // editor (the whole row does while there is no place); the

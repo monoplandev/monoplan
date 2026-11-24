@@ -3,7 +3,7 @@ import { formatWhenBadge, nowMs, todayStamp } from "./format.tsx";
 import calendarSvg from "./icons/calendar.svg?raw";
 import { useAppI18n } from "./i18n.tsx";
 
-// Compact planned-date badge, the `when` twin of `DeadlineBadge`. Reads
+// Compact planned-date badge. Reads
 // the raw register (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) and renders a
 // short label with a `data-tone` of today / future, or muted for
 // done/binned items. A past `when` shows its date, never a word and never
@@ -37,7 +37,7 @@ export function WhenBadge(props: { when: string; muted?: boolean; iconOnly?: boo
           title={title()}
           aria-label={props.iconOnly ? title() : undefined}
         >
-          <span class="deadline-badge-icon" innerHTML={calendarSvg} />
+          <span class="badge-icon" innerHTML={calendarSvg} />
           <Show when={!props.iconOnly}>{i().label}</Show>
         </span>
       )}

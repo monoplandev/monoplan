@@ -799,7 +799,7 @@ function BoardColumn(props: {
               assigneeOf={props.assigneeOf}
               onMoveToList={props.onMoveToList}
               openOnTap={props.openOnTap}
-              deadlineInFooter
+              badgesInFooter
             />
           )}
         </Dnd>

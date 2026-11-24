@@ -711,16 +711,6 @@
         }
       }
     },
-    "Deadline" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plazo"
-          }
-        }
-      }
-    },
     "Delete" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -877,27 +867,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hecho"
-          }
-        }
-      }
-    },
-    "Due %@" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vence el %@"
-          }
-        }
-      }
-    },
-    "due today" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "vence hoy"
           }
         }
       }

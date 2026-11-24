@@ -9,7 +9,6 @@ import {
   canPinToFocusIn,
   type RevealTarget,
 } from "./ItemContextMenu.tsx";
-import { DeadlineBadge } from "./DeadlineBadge.tsx";
 import { subtaskCount } from "./SubtasksField.tsx";
 import { Avatar } from "./Avatar.tsx";
 import { PlaceBadge } from "./PlaceBadge.tsx";
@@ -110,9 +109,9 @@ export function Row(props: {
   /** When true (a touch device), a plain tap on the row opens the dialog
    *  instead of only selecting — inline editing is unpleasant on touch. */
   openOnTap?: () => boolean;
-  /** Board cards pin the deadline badge to a footer at the bottom of the card;
-   *  list rows show it inline after the title instead. */
-  deadlineInFooter?: boolean;
+  /** Board cards pin the badges to a footer at the bottom of the card;
+   *  list rows show them inline after the title instead. */
+  badgesInFooter?: boolean;
   /** Done / Bin / Focus views: when true, badge the row with its origin
    *  list name. Resolved via `listLabel` so `main` shows the Home label. */
   showList?: () => boolean;
@@ -157,7 +156,7 @@ export function Row(props: {
   // otherwise flash a "Done" pill for its last three seconds.
   const stateBadge = createMemo(() => {
     return props.viewKind === "list" &&
-      !props.deadlineInFooter &&
+      !props.badgesInFooter &&
       props.showState?.() &&
       isOpen(props.item())
       ? laneLabel(m(), props.item().state)
@@ -173,7 +172,7 @@ export function Row(props: {
   // The global Done view leads with the stamp, sat right of the checkbox
   // and without the check glyph (the ticked box already says done). Bin
   // rows and board Done cards keep it trailing with the other badges.
-  const leadingStamp = () => props.viewKind === "done" && !props.deadlineInFooter;
+  const leadingStamp = () => props.viewKind === "done" && !props.badgesInFooter;
   // Hover text on the stamp: the full local date-time, prefixed on Bin
   // rows so it names the transition ("Binned …").
   const stampTitle = (ts: number): string => {
@@ -208,14 +207,13 @@ export function Row(props: {
   const showInlineBadges = () =>
     Boolean(originList()) ||
     Boolean(stateBadge()) ||
-    (!props.deadlineInFooter &&
+    (!props.badgesInFooter &&
       ((!leadingStamp() && Boolean(rowStamp())) ||
         Boolean(assignee()) ||
         (!props.expanded() &&
           ((canPinToFocus() && focused()) ||
             (isOpen(props.item()) &&
               (Boolean(props.item().when) ||
-                Boolean(props.item().deadline) ||
                 Boolean(props.item().place) ||
                 Boolean(subtasks())))))));
   let textRef!: HTMLSpanElement;
@@ -340,7 +338,7 @@ export function Row(props: {
       listLabel={props.listLabel}
     >
       <ContextMenu.Trigger
-        class={props.deadlineInFooter ? "row row-card" : "row"}
+        class={props.badgesInFooter ? "row row-card" : "row"}
         data-done={isClosed(props.item()) ? "" : undefined}
         data-cancelled={isCancelled(props.item()) ? "" : undefined}
         data-binned={isBinned(props.item()) ? "" : undefined}
@@ -548,14 +546,14 @@ export function Row(props: {
             a direct child of the card so the badges start at the card's
             left padding edge (under the checkbox), not the title. List
             rows show them inline after the title instead. Once an item
-            leaves Open its deadline stops mattering — done/binned cards
+            leaves Open its date stops mattering — done/binned cards
             show only their lifecycle timestamp. Place is deliberately
             omitted from cards; it stays on list rows and in the dialog. */}
         <Show
           when={
-            props.deadlineInFooter &&
+            props.badgesInFooter &&
             !props.expanded() &&
-            ((isOpen(props.item()) && (props.item().when || props.item().deadline)) ||
+            ((isOpen(props.item()) && props.item().when) ||
               (canPinToFocus() && focused()) ||
               subtasks() ||
               assignee() ||
@@ -573,9 +571,6 @@ export function Row(props: {
             </Show>
             <Show when={isOpen(props.item()) && props.item().when}>
               {(w) => <WhenBadge when={w()} />}
-            </Show>
-            <Show when={isOpen(props.item()) && props.item().deadline}>
-              {(d) => <DeadlineBadge deadline={d()} />}
             </Show>
             <Show when={subtasks()}>
               {(c) => (
@@ -614,7 +609,7 @@ export function Row(props: {
                 context menu (spec/focus.md). */}
             <Show
               when={
-                !props.deadlineInFooter && canPinToFocus() && focused() && !props.expanded()
+                !props.badgesInFooter && canPinToFocus() && focused() && !props.expanded()
               }
             >
               <span
@@ -626,7 +621,7 @@ export function Row(props: {
             </Show>
             <Show
               when={
-                !props.deadlineInFooter &&
+                !props.badgesInFooter &&
                 !props.expanded() &&
                 isOpen(props.item()) &&
                 props.item().when
@@ -636,17 +631,7 @@ export function Row(props: {
             </Show>
             <Show
               when={
-                !props.deadlineInFooter &&
-                !props.expanded() &&
-                isOpen(props.item()) &&
-                props.item().deadline
-              }
-            >
-              {(d) => <DeadlineBadge deadline={d()} />}
-            </Show>
-            <Show
-              when={
-                !props.deadlineInFooter &&
+                !props.badgesInFooter &&
                 !props.expanded() &&
                 isOpen(props.item()) &&
                 props.item().place
@@ -654,7 +639,7 @@ export function Row(props: {
             >
               {(p) => <PlaceBadge place={p()} iconOnly />}
             </Show>
-            <Show when={!props.deadlineInFooter && !props.expanded() && subtasks()}>
+            <Show when={!props.badgesInFooter && !props.expanded() && subtasks()}>
               {(c) => (
                 <span
                   class="badge row-subtasks"
@@ -664,7 +649,7 @@ export function Row(props: {
                 </span>
               )}
             </Show>
-            <Show when={!props.deadlineInFooter && assignee()}>
+            <Show when={!props.badgesInFooter && assignee()}>
               {(a) => (
                 <Avatar accountId={a().accountId} email={a().email} title={assigneeTitle(a())} />
               )}
@@ -688,7 +673,7 @@ export function Row(props: {
             </Show>
             {/* Trailing stamp: Bin rows only (the Done view leads with
                 its stamp next to the checkbox, board cards use the footer). */}
-            <Show when={!props.deadlineInFooter && !leadingStamp() && rowStamp()}>
+            <Show when={!props.badgesInFooter && !leadingStamp() && rowStamp()}>
               {(ts) => (
                 <span class="badge row-timestamp" title={stampTitle(ts())}>
                   {formatRelative(ts(), nowMs(), locale())}

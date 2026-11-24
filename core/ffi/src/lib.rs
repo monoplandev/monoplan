@@ -1006,18 +1006,6 @@ impl Engine {
         })?)
     }
 
-    /// Set an item's deadline (`YYYY-MM-DD`), or clear it (nil).
-    pub fn set_deadline(
-        &self,
-        workspace: Option<String>,
-        id: String,
-        deadline: Option<String>,
-    ) -> Result<(), EngineError> {
-        Ok(self.client.call_blocking(workspace, move |cx| {
-            api::items::set_deadline(cx, &id, deadline.as_deref())
-        })?)
-    }
-
     /// Set an item's place, or clear it (nil). A place with
     /// coordinates or an address is written as given; a bare label
     /// takes a known place of that label whole unless `exact`.
@@ -1334,8 +1322,7 @@ impl Engine {
     }
 
     /// The Calendar nav entry's count: Open items owed or on today
-    /// (an overdue deadline, a task `when` that is over, a deadline
-    /// today, a `when` on today) over the workspaces `agenda` covers.
+    /// (a task `when` that is over, a `when` on today) over the workspaces `agenda` covers.
     /// The web's Upcoming badge, by the same rule.
     pub fn calendar_count(&self) -> Result<u32, EngineError> {
         Ok(self
@@ -1427,8 +1414,7 @@ impl Engine {
 
     /// The open items assigned to this account in every open
     /// workspace, tasks and events alike, each tagged with its
-    /// workspace: dated ones first by their earliest date (`when` or
-    /// deadline), then the rest newest first
+    /// workspace: dated ones first by their `when`, then the rest newest first
     /// (spec/sharing-plan.md "Assignment").
     pub fn assigned(&self) -> Result<Vec<AssignedEntry>, EngineError> {
         Ok(self.client.call_blocking(None, api::assigned::assigned)?)

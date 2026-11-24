@@ -41,7 +41,7 @@ Migrations: while pre-release, keep exactly one migration file per database (`00
 | [`spec/peer-id-plan.md`](spec/peer-id-plan.md) | Stable per-device Loro peer id: flock-leased slot pool, VV-width bound |
 | [`spec/board.md`](spec/board.md) | Board view: fixed Backlog / Live / Done lanes driven by item lifecycle |
 | [`spec/focus.md`](spec/focus.md) | Focus lens: curated single-tier list-by-reference, FocusRef grammar, auto-remove-on-Done |
-| [`spec/calendar-plan.md`](spec/calendar-plan.md) | Plan (not built): `when` date/datetime register beside `deadline`, agenda + month grid lenses, floating-only with reserved zone suffix, no recurrence |
+| [`spec/calendar-plan.md`](spec/calendar-plan.md) | Plan (not built): `when` date/datetime register (the `deadline` beside it removed 2026-11-24), agenda + month grid lenses, floating-only with reserved zone suffix, no recurrence |
 | [`spec/search.md`](spec/search.md) | Local search index + command palette query contract |
 | [`spec/urls.md`](spec/urls.md) | Fragment URLs for items / lists / views, history rules, internal links |
 | [`spec/cli.md`](spec/cli.md) | Commands, local key storage, device bootstrap UX |

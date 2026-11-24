@@ -149,7 +149,7 @@ struct AgendaWidgetView: View {
     }
 }
 
-/// One row: a dot in the tone's colour (red overdue, orange due today),
+/// One row: a dot in the tone's colour (red overdue),
 /// the text, and the time when timed (under the text where the widget
 /// is narrow, beside it otherwise).
 struct AgendaWidgetRow: View {
@@ -159,7 +159,6 @@ struct AgendaWidgetRow: View {
     private var tone: Color {
         switch row.tone {
         case "overdue": return .red
-        case "warning": return .orange
         default: return .accentColor
         }
     }

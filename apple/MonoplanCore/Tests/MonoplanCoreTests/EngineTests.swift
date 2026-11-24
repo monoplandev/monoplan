@@ -178,7 +178,6 @@ final class EngineTests: XCTestCase {
         try await calls.run {
             try $0.setWhen(workspace: nil, id: id, when: "2030-01-04T09:00", duration: .minutes(minutes: 45))
         }
-        try await calls.run { try $0.setDeadline(workspace: nil, id: id, deadline: "2030-01-05") }
         try await calls.run {
             try $0.setPlace(workspace: nil, id: id, place: Place(label: "Shed", lat: 1.5, lon: 2.5), exact: false)
         }
@@ -187,7 +186,6 @@ final class EngineTests: XCTestCase {
         page = try await calls.run { try $0.item(workspace: nil, id: id) }
         XCTAssertEqual(page.item.when, "2030-01-04T09:00")
         XCTAssertEqual(page.item.duration, 45)
-        XCTAssertEqual(page.item.deadline, "2030-01-05")
         XCTAssertEqual(page.item.place?.lat, 1.5)
         XCTAssertEqual(page.item.state, .inProgress)
         XCTAssertNil(page.item.whenSuggested, "a date set answers the suggestion")
@@ -245,7 +243,6 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(agenda.first?.today, true)
         let dated = try XCTUnwrap(agenda.first { $0.day == "2030-01-04" })
         XCTAssertEqual(dated.rows.map(\.id), [id])
-        XCTAssertEqual(dated.rows.first?.placedBy, .when)
         XCTAssertEqual(dated.rows.first?.tone, .neutral)
         XCTAssertEqual(dated.rows.first?.docId, home)
         let json = try await calls.run { try $0.agendaJson(days: 36_500) }

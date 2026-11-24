@@ -367,7 +367,7 @@ export function Nav(props: {
       {props.header}
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
-        {/* Upcoming: the deadline lens (proto calendar) — a cross-cutting
+        {/* Upcoming: the calendar lens — a cross-cutting
             view like Done / Bin, so a static entry with a fixed icon. */}
         <button
           type="button"

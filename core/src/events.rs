@@ -60,9 +60,6 @@ pub enum AppEvent {
         done_at: Option<i64>,
         /// Bin mask: present ≡ binned (masking the workflow state).
         binned_at: Option<i64>,
-        /// Date-only deadline (`YYYY-MM-DD`) or `None`. Floating local
-        /// calendar date — consumers format without timezone conversion.
-        deadline: Option<String>,
         /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`) or `None`.
         /// Floating wall-clock; consumers format without zone conversion.
         when: Option<String>,
@@ -111,14 +108,6 @@ pub enum AppEvent {
     ItemNotesDelta {
         id: String,
         delta: Vec<NotesDeltaOp>,
-    },
-    /// Item's date-only deadline changed. The payload is the raw
-    /// `YYYY-MM-DD` value after the write — `None` when cleared. The
-    /// value is a floating local calendar date; consumers format it
-    /// locally without timezone conversion.
-    ItemDeadlineChanged {
-        id: String,
-        deadline: Option<String>,
     },
     /// Item was assigned, reassigned or unassigned. The payload is the
     /// assignee's account id after the write, `None` when unassigned.

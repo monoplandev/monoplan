@@ -23,7 +23,7 @@ export function PlaceBadge(props: { place: Place; muted?: boolean; iconOnly?: bo
       title={title()}
       aria-label={props.iconOnly ? title() : undefined}
     >
-      <span class="deadline-badge-icon" innerHTML={mapPinSvg} />
+      <span class="badge-icon" innerHTML={mapPinSvg} />
       <Show when={!props.iconOnly}>
         <span class="place-badge-label">{props.place.label}</span>
       </Show>

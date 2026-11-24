@@ -98,13 +98,13 @@ export function ItemContextMenu(props: {
       !isDraftId(props.item().id) &&
       !isInboxDated(props.item()));
 
-  // "Open in calendar" for an unbinned item with a date or a deadline,
+  // "Open in calendar" for an unbinned item with a date,
   // from anywhere but the calendar itself.
   const canOpenInCalendar = (): boolean =>
     props.viewKind !== "upcoming" &&
     !isDraftId(props.item().id) &&
     !isBinned(props.item()) &&
-    (!!props.item().when || !!props.item().deadline);
+    !!props.item().when;
 
   // If the right-clicked row is already in the multi-select, act on the
   // whole selection; otherwise act on this row alone. The onOpenChange
@@ -227,14 +227,6 @@ export function ItemContextMenu(props: {
   const onCopyLink = () => {
     void navigator.clipboard.writeText(targetIds().map(itemUrl).join("\n"));
   };
-  // A deadline is set from the task surface's "…" menu only
-  // (`spec/calendar-plan.md`); this menu just removes one, from the one
-  // open item it is on.
-  const canRemoveDeadline = (): boolean =>
-    isOpen(props.item()) &&
-    !isDraftId(props.item().id) &&
-    targetIds().length === 1 &&
-    !!props.item().deadline;
   const onOpenChange = (open: boolean) => {
     // Register the menu in the shared overlay count so the workspace's
     // document-level shortcuts (Enter → open dialog, x → done, …) go inert
@@ -377,14 +369,6 @@ export function ItemContextMenu(props: {
               onSelect={() => props.onReveal?.(props.item().id, "calendar")}
             >
               <span>{m().focus.openInCalendar}</span>
-            </ContextMenu.Item>
-          </Show>
-          <Show when={canRemoveDeadline()}>
-            <ContextMenu.Item
-              class="context-menu-item"
-              onSelect={() => props.app.setItemDeadline(props.item().id, null)}
-            >
-              <span>{m().deadline.remove}</span>
             </ContextMenu.Item>
           </Show>
           <Show when={props.onMoveToList}>

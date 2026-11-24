@@ -15,7 +15,7 @@ Companion to `calendar-plan.md` (the `when` register) and
 
 | Question | Decision |
 |---|---|
-| What gets a reminder? | **An Open item with a timed `when`** (`YYYY-MM-DDTHH:MM`). An all-day `when` and a deadline get none. |
+| What gets a reminder? | **An Open item with a timed `when`** (`YYYY-MM-DDTHH:MM`). An all-day `when` gets none. |
 | Which kinds are there? | **Two, by the `event` flag:** an event, and a scheduled task (any other timed item). |
 | What are the settings? | **Events: 10 minutes before / Off. Scheduled tasks: At the time / 10 minutes before / Off.** **Both start Off** (changed the day it was built): a device reminds about nothing until asked to. |
 | Where do the settings live? | **On the device** (`UserDefaults`), never synced and never in a doc. Each device has its own, and a new install starts with both Off. |
@@ -101,7 +101,7 @@ at most).
 ## Not built
 
 Web (a tab can notify only while open), the CLI daemon (it would double
-up with the Mac app on one machine), all-day and deadline reminders, a
+up with the Mac app on one machine), all-day reminders, a
 daily digest, per-item overrides, synced settings, an assignee filter,
 a dismissal on one device clearing the other (phone to Mac could ride a
 Home register; Mac to phone needs push).

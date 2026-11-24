@@ -5,14 +5,14 @@ import MonoplanCore
 final class TrayMenuTests: XCTestCase {
     func entry(
         _ id: String, _ text: String, list: String = "inbox", state: ItemState = .backlog,
-        event: Bool = false, when: String? = nil, duration: UInt32? = nil, deadline: String? = nil,
-        tone: AgendaTone = .neutral, docId: String? = nil, placedBy: AgendaPlacedBy? = nil
+        event: Bool = false, when: String? = nil, duration: UInt32? = nil,
+        tone: AgendaTone = .neutral, docId: String? = nil
     ) -> AgendaEntry {
         AgendaEntry(
             id: id, text: text, listId: list, listName: nil, listIcon: nil, state: state, event: event,
             when: when,
             duration: duration,
-            deadline: deadline, place: nil, assignee: nil, placedBy: placedBy ?? (when == nil ? .deadline : .when),
+            place: nil, assignee: nil,
             tone: tone,
             docId: docId, docName: nil)
     }
@@ -24,19 +24,19 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertTrue(shows(entry("b", "Gig", state: .done, event: true, when: "2026-10-26T20:00")))
         XCTAssertFalse(shows(entry("c", "Gig", state: .done, event: true, when: "2026-10-20T20:00")))
         XCTAssertTrue(shows(entry("d", "Task", when: "2026-10-26")))
-        XCTAssertTrue(shows(entry("e", "Tickets", event: true, when: "2026-10-30", deadline: "2026-10-26", placedBy: .deadline)))
     }
 
-    /// What `Engine.agenda(days: 0)` returns on a day with all five
-    /// kinds of row, plus a group a tray does not show.
+    /// What `Engine.agenda(days: 0)` returns on a day with an
+    /// overdue task, two timed events, a done task and an untimed task,
+    /// plus a group a tray does not show.
     var sample: [AgendaGroup] {
         [
             AgendaGroup(day: "2026-10-26", today: true, rows: [
-                entry("a", "Overdue report", list: "work", state: .todo, deadline: "2026-10-20", tone: .overdue),
+                entry("a", "Overdue report", list: "work", state: .todo, when: "2026-10-20", tone: .overdue),
                 entry("b", "Standup", event: true, when: "2026-10-26T09:00", duration: 15),
                 entry("c", "Dentist", list: "errands", event: true, when: "2026-10-26T14:30", duration: 60, docId: "doc-2"),
                 entry("d", "Groceries", state: .done, when: "2026-10-26"),
-                entry("e", "Pay rent", state: .todo, deadline: "2026-10-26", tone: .warning),
+                entry("e", "Pay rent", state: .todo, when: "2026-10-26"),
             ]),
             AgendaGroup(day: "2026-10-27", today: false, rows: [
                 entry("u", "Tomorrow's thing", when: "2026-10-27"),
@@ -53,10 +53,10 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(lines.map(\.title), [
             "Overdue report", "09:00  Standup", "14:30  Dentist", "Groceries", "Pay rent",
         ])
-        // An overdue row's note is the day it was due.
+        // An overdue row's note is the day it was planned for.
         let due = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 20))!
         XCTAssertEqual(lines.map(\.note), [
-            due.formatted(.dateTime.day().month(.abbreviated)), "now", "in 5h 25m", nil, "due today",
+            due.formatted(.dateTime.day().month(.abbreviated)), "now", "in 5h 25m", nil, nil,
         ])
         XCTAssertEqual(lines.map(\.done), [false, false, false, true, false])
         XCTAssertEqual(lines.map(\.overdue), [true, false, false, false, false])
@@ -145,7 +145,7 @@ final class AgendaFillTests: XCTestCase {
     private func entry(_ id: String) -> AgendaEntry {
         AgendaEntry(
             id: id, text: id, listId: "inbox", listName: nil, listIcon: nil, state: .backlog, event: false,
-            when: nil, duration: nil, deadline: nil, place: nil, assignee: nil, placedBy: .deadline,
+            when: nil, duration: nil, place: nil, assignee: nil,
             tone: .neutral, docId: nil, docName: nil)
     }
 

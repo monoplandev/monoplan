@@ -482,17 +482,13 @@ async fn when_converges_across_devices() {
     )
     .await;
 
-    // A: one timed `when`, one all-day, and a deadline beside the first.
+    // A: one timed `when`, one all-day.
     let engine_a = Engine::open_with_profile(profile_a, true).await.unwrap();
     let timed = engine_a.doc().add_item(LIST_INBOX, "timed").unwrap();
     let allday = engine_a.doc().add_item(LIST_INBOX, "all day").unwrap();
     engine_a
         .doc()
         .set_item_when(&timed, Some("2026-09-12T14:00"))
-        .unwrap();
-    engine_a
-        .doc()
-        .set_item_deadline(&timed, Some("2026-10-31"))
         .unwrap();
     engine_a
         .doc()
@@ -506,14 +502,13 @@ async fn when_converges_across_devices() {
     assert!(engine_b.is_online());
     let b_timed = engine_b.doc().get_item(&timed).unwrap();
     assert_eq!(b_timed.when.as_deref(), Some("2026-09-12T14:00"));
-    assert_eq!(b_timed.deadline.as_deref(), Some("2026-10-31"));
     assert_eq!(
         engine_b.doc().get_item(&allday).unwrap().when.as_deref(),
         Some("2026-09-12")
     );
     assert_eq!(engine_b.doc().fingerprint(), fp_set, "when is hashed");
 
-    // B clears the timed one's `when`; the deadline must survive.
+    // B clears the timed one's `when`.
     engine_b.doc().set_item_when(&timed, None).unwrap();
     let fp_cleared = engine_b.doc().fingerprint();
     engine_b.flush().await.unwrap();
@@ -524,7 +519,6 @@ async fn when_converges_across_devices() {
         .unwrap();
     let a_timed = engine_a2.doc().get_item(&timed).unwrap();
     assert_eq!(a_timed.when, None, "A observes B's clear");
-    assert_eq!(a_timed.deadline.as_deref(), Some("2026-10-31"));
     assert_eq!(engine_a2.doc().fingerprint(), fp_cleared);
     engine_a2.flush().await.unwrap();
 }

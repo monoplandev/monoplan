@@ -46,8 +46,6 @@
   --switch-off: #d1d1d6;
   --error-bg: #fee2e2;
   --error-text: #991b1b;
-  --overdue-bg: #ffe4e4;
-  --overdue-text: #ff5978;
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
   --dnd-select-bg: #dbeafe;
@@ -91,8 +89,6 @@
   --switch-off: #48484c;
   --error-bg: #2a1215;
   --error-text: #f87171;
-  --overdue-bg: #3a1a22;
-  --overdue-text: #ff7a93;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
   --dnd-select-bg: #293a5b;
@@ -108,7 +104,7 @@
 }
 
 /* Shared badge pill. Every badge carries this class; the per-badge
-   classes below (.deadline-badge, .row-timestamp, .row-list, …) layer only
+   classes below (.when-badge, .row-timestamp, .row-list, …) layer only
    their deltas on top, so this rule must precede them in source order. */
 .badge {
   flex-shrink: 0;
@@ -854,33 +850,6 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
-}
-
-/* A deadline on the calendar: the timer glyph ahead of "Deadline", in the
-   time lane of the deadline's own row and after the title of a row
-   whose date is the same day. */
-.upcoming-row-due {
-  display: inline-flex;
-  align-items: center;
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.upcoming-row-due-icon {
-  display: inline-flex;
-  margin-right: 4px;
-}
-
-.upcoming-row-due-icon svg {
-  width: 12px;
-  height: 12px;
-}
-
-/* Urgency colours the deadline, not the row: red once it is behind.
-   On its day it stays muted, as a deadline ahead does. */
-.upcoming-row[data-placed="deadline"][data-tone="overdue"] .upcoming-row-time {
-  color: var(--overdue-text);
 }
 
 /* A day gone by is the record of what happened: its rows are muted,
@@ -1694,7 +1663,7 @@ input.task-check:hover {
 }
 
 /* People glyph ahead of the list name when the item is in a shared
-   workspace; sized to the deadline badge's icon slot. */
+   workspace; sized to the date badge's icon slot. */
 .row-list-icon {
   display: inline-flex;
   align-items: center;
@@ -1719,7 +1688,7 @@ input.task-check:hover {
    glanceable while scanning a list. Add / remove happens via the row
    context menu. No pill background — it reads as a glyph in the text
    flow, not a detached chip; being icon-only it has no
-   line box, so min-height pins it to the deadline badge's text-driven
+   line box, so min-height pins it to the date badge's text-driven
    height (1.3em line + 2px padding + 2px border). */
 .row-focus-badge {
   justify-content: center;
@@ -2912,7 +2881,7 @@ input.task-check:hover {
   pointer-events: none;
 }
 
-/* Trailing chevron on a submenu trigger (Deadline ›). */
+/* Trailing chevron on a submenu trigger. */
 .menu-sub-arrow {
   color: var(--text-faint);
   font-size: 15px;
@@ -3400,7 +3369,7 @@ input.task-check:hover {
   flex-direction: column;
 }
 
-/* The content column's stacked sections (title, badges, dates, deadline,
+/* The content column's stacked sections (title, badges, dates, place,
    notes, activity): each padded and ruled off below by a hairline, the
    last one open-ended. */
 .task-dialog-section {
@@ -3770,9 +3739,8 @@ input.task-check:hover {
   font-size: 14px;
 }
 
-/* Date section between the badge row and the deadline: the time row
-   stacked over the date input row. The deadline section under it is one
-   row (the deadline input) and needs nothing beyond the section rule. */
+/* Date section between the badge row and the place: the time row
+   stacked over the date input row. */
 .task-dialog-dates {
   display: flex;
   flex-direction: column;
@@ -3979,7 +3947,7 @@ input.task-check:hover {
   outline: none;
 }
 
-/* The typed date inputs (date, end date, deadline) are real text
+/* The typed date inputs (date, end date) are real text
    fields: caret and I-beam back. A read-only one keeps the button manner
    above. */
 .task-dialog-when-input:not([readonly]) {
@@ -3993,17 +3961,6 @@ input.task-check:hover {
 
 .task-dialog-when-input[data-muted] {
   color: var(--text-muted);
-}
-
-/* The deadline input reads its urgency as text colour (the row badge's
-   overdue / today roles, without the fill); muted wins via the rule above
-   since it sets no tone but "muted". */
-.task-dialog-deadline-input[data-tone="overdue"] {
-  color: var(--overdue-text);
-}
-
-.task-dialog-deadline-input[data-tone="today"] {
-  color: var(--due-today-text);
 }
 
 .task-dialog-when-input:hover {
@@ -4306,11 +4263,11 @@ input.task-check:hover {
   color: var(--text);
 }
 
-/* The picker popover under the date / deadline / place inputs: shares the
-   card look (`.deadline-dialog`) with tighter padding, and sits
+/* The picker popover under the date / place inputs: shares the
+   card look (`.picker-card`) with tighter padding, and sits
    above the task dialog (z-index 100 / 101). Doubled up so the padding
    beats the card's 12px, which is declared later. */
-.deadline-dialog.when-popover {
+.picker-card.when-popover {
   z-index: 120;
   padding: 4px;
   /* Backstop for a viewport shorter than the picker (a phone on its
@@ -4354,9 +4311,9 @@ input.task-check:hover {
 }
 
 /* ---------- calendar popover (@corvu/calendar) ---------- */
-/* Card look shared by the task surface's date / deadline / place popovers
+/* Card look shared by the task surface's date / place popovers
    (`.when-popover` tightens it). */
-.deadline-dialog {
+.picker-card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -4366,11 +4323,11 @@ input.task-check:hover {
   color: var(--text);
 }
 
-[data-theme="dark"] .deadline-dialog {
+[data-theme="dark"] .picker-card {
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
-.deadline-dialog-footer {
+.picker-card-footer {
   display: flex;
   justify-content: center;
   margin-top: 8px;
@@ -4378,11 +4335,11 @@ input.task-check:hover {
   border-top: 1px solid var(--border-row);
 }
 
-.deadline-dialog-remove {
+.picker-card-remove {
   margin-left: auto;
 }
 
-.deadline-dialog-remove {
+.picker-card-remove {
   font: inherit;
   font-size: 12px;
   color: var(--text-muted);
@@ -4393,12 +4350,12 @@ input.task-check:hover {
   cursor: pointer;
 }
 
-.deadline-dialog-remove:hover {
+.picker-card-remove:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
 
-.deadline-dialog-remove:focus-visible {
+.picker-card-remove:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 1px;
 }
@@ -5304,39 +5261,22 @@ input.task-check:hover {
   overflow: hidden;
 }
 
-/* Compact deadline pill — the shared `.badge` styles as-is, plus a
-   `data-tone` urgency color role: overdue = danger (red), today = warning
-   (orange, same pastel-fill / fluoro-text pairing as overdue), future =
-   neutral, muted = done/binned (no urgency). Shared by list rows and
-   board cards. */
-.deadline-badge-icon {
+/* The glyph slot of the date and place pills. */
+.badge-icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
 }
 
-.deadline-badge-icon svg {
+.badge-icon svg {
   width: 12px;
   height: 12px;
 }
 
-.deadline-badge[data-tone="overdue"] {
-  color: var(--overdue-text);
-  background: var(--overdue-bg);
-}
-
-.deadline-badge[data-tone="today"] {
-  color: var(--due-today-text);
-  background: var(--due-today-bg);
-}
-
-.deadline-badge[data-tone="muted"] {
-  color: var(--text-badge-faint);
-}
-
-/* Planned-date pill (`WhenBadge`): same geometry and icon slot as the
-   deadline pill. Today is the warning pairing; a past `when` is plain,
-   it never goes red. */
+/* Planned-date pill (`WhenBadge`): the shared `.badge` styles plus a
+   `data-tone` color role. Today is the orange pastel-fill / fluoro-text
+   pairing; a past `when` is plain, it never goes red; muted is
+   done/binned. */
 .when-badge[data-tone="today"] {
   color: var(--due-today-text);
   background: var(--due-today-bg);

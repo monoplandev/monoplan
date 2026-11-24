@@ -1,21 +1,14 @@
-// The Upcoming view: the agenda. Every Open item with a planned date or a
-// deadline, bucketed by day (`dayGroups.ts`, grouped by the Workspace so
-// the same rows feed its selection-scoped shortcuts), Today always
-// anchored so the surface reads as "the days ahead" even when nothing is
-// due. Overdue deadlines sit in an Overdue section above Today, and so
-// does an Open task whose `when` has passed; an event's past `when` is
-// over and places nothing here. Rows carry no date pills: the
+// The Upcoming view: the agenda. Every Open item with a planned date,
+// bucketed by day (`dayGroups.ts`, grouped by the Workspace so the same
+// rows feed its selection-scoped shortcuts), Today always anchored so
+// the surface reads as "the days ahead" even when nothing is on. An Open
+// task whose `when` has passed sits in an Overdue section above Today;
+// an event's past `when` is over and places nothing here. Rows carry no date pills: the
 // day header is the date, and the task surface shows the rest. The
 // checkbox leads each row, then a fixed-width lane carries the start time
-// ("All day" on an event with no time, nothing on a task with none,
-// "Deadline" on a deadline, or the planned date on a task that
-// slipped into Overdue, which has no day header to say it); the place is
-// a muted line under the title.
-// A deadline is a special kind of date here: its own row on the day it
-// is owed, a timer glyph and "Deadline" in the time lane, beside whatever row
-// the item's `when` gives it on another day. Where both fall on one day
-// the `when` row stands for both and carries the "Deadline" mark after its
-// title.
+// ("All day" on an event with no time, nothing on a task with none, or
+// the planned date on a task that slipped into Overdue, which has no day
+// header to say it); the place is a muted line under the title.
 // An event ticks off in place and stays on its `when` day once done or
 // cancelled, so the day still records what happened and what was called
 // off. A task does not: closed, it leaves the agenda after a short
@@ -93,7 +86,6 @@ import {
   agendaItems,
   dropOnDay,
   firstDayOfWeek,
-  isDueRow,
   OVERDUE_KEY,
   weekStarts,
   type DayGroup,
@@ -117,7 +109,7 @@ import {
   addDaysToStamp,
   endTimeOf,
   formatClockTime,
-  formatDeadlineBadge,
+  formatDayLabel,
   formatDurationShort,
   nowMs,
   todayStamp,
@@ -131,7 +123,6 @@ import fileSvg from "./icons/file.svg?raw";
 import mapPinSvg from "./icons/map-pin.svg?raw";
 import plusSvg from "./icons/plus.svg?raw";
 import starFilledSvg from "./icons/star-filled.svg?raw";
-import timerSvg from "./icons/timer.svg?raw";
 import usersSvg from "./icons/users.svg?raw";
 import {
   isCancelled,
@@ -339,7 +330,7 @@ export function Upcoming(props: {
     const head = new Map<string, { day: string; n: number }>();
     for (const g of props.groups) {
       for (const r of g.rows) {
-        if (!r.span || r.placedBy !== "when") continue;
+        if (!r.span) continue;
         const at = head.get(r.item.id);
         if (!at || r.span.day < at.n) {
           head.set(r.item.id, { day: g.key, n: r.span.day });
@@ -349,7 +340,7 @@ export function Upcoming(props: {
     return head;
   });
   const isSpanTail = (r: DayRow, day: string): boolean => {
-    if (!r.span || r.placedBy !== "when") return false;
+    if (!r.span) return false;
     const head = spanHead().get(r.item.id);
     return head !== undefined && head.day !== day;
   };
@@ -1137,8 +1128,8 @@ export function Upcoming(props: {
     if (!commit || day === null) return;
     const writes = ids.flatMap((id) => {
       const it = flat().find((r) => r.item.id === id)?.item;
-      const w = it ? dropOnDay(it, day) : null;
-      return w ? [{ id, ...w }] : [];
+      const when = it ? dropOnDay(it, day) : null;
+      return when ? [{ id, when }] : [];
     });
     if (writes.length === 0) return;
     // The selection follows the moved items to the day they land on;
@@ -1146,10 +1137,7 @@ export function Upcoming(props: {
     landingDay = day;
     batch(() =>
       props.app.withActionBatch(() => {
-        for (const w of writes) {
-          if (w.field === "when") props.app.setItemWhen(w.id, w.value);
-          else props.app.setItemDeadline(w.id, w.value);
-        }
+        for (const w of writes) props.app.setItemWhen(w.id, w.when);
       }),
     );
   };
@@ -1229,9 +1217,9 @@ export function Upcoming(props: {
       month: "short",
       year: g.key.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric",
     }).format(new Date(y, mo - 1, d));
-    if (g.key === today) return `${m().deadline.today} - ${date}`;
+    if (g.key === today) return `${m().calendar.today} - ${date}`;
     if (g.key === addDaysToStamp(today, 1)) {
-      return `${m().deadline.tomorrow} - ${date}`;
+      return `${m().calendar.tomorrow} - ${date}`;
     }
     return date;
   };
@@ -1247,7 +1235,7 @@ export function Upcoming(props: {
   // Start time only: the agenda is a glance at the day, the end sits on
   // the task surface. An all-day event says so in the lane; a task with
   // no time says nothing (it is for the day, not something that fills
-  // it), and a row here on its deadline says "Deadline". A multi-day span
+  // it). A multi-day span
   // reads by what the day holds of it: every day of an all-day span is
   // "All day"; a timed one shows its start clock on the first day, "All
   // day" on the days it runs clean through, and its end clock on the last
@@ -1257,17 +1245,15 @@ export function Upcoming(props: {
   // A task in Overdue by its `when` shows the day it was planned for
   // ("7 Sept"): Overdue has no day header to carry it.
   const timeLabel = (r: DayRow): string => {
-    if (r.placedBy === "deadline") return m().upcoming.due;
-    if (r.placedBy !== "when") return "";
     if (r.tone === "overdue") {
-      const info = formatDeadlineBadge(
-        whenDay(r.item.when!),
-        todayStamp(nowMs()),
-        m().deadline,
-        locale(),
-        { pastAsDate: true },
+      return (
+        formatDayLabel(
+          whenDay(r.item.when!),
+          todayStamp(nowMs()),
+          m().calendar,
+          locale(),
+        ) ?? ""
       );
-      return info?.label ?? "";
     }
     const allDay = isEvent(r.item) ? m().when.allDay : "";
     const start = whenTime(r.item.when!);
@@ -1284,7 +1270,7 @@ export function Upcoming(props: {
   // timed span under 24 hours: an evening that runs past midnight is one
   // occasion, and its rows already read "22:00" and "until 03:00".
   const spanDayLabel = (r: DayRow): string | null => {
-    if (!r.span || r.placedBy !== "when" || r.tone === "overdue") return null;
+    if (!r.span || r.tone === "overdue") return null;
     if (whenTime(r.item.when!) && (r.item.duration ?? 0) < 1440) return null;
     return m().upcoming.spanDay(r.span.day);
   };
@@ -1294,7 +1280,7 @@ export function Upcoming(props: {
   // open rows with a start still ahead; the minute is rounded up so a
   // row never reads "in 0m" before its time.
   const startsIn = (r: DayRow): string | null => {
-    if (r.placedBy !== "when" || isClosed(r.item)) return null;
+    if (isClosed(r.item)) return null;
     const start = whenStartMs(r.item.when!);
     if (start === null) return null;
     const now = nowMs();
@@ -1396,7 +1382,6 @@ export function Upcoming(props: {
                     data-day={g.key}
                     aria-selected={selected() ? "true" : "false"}
                     data-tone={r.tone}
-                    data-placed={r.placedBy}
                     data-dragging={dragging().has(r.item.id) ? "" : undefined}
                     data-span-tail={isSpanTail(r, g.key) ? "" : undefined}
                     // `data-done`, not `data-closed`: the menu trigger
@@ -1414,12 +1399,10 @@ export function Upcoming(props: {
                           on): an upright pill holds the slot, or a
                           bare cross on a cancelled one. Done or
                           cancelled from today on, it shows the box,
-                          ticked or crossed, and unticks as usual. A
-                          deadline's own row is owed, so it keeps it. */}
+                          ticked or crossed, and unticks as usual. */}
                       <Show
                         when={
                           !isEvent(r.item) ||
-                          r.placedBy !== "when" ||
                           (isClosed(r.item) && g.urgency !== "past")
                         }
                         fallback={
@@ -1447,13 +1430,6 @@ export function Upcoming(props: {
                       class="upcoming-row-time"
                       data-empty={timeLabel(r) === "" ? "" : undefined}
                     >
-                      <Show when={r.placedBy === "deadline"}>
-                        <span
-                          class="upcoming-row-due-icon"
-                          aria-hidden="true"
-                          innerHTML={timerSvg}
-                        />
-                      </Show>
                       {timeLabel(r)}
                     </span>
                     <span class="upcoming-row-body">
@@ -1565,18 +1541,6 @@ export function Upcoming(props: {
                       </Show>
                     </span>
                     <span class="upcoming-row-meta">
-                      {/* The item's deadline is this day too: the one
-                          row says so. */}
-                      <Show when={isDueRow(r, g.key)}>
-                        <span class="upcoming-row-due">
-                          <span
-                            class="upcoming-row-due-icon"
-                            aria-hidden="true"
-                            innerHTML={timerSvg}
-                          />
-                          {m().upcoming.due}
-                        </span>
-                      </Show>
                       <Show when={startsIn(r)}>
                         {(label) => (
                           <span class="upcoming-row-soon">{label()}</span>

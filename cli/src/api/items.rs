@@ -149,9 +149,6 @@ pub struct Item {
     pub started_at: Option<i64>,
     pub done_at: Option<i64>,
     pub binned_at: Option<i64>,
-    /// Date-only deadline (`YYYY-MM-DD`), when set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<String>,
     /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`), when set:
     /// wall time on this device, whether or not it is fixed to a zone.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,7 +187,6 @@ impl From<&ItemView> for Item {
             started_at: item.started_at,
             done_at: item.done_at,
             binned_at: item.binned_at,
-            deadline: item.deadline.clone(),
             when: item.when.clone(),
             when_zone: item.when_zone().map(str::to_string),
             when_suggested: item.when_suggested.clone(),
@@ -453,12 +449,6 @@ pub fn remove_subtask(cx: &Ctx, id: &str, subtask: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Set the deadline (`YYYY-MM-DD`), or clear it (`None`).
-pub fn set_deadline(cx: &Ctx, id: &str, deadline: Option<&str>) -> anyhow::Result<()> {
-    cx.doc.set_item_deadline(id, deadline)?;
-    Ok(())
-}
-
 /// Set the item's place, or clear it (`None`). A place with
 /// coordinates or an address is written as given. A bare label that
 /// matches a place already on some item of any open workspace
@@ -616,13 +606,7 @@ mod tests {
             .collect();
         // Unset optionals that the old row skipped are absent; the
         // three stamps are always there, null when unset.
-        for k in [
-            "created_by",
-            "assignee",
-            "deadline",
-            "when_suggested",
-            "event",
-        ] {
+        for k in ["created_by", "assignee", "when_suggested", "event"] {
             assert!(!keys.contains(&k), "{k} should be absent: {json}");
         }
         assert_eq!(json["state"], "done");

@@ -168,7 +168,7 @@ engine, and after each of its own writes; nothing is optimistic. A row
 of a list or a lens can be selected, which opens the item's panel at
 the right of the window (`ItemPanel.swift`, `Engine.item` in the same
 read): the iOS item page top to bottom (status, title, list, planned
-date, deadline, place with its map, notes, activity), read only but
+date, place with its map, notes, activity), read only but
 for its tick and its star (`Engine.setStarred`); the cross, Escape, a
 click on no row or a move to another list closes it. No board, no drag
 and drop, no item editing: those come from sharing views with iOS. Monoplan › New Workspace… asks for a name and has the
@@ -441,7 +441,7 @@ item as a sheet over its list (`ItemView.swift`, 2026-11-13; half
 height, draggable to full; `opensItems()` on Home's stack presents
 it): the web task dialog's
 content in its order (status, title, list, planned date and length,
-deadline when set, place, notes, activity log), read through
+place, notes, activity log), read through
 `Request.item(id:workspace:)`, i.e. `item show <id> --json`
 (`spec/cli.md` §Items; decoded by `ItemDetail.parse`), and refetched on
 `Changed` while shown; its checkbox ticks too, and its list field is a
@@ -484,7 +484,7 @@ leaves the device), and from three characters Apple's search
 (`MKLocalSearchCompleter`, resolved to coordinates by `MKLocalSearch`;
 the query goes to Apple, not E2EE, as the web's goes to Photon). A pick
 is written at once (`Request.setPlace`, i.e. `item set --place
-[--coords] [--address] [--new-place]`). Deadline and notes are display
+[--coords] [--address] [--new-place]`). Notes are display
 only. A place
 with coordinates also shows a small non-interactive MapKit map with a
 pin (`PlaceMapCard`); tapping it opens the spot in Apple Maps under the

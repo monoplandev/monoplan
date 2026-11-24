@@ -425,17 +425,10 @@ export function Workspace(props: {
       openedViewKey = id === null ? null : viewKey(untrack(view));
       setOpenItemIdRaw(id);
     });
-  // Whether the task surface's planned-date / deadline popovers are open.
-  // Owned here rather than by the surface so a row context menu's "Set
-  // date…" / "Set deadline…" can enter the item with the popover already
-  // showing. The surface clears them as it closes.
+  // Whether the task surface's planned-date popover is open. Owned here
+  // rather than by the surface so it can be entered with the popover
+  // already showing. The surface clears it as it closes.
   const [itemWhenOpen, setItemWhenOpen] = createSignal(false);
-  const [itemDeadlineOpen, setItemDeadlineOpen] = createSignal(false);
-  const openItemDeadline = (id: string) =>
-    batch(() => {
-      setOpenItemId(id);
-      setItemDeadlineOpen(true);
-    });
   // Rows the move palette will re-file (visible order), or null when the
   // palette is closed. Captured at open (from the `m` shortcut's selection
   // or a row context menu's target set) so the pick acts on what the user
@@ -670,7 +663,7 @@ export function Workspace(props: {
   const [expandedKey, setExpandedKey] = createSignal<string | null>(null);
   // Draft mirror. With the side pane showing, a draft also opens the
   // pane's capture surface on the same slot (`newItemTarget.draft`), so
-  // the date, deadline, place, notes, list and pin are a click away while
+  // the date, place, notes, list and pin are a click away while
   // the row is still being typed — the board's capture, with the row as
   // its title editor. `draftText` is the row's text as typed, which the
   // pane follows; `captureHandle` is how the row's settle commits through
@@ -878,9 +871,9 @@ export function Workspace(props: {
     doneMoveTick();
     const now = Date.now();
     const labels = {
-      overdue: m().deadline.overdue,
-      today: m().deadline.today,
-      tomorrow: m().deadline.tomorrow,
+      overdue: m().calendar.overdue,
+      today: m().calendar.today,
+      tomorrow: m().calendar.tomorrow,
     };
     const lingering = agendaLinger(now).ids;
     const groups = groupByDay(
@@ -2109,8 +2102,8 @@ export function Workspace(props: {
   // bottom-most source row — same shape as paste — rather than each
   // clone sitting under its own original. Shared by Cmd+D and the row
   // context menu's Duplicate action so both behave identically.
-  // A clone is a full copy, not just the title: carry the notes and both
-  // dates across. Each is a no-op when the source lacks it, so the batch
+  // A clone is a full copy, not just the title: carry the notes and the
+  // date across. Each is a no-op when the source lacks it, so the batch
   // stays a single undo step either way.
   // Written through the creating doc's own app: inside a batch the store
   // has not seen the new id yet, so the routed layer could not place it.
@@ -2119,7 +2112,6 @@ export function Workspace(props: {
     id: string,
     src: {
       notes?: string;
-      deadline?: string;
       when?: string;
       whenZone?: string;
       event?: boolean;
@@ -2135,7 +2127,6 @@ export function Workspace(props: {
       if (subId && sub.done) target.setSubtaskDone(id, subId, true);
     }
     if (src.notes) target.setItemNotes(id, src.notes);
-    if (src.deadline) target.setItemDeadline(id, src.deadline);
     // A fixed time goes over with its zone, as the register holds it.
     if (src.when) target.setItemWhen(id, storedWhen(src.when, src.whenZone));
     if (src.when && src.event) target.setItemEvent(id, true);
@@ -2160,7 +2151,6 @@ export function Workspace(props: {
         idx: number;
         text: string;
         notes: string;
-        deadline: string | undefined;
         when: string | undefined;
         whenZone: string | undefined;
         event: boolean | undefined;
@@ -2182,7 +2172,6 @@ export function Workspace(props: {
           idx,
           text: it.text,
           notes: it.notes,
-          deadline: it.deadline,
           when: it.when,
           whenZone: it.whenZone,
           event: it.event,
@@ -2243,7 +2232,6 @@ export function Workspace(props: {
       idx: number;
       text: string;
       notes: string;
-      deadline: string | undefined;
       when: string | undefined;
       whenZone: string | undefined;
       event: boolean | undefined;
@@ -2259,7 +2247,6 @@ export function Workspace(props: {
         idx,
         text: it.text,
         notes: it.notes,
-        deadline: it.deadline,
         when: it.when,
         whenZone: it.whenZone,
         event: it.event,
@@ -3065,8 +3052,7 @@ export function Workspace(props: {
   // whenever the viewport has room for it, and the task surface's shell
   // follows the viewport alone (panel, floating sheet). While
   // an item is open (or a capture is in progress) the panel hosts the
-  // task surface; otherwise it just invites a click. Deadlines live on
-  // the Upcoming view, never here.
+  // task surface; otherwise it just invites a click.
   const sidePanelShown = () => !isNarrow();
 
   // The one concession to touch: a single tap on a row opens the item
@@ -3169,15 +3155,6 @@ export function Workspace(props: {
         label: msgs.focus.remove,
         shortcut: "S",
         run: () => routed.removeFromFocusMany(ids),
-      });
-    }
-    // Deadlines only matter while an item is open (the row badge and menu
-    // entry hide for done rows too). Single item only: the pick happens
-    // in the item's own deadline popover.
-    if (openIds.length === 1) {
-      out.push({
-        label: `${msgs.deadline.label}: ${msgs.deadline.setDate}`,
-        run: () => openItemDeadline(openIds[0]!),
       });
     }
     out.push(
@@ -3609,8 +3586,6 @@ export function Workspace(props: {
         entered={() => openItemId() !== null}
         whenOpen={itemWhenOpen}
         setWhenOpen={setItemWhenOpen}
-        deadlineOpen={itemDeadlineOpen}
-        setDeadlineOpen={setItemDeadlineOpen}
         onClosed={restoreItemsFocus}
         onReleaseFocus={() => {
           // Handing focus back closes the entered item; the pane carries
@@ -4015,7 +3990,7 @@ export function Workspace(props: {
                   upcomingHandle?.focus();
                 }}
               >
-                {m().deadline.today}
+                {m().calendar.today}
               </button>
             </Show>
             {/* The calendar merges every doc; the Done view's filter menu

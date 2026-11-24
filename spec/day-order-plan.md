@@ -11,7 +11,7 @@ Read with `calendar-plan.md` ("Within a day", where the bands are) and
 
 | Question | Decision |
 |---|---|
-| What is ordered? | **Band 3 only**: rows placed by a 10-character `when` on a task (not an event). All-day events and deadline rows (band 1) lead the day in their fixed order; timed rows (band 2) are clock order; Overdue and "Completed today" keep their date / close order. |
+| What is ordered? | **Band 3 only**: rows placed by a 10-character `when` on a task (not an event). All-day events (band 1) lead the day in their fixed order; timed rows (band 2) are clock order; Overdue and "Completed today" keep their date / close order. |
 | Whose order? | **Personal.** Each account orders its own days, as Starred is personal. Calendar and Starred are the two answers to "what am I working on now" (the product thesis); both are lenses, neither is a home. A member of a shared workspace reordering their day does not move anyone else's. |
 | Where is it stored? | **The Home doc**, never a shared one: a root map `day_order`, one mergeable `LoroMovableList` per day under it, keyed by the day key (`YYYY-MM-DD`). |
 | What is an entry? | A **FocusRef string** (`focus.md` grammar): `<item_id>` for a Home item, `<doc_id>:<item_id>` for an item in another workspace. Scalar strings only, never child containers. |

@@ -122,19 +122,16 @@ extension AgendaEntry {
     /// The row's identity within its day, across workspaces.
     var key: String { "\(docId ?? "")/\(id)" }
     var isDone: Bool { state == .done }
-    /// The row shows a clock time: its `when` carries one, and the row is
-    /// the `when`'s. A deadline's own row is a day, whatever time the
-    /// item is planned for on another.
-    var isTimed: Bool { placedBy == .when && (when?.count ?? 0) >= 16 }
+    /// The row shows a clock time: its `when` carries one.
+    var isTimed: Bool { (when?.count ?? 0) >= 16 }
 
     /// Whether the row leads with a checkbox. An event's own row does
     /// not while it is open (spec/events-plan.md: nothing asks for the
     /// tick) or once its day has gone by (it is a record of what was
     /// on): the event pill holds the box's place. One marked done from
-    /// today on shows the box, ticked, and a deadline's own row is
-    /// owed, so it keeps it.
+    /// today on shows the box, ticked.
     var showsCheck: Bool {
-        guard event, placedBy == .when else { return true }
+        guard event else { return true }
         return state.isClosed && !whenIsPast
     }
 
@@ -143,7 +140,7 @@ extension AgendaEntry {
     /// task whose day has passed is in Overdue). The Mac's rule
     /// (`MainWindow.agendaRowIsPast`).
     var isMuted: Bool {
-        isDone || (event && placedBy == .when && whenIsPast)
+        isDone || (event && whenIsPast)
     }
 
     /// The `when`'s day is before today.
@@ -154,10 +151,8 @@ extension AgendaEntry {
 
     /// The quick moves the row's menu offers (`ItemRowMenu`): an
     /// overdue row goes to today or tomorrow, a row on today to
-    /// tomorrow, and any other row nowhere. Only an open row placed by
-    /// its `when`: a deadline is what is owed, and is put off on the
-    /// item's page, on purpose. The clock time is kept, as a pick in
-    /// the date editor keeps it.
+    /// tomorrow, and any other row nowhere. Only an open row. The clock
+    /// time is kept, as a pick in the date editor keeps it.
     var quickMoves: [WhenMove] {
         WhenMove.offers(for: self, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
     }
@@ -171,7 +166,7 @@ struct WhenMove: Equatable {
     let when: String
 
     static func offers(for row: AgendaEntry, today: String, tomorrow: String) -> [WhenMove] {
-        guard row.placedBy == .when, !row.state.isClosed, let when = row.when, when.count >= 10 else { return [] }
+        guard !row.state.isClosed, let when = row.when, when.count >= 10 else { return [] }
         let day = String(when.prefix(10))
         let time = String(when.dropFirst(10))
         if day == today {
@@ -196,15 +191,6 @@ extension AssignedEntry {
     /// The row's identity across workspaces.
     var key: String { "\(docId ?? "")/\(item.id)" }
     var ref: ItemRef { ItemRef(docId: docId, itemId: item.id, title: item.text) }
-}
-
-extension Item {
-    /// The date the Assigned lens orders by: the earlier of the planned
-    /// day and the deadline (both `YYYY-MM-DD…`, so they order as text).
-    var assignedDate: String? {
-        if let when, let deadline { return min(when, deadline) }
-        return when ?? deadline
-    }
 }
 
 extension DoneEntry {
@@ -238,7 +224,6 @@ extension ItemInfo {
     var createdAt: Int64 { item.createdAt }
     var doneAt: Int64? { item.doneAt }
     var binnedAt: Int64? { item.binnedAt }
-    var deadline: String? { item.deadline }
     /// Account id of the member the item is assigned to, when it is.
     var assignee: String? { item.assignee }
     var when: String? { item.when }

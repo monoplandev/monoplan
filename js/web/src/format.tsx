@@ -132,9 +132,9 @@ export function formatRelative(ts: number, now: number, locale: string): string 
   return monthDayYearFmt.format(tsDate);
 }
 
-// ---------- date-only deadlines ----------
+// ---------- date-only days ----------
 //
-// Deadlines are floating local calendar dates stored as raw `YYYY-MM-DD`
+// Days are floating local calendar dates stored as raw `YYYY-MM-DD`
 // strings. Everything here works on local date *parts* — we never call
 // `new Date("YYYY-MM-DD")`, which parses as UTC midnight and shifts the
 // day backwards in negative-offset timezones.
@@ -170,15 +170,6 @@ export function parseLocalDateParts(stamp: string): Date | null {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-// Urgency drives the badge's color role; the component maps done/binned
-// items to a muted variant regardless of this value.
-export type DeadlineUrgency = "overdue" | "today" | "future";
-
-export interface DeadlineBadgeInfo {
-  label: string;
-  urgency: DeadlineUrgency;
-}
-
 // `Jul 12`, gaining the year only when it falls outside `ref`'s.
 function compactDate(date: Date, ref: Date, locale: string): string {
   const opts: Intl.DateTimeFormatOptions =
@@ -188,44 +179,34 @@ function compactDate(date: Date, ref: Date, locale: string): string {
   return new Intl.DateTimeFormat(locale, opts).format(date);
 }
 
-// Compact label + urgency for a deadline, relative to `today` (both raw
-// `YYYY-MM-DD`). Rules: before today → "Overdue"; today → "Today";
-// tomorrow → "Tomorrow"; within the next 7 days → short weekday; else a
-// compact `Jul 12` (with the year when it differs from today's). Labels
-// for the fixed cases come from i18n so callers stay locale-correct.
-//
-// `pastAsDate` swaps the "Overdue" label for that same compact date:
-// nothing is still owed on a done/binned item, so the useful fact is when
-// it was due, not that the deadline slipped.
-export function formatDeadlineBadge(
-  deadline: string,
+// Compact label for a day, relative to `today` (both raw `YYYY-MM-DD`).
+// Rules: today → "Today"; tomorrow → "Tomorrow"; within the next 7 days
+// → short weekday; else (past days included) a compact `Jul 12` (with
+// the year when it differs from today's). Labels for the fixed cases
+// come from i18n so callers stay locale-correct.
+export function formatDayLabel(
+  day: string,
   today: string,
-  labels: { overdue: string; today: string; tomorrow: string },
+  labels: { today: string; tomorrow: string },
   locale: string,
-  opts?: { pastAsDate?: boolean },
-): DeadlineBadgeInfo | null {
-  const target = parseLocalDateParts(deadline);
+): string | null {
+  const target = parseLocalDateParts(day);
   const ref = parseLocalDateParts(today);
   if (!target || !ref) return null;
   const days = calendarDayDiff(target, ref);
-  if (days < 0) {
-    const label = opts?.pastAsDate ? compactDate(target, ref, locale) : labels.overdue;
-    return { label, urgency: "overdue" };
+  if (days === 0) return labels.today;
+  if (days === 1) return labels.tomorrow;
+  if (days > 1 && days < 7) {
+    return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(target);
   }
-  if (days === 0) return { label: labels.today, urgency: "today" };
-  if (days === 1) return { label: labels.tomorrow, urgency: "future" };
-  if (days < 7) {
-    const weekday = new Intl.DateTimeFormat(locale, { weekday: "short" }).format(target);
-    return { label: weekday, urgency: "future" };
-  }
-  return { label: compactDate(target, ref, locale), urgency: "future" };
+  return compactDate(target, ref, locale);
 }
 
 // ---------- planned dates (`when`) ----------
 //
 // A `when` is a floating `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM`
 // (timed) register (`spec/calendar-plan.md`). Same local-parts rule as
-// deadlines: never `new Date(when)`.
+// days: never `new Date(when)`.
 
 /** Hour / minute pair of a `when`; both set for a timed value. The
  *  optional shape is what `whenTime` parses, narrowed by `isCompleteTime`. */
@@ -466,7 +447,7 @@ export interface WhenBadgeInfo {
 // Compact label + urgency for a planned date relative to `today`. Before
 // today → the compact date itself, unjudged (a `when` is never "overdue",
 // and whether it slipped is not decided: the useful fact is which day).
-// Today / tomorrow / weekday / compact date otherwise, as deadlines do. A
+// Today / tomorrow / weekday / compact date otherwise, as `formatDayLabel`. A
 // timed value appends its wall-clock time.
 export function formatWhenBadge(
   when: string,

@@ -15,24 +15,13 @@ use super::{
 use crate::commands::agenda::{self as rules, Source};
 use crate::workspace::Candidate;
 
-/// Row tone, least to most urgent. Warning comes from the deadline
-/// alone; overdue is a past deadline, or a task's `when` that is over.
+/// Row tone: overdue is a task's `when` that is over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum AgendaTone {
     Neutral,
-    Warning,
     Overdue,
-}
-
-/// What put the row on its day: one of its two dates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum AgendaPlacedBy {
-    When,
-    Deadline,
 }
 
 /// One row of a group; the `agenda --json` row.
@@ -61,15 +50,11 @@ pub struct AgendaEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub place: Option<Place>,
     /// The account id the item is assigned to (`spec/sharing-plan.md`
     /// "Assignment"); absent when unassigned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignee: Option<String>,
-    /// Which field placed the row.
-    pub placed_by: AgendaPlacedBy,
     pub tone: AgendaTone,
     /// The merged agenda only: the row's workspace. `doc_name` is
     /// absent for Home (never named) and for an unnamed doc.
@@ -240,10 +225,8 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                         event: r.item.event,
                         when: r.item.when.clone(),
                         duration: r.item.duration,
-                        deadline: r.item.deadline.clone(),
                         place: r.item.place.as_ref().map(Place::from),
                         assignee: r.item.assignee.clone(),
-                        placed_by: r.placed_by,
                         tone: r.tone,
                         doc_id,
                         doc_name,

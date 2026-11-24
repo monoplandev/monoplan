@@ -1024,17 +1024,6 @@
         }
       }
     },
-    "Deadline" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plazo"
-          }
-        }
-      }
-    },
     "Debug" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1227,17 +1216,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hecho no disponible"
-          }
-        }
-      }
-    },
-    "Due %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vence el %@"
           }
         }
       }
@@ -1584,12 +1562,12 @@
         }
       }
     },
-    "Items with a date or deadline will show here." : {
+    "Items with a date will show here." : {
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Los elementos con fecha o fecha límite aparecerán aquí."
+            "value" : "Los elementos con fecha aparecerán aquí."
           }
         }
       }

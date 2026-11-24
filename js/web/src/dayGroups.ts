@@ -1,20 +1,11 @@
 // Day grouping behind the Upcoming view (`spec/calendar-plan.md`
-// "Agenda"): every Open item carrying a `when` or a `deadline`. The two
-// dates place independently: the `when` puts the item on its day, and
-// the deadline puts a row of its own on the day it is owed (`placedBy:
-// "deadline"`, the special kind of date), so an item with both is on the
-// calendar twice. One row per item per group, though: a deadline on a
-// day the `when` already covers rides on that row. An overdue deadline
-// leads in an Overdue group so what is owed is visible at a glance and
-// Today reads as today's plan; the group only exists while something is
-// overdue. A task whose `when` has passed while it is still Open joins
-// that group too (it was planned and did not happen, so it is still to
-// do). An event's past `when` has gone by: it places nothing, and an
-// event with only that is not selected for this view. Closed items (done
-// or cancelled) keep their calendar day via `when` only ("happens on"
-// outlives the tick or the cross, "owed by" does not): they keep their
-// slot on that day, never in Overdue and never placed by deadline. Binned
-// items never appear. Events
+// "Agenda"): every Open item carrying a `when`, on its day. A task whose
+// `when` has passed while it is still Open leads in an Overdue group (it
+// was planned and did not happen, so it is still to do), so Today reads
+// as today's plan; the group only exists while something is overdue. An
+// event's past `when` has gone by: it places nothing. A closed event
+// keeps its slot on its `when` day, never in Overdue. Binned items never
+// appear. Events
 // (`spec/events-plan.md`) place by the same rules; an event always has a
 // `when`, so it always has a day. A `when` that runs for
 // days (`duration` beside it, `spec/calendar-plan.md` "Field:
@@ -27,13 +18,12 @@
 // has a `when` on it and went by, an event, neutral. A closed task
 // leaves the calendar once closed (2026-11-22; the Done view has it);
 // an event alone keeps its `when` once closed. An Open task with a
-// past `when` is in Overdue only, and a deadline never places in the
-// past. Pure so it can be unit-tested without a DOM
+// past `when` is in Overdue only. Pure so it can be unit-tested without a DOM
 // (`test/dayGroups.test.ts`).
 
 import {
   addDaysToStamp,
-  formatDeadlineBadge,
+  formatDayLabel,
   spanCoverOffset,
   whenDay,
 } from "./format.tsx";
@@ -45,14 +35,10 @@ import {
   type ItemView,
 } from "./sync/store.ts";
 
-/** Most urgent first when comparing. */
-export type DayTone = "overdue" | "warning" | "neutral";
+export type DayTone = "overdue" | "neutral";
 
 export interface DayRow {
   item: ItemView;
-  /** What put the row on this day: one of its two dates, or, for a
-   *  closed task, the day it was closed (`done`). */
-  placedBy: "when" | "deadline";
   tone: DayTone;
   /** Set on every row of a `when` that covers more than one day: which
    *  day of the span this row is (1-based) and how many there are. The
@@ -115,13 +101,11 @@ export const isSlippedTask = (it: ItemView, today: string): boolean =>
   whenSpan(it.when, it.duration).end < today;
 
 /** Where a row sits among its day's rows (`spec/calendar-plan.md`
- *  "Within a day"): all-day events and deadline rows lead (0), they are
- *  the day's backdrop; then what has a clock time, tasks and events
- *  alike (1); then untimed tasks, for the day at no particular time (2).
- *  Mirrors `day_band` in the CLI's `agenda.rs`. */
+ *  "Within a day"): all-day events lead (0), they are the day's
+ *  backdrop; then what has a clock time, tasks and events alike (1);
+ *  then untimed tasks, for the day at no particular time (2). Mirrors
+ *  `day_band` in the CLI's `agenda.rs`. */
 export const dayBand = (row: DayRow): 0 | 1 | 2 => {
-  if (row.placedBy === "deadline") return 0;
-  if (row.placedBy !== "when") return 2;
   if ((row.item.when?.length ?? 0) > 10) return 1;
   return isEvent(row.item) ? 0 : 2;
 };
@@ -135,35 +119,28 @@ export const isClosedTask = (it: ItemView): boolean =>
 
 /** Bucket `items` by placement day. `today` is the local `YYYY-MM-DD`
  *  stamp everything is judged against. An Overdue group leads when any
- *  deadline is past or any Open task's `when` is over, oldest first by
- *  the date that put the row there, then `createdAt`. Today is always
- *  present after it, empty if nothing is due, so the surface
- *  anchors on the current day.
+ *  Open task's `when` is over, oldest first by its `when`, then
+ *  `createdAt`. Today is always present after it, empty if nothing is
+ *  on, so the surface anchors on the current day.
  *
- *  Within a day, rows order in three bands (`dayBand`): all-day events
- *  and deadline rows, timed rows by the clock, then untimed tasks. Inside
- *  a band, the raw string of the placing field, then `createdAt`.
- *  Overdue has no bands.
+ *  Within a day, rows order in three bands (`dayBand`): all-day events,
+ *  timed rows by the clock, then untimed tasks. Inside a band, the raw
+ *  `when`, then `createdAt`. Overdue has no bands.
  *
  *  A closed task (`isClosedTask`) is not on the agenda. `lingers` holds
  *  one just closed where it was, placed as if it were still open, for
  *  the beat before it leaves. A closed event stays on its `when`.
  *
  *  A row placed by a `when` that covers several days is repeated on each
- *  day of the span from today onward (`span` on every copy), and an item
- *  with both dates has its deadline row besides, so the same id can
- *  occur more than once down the groups; a flat reading of the rows
- *  dedupes by id. The deadline is one day, and never a second row in a
- *  group the item is already in: on a day its `when` covers, that row is
- *  the one (`isDueRow`), and with both dates behind it the deadline row
- *  is the one in Overdue.
+ *  day of the span from today onward (`span` on every copy), so the same
+ *  id can occur more than once down the groups; a flat reading of the
+ *  rows dedupes by id.
  *
  *  `floor` (a `YYYY-MM-DD` stamp before `today`) adds the days gone by
  *  from that day on, each non-empty one a `past` group ahead of Overdue
  *  and Today, oldest first: events on the days their `when` covered.
  *  An item can then sit on a past day and again from
- *  today on (a span still running, or an event that went by with a
- *  deadline ahead). Without it no past day is grouped. */
+ *  today on (a span still running). Without it no past day is grouped. */
 export function groupByDay(
   items: Iterable<ItemView>,
   today: string,
@@ -176,38 +153,26 @@ export function groupByDay(
   const placed: { day: string; raw: string; row: DayRow }[] = [];
   const overdueRows: { raw: string; row: DayRow }[] = [];
   for (const it of items) {
-    if (isBinned(it) || (!it.when && !it.deadline)) continue;
+    if (isBinned(it) || !it.when) continue;
     const closedTask = isClosedTask(it);
     // Off the calendar once closed: the Done view is its record.
     if (closedTask && !lingers(it)) continue;
     // From today on, a `when` that is over places nothing, done or not.
     // A span still running is placed from today: `wDay` is its first day
     // there, the start or today, whichever is later.
-    const span = it.when ? whenSpan(it.when, it.duration) : null;
+    const span = whenSpan(it.when, it.duration);
     const wDay =
-      span && span.end >= today
-        ? span.start >= today
-          ? span.start
-          : today
-        : null;
-    const dDay = it.deadline ?? null;
+      span.end >= today ? (span.start >= today ? span.start : today) : null;
     // Every day of the span from `from` to `to`, each row carrying its
     // position in the span when there is more than one day.
-    // `dueDay`: the deadline's day when it is today, whose row reads as
-    // due (warning) for carrying the deadline too.
-    const placeWhen = (from: string, to: string, dueDay?: string) => {
-      const first = span!.start;
+    const placeWhen = (from: string, to: string) => {
       for (let day = from; day <= to; day = addDaysToStamp(day, 1)) {
-        const row: DayRow = {
-          item: it,
-          placedBy: "when",
-          tone: day === dueDay ? "warning" : "neutral",
-        };
-        if (span!.total > 1) {
+        const row: DayRow = { item: it, tone: "neutral" };
+        if (span.total > 1) {
           // Days since the start, +1 for the 1-based label.
           let n = 1;
-          for (let d = first; d < day; d = addDaysToStamp(d, 1)) n++;
-          row.span = { day: n, total: span!.total };
+          for (let d = span.start; d < day; d = addDaysToStamp(d, 1)) n++;
+          row.span = { day: n, total: span.total };
         }
         placed.push({ day, raw: it.when!, row });
       }
@@ -215,57 +180,28 @@ export function groupByDay(
     // The days gone by: what happened on them (an event), on each day
     // the `when` covered before today and not before the floor. The rest
     // of the placement is from today on.
-    if (floor && span && span.start < today && isEvent(it)) {
+    if (floor && span.start < today && isEvent(it)) {
       const from = span.start >= floor ? span.start : floor;
       const to = span.end < yesterday ? span.end : yesterday;
       if (from <= to) placeWhen(from, to);
     }
     if (isClosed(it) && !closedTask) {
       // A ticked or crossed event stays put on its `when` day, unjudged:
-      // the day still records what happened, or what was called off. Its
-      // deadline is settled and places nothing; Overdue is Open-only.
-      if (wDay === null) continue;
-      placeWhen(wDay, span!.end);
+      // the day still records what happened, or what was called off.
+      // Overdue is Open-only.
+      if (wDay !== null) placeWhen(wDay, span.end);
       continue;
     }
-    // The two dates place independently from here: the `when` row(s),
-    // then the deadline's own row unless the item already has one in
-    // that group. A lingering closed task is placed here too, where it
-    // was while open.
-    const deadlineOverdue = dDay !== null && dDay < today;
+    // A lingering closed task is placed here too, where it was while
+    // open.
     if (wDay !== null) {
-      placeWhen(wDay, span!.end, dDay === today ? today : undefined);
-    } else if (
-      (isSlippedTask(it, today) ||
-        (closedTask && span !== null && span.end < today)) &&
-      !deadlineOverdue
-    ) {
+      placeWhen(wDay, span.end);
+    } else if (isSlippedTask(it, today) || closedTask) {
       // A task planned for a day that has passed is still to do: Overdue,
-      // by its `when`. With the deadline behind it as well the deadline
-      // row below is the one: it is what is owed.
+      // by its `when`.
       overdueRows.push({
-        raw: it.when!,
-        row: { item: it, placedBy: "when", tone: "overdue" },
-      });
-    }
-    if (dDay === null) continue;
-    if (deadlineOverdue) {
-      // Owed now: the Overdue group (red), whatever `when` says.
-      overdueRows.push({
-        raw: dDay,
-        row: { item: it, placedBy: "deadline", tone: "overdue" },
-      });
-    } else if (wDay === null || dDay < wDay || dDay > span!.end) {
-      // Its own row on its day: the special kind of date. On a day the
-      // `when` covers, that row carries it instead (`isDueRow`).
-      placed.push({
-        day: dDay,
-        raw: dDay,
-        row: {
-          item: it,
-          placedBy: "deadline",
-          tone: dDay === today ? "warning" : "neutral",
-        },
+        raw: it.when,
+        row: { item: it, tone: "overdue" },
       });
     }
   }
@@ -295,14 +231,11 @@ export function groupByDay(
       last.rows.push(p.row);
       continue;
     }
-    // Day labels reuse the deadline badge's Tomorrow / weekday / compact
-    // date rules, judged against today; a day gone by is its date.
-    const info = formatDeadlineBadge(p.day, today, labels, locale, {
-      pastAsDate: true,
-    });
+    // Tomorrow / weekday / compact date, judged against today; a day
+    // gone by is its date.
     into.push({
       key: p.day,
-      label: info?.label ?? p.day,
+      label: formatDayLabel(p.day, today, labels, locale) ?? p.day,
       urgency: gone ? "past" : "future",
       rows: [p.row],
     });
@@ -320,16 +253,9 @@ export function groupByDay(
   return out;
 }
 
-/** A `when` row on the day its item's deadline falls: the one row
- *  stands for both dates there, so the surface marks it as due. `day` is
- *  the row's group key. */
-export const isDueRow = (row: DayRow, day: string): boolean =>
-  row.placedBy === "when" && isOpen(row.item) && row.item.deadline === day;
-
 /** Every item on the agenda once, in display order, with the key of the
  *  group its row is in: what the selection runs over. An item on more
- *  than one day (a multi-day span, a date and a deadline, or a past day
- *  and a day ahead) counts
+ *  than one day (a multi-day span, or a past day and a day ahead) counts
  *  at its first row from Overdue on, and at its first past row only when
  *  it has none there: a span that began yesterday is one of today's
  *  rows, not yesterday's. */
@@ -361,33 +287,28 @@ export interface AttentionBadge {
   tone: DayTone;
 }
 
-/** Count what is owed or on today: Open items with an overdue deadline, a
- *  task `when` that is over, a deadline today, or a `when` on today, a
- *  span covering it included. Tone is the most urgent counted: overdue,
- *  else warning (a deadline today), else neutral. An event's past `when`
- *  has gone by and counts for nothing; future days are the view's
- *  business, not the badge's. */
+/** Count what is owed or on today: Open items with a task `when` that
+ *  is over, or a `when` on today, a span covering it included. Tone is
+ *  overdue when any counted task is, else neutral. An event's past
+ *  `when` has gone by and counts for nothing; future days are the view's
+ *  business, not the badge's. Mirrors `attention_count` in the CLI's
+ *  `agenda.rs`. */
 export function attentionBadge(
   items: Iterable<ItemView>,
   today: string,
 ): AttentionBadge {
   let count = 0;
   let overdue = false;
-  let warning = false;
   for (const it of items) {
     if (!isOpen(it)) continue;
-    const dDay = it.deadline ?? null;
-    if ((dDay !== null && dDay < today) || isSlippedTask(it, today)) {
+    if (isSlippedTask(it, today)) {
       count++;
       overdue = true;
-    } else if (dDay === today) {
-      count++;
-      warning = true;
     } else if (it.when && coversToday(it.when, it.duration, today)) {
       count++;
     }
   }
-  return { count, tone: overdue ? "overdue" : warning ? "warning" : "neutral" };
+  return { count, tone: overdue ? "overdue" : "neutral" };
 }
 
 const coversToday = (
@@ -444,12 +365,11 @@ export function fillEmptyDays(
       out.push(have);
       continue;
     }
-    const info = formatDeadlineBadge(day, today, labels, locale, {
-      pastAsDate: true,
-    });
     out.push({
       key: day,
-      label: day === today ? labels.today : (info?.label ?? day),
+      label: day === today
+        ? labels.today
+        : (formatDayLabel(day, today, labels, locale) ?? day),
       urgency: day < today ? "past" : day === today ? "today" : "future",
       rows: [],
     });
@@ -457,28 +377,17 @@ export function fillEmptyDays(
   return out;
 }
 
-/** What dropping `item` on the agenda day `day` writes
- *  (`spec/calendar-plan.md` "Reschedule"): an item with a `when` moves
- *  its `when` there, the clock time kept, and a multi-day span moves its
- *  start (the `duration` is untouched, so the span keeps its length),
- *  whichever of its rows was grabbed; an item with only a deadline moves
- *  the deadline. Null when nothing would change, or for an item the
- *  drop does not move: a closed task (it sits on the day it was closed)
- *  or one with no date. */
-export function dropOnDay(
-  item: ItemView,
-  day: string,
-): { field: "when" | "deadline"; value: string } | null {
-  if (isBinned(item) || isClosedTask(item)) return null;
-  if (item.when) {
-    if (whenDay(item.when) === day) return null;
-    return { field: "when", value: day + item.when.slice(10) };
-  }
-  if (item.deadline) {
-    if (item.deadline === day) return null;
-    return { field: "deadline", value: day };
-  }
-  return null;
+/** The `when` dropping `item` on the agenda day `day` writes
+ *  (`spec/calendar-plan.md` "Reschedule"): the `when` moves there, the
+ *  clock time kept, and a multi-day span moves its start (the `duration`
+ *  is untouched, so the span keeps its length), whichever of its rows
+ *  was grabbed. Null when nothing would change, or for an item the drop
+ *  does not move: a closed task (it sits on the day it was closed) or
+ *  one with no date. */
+export function dropOnDay(item: ItemView, day: string): string | null {
+  if (isBinned(item) || isClosedTask(item) || !item.when) return null;
+  if (whenDay(item.when) === day) return null;
+  return day + item.when.slice(10);
 }
 
 /** The locale's first day of the week, 1 (Monday) to 7 (Sunday), from

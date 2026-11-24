@@ -2,7 +2,7 @@
 // and the item sheet): the engine's agenda projection (`Engine.agenda`,
 // spec/cli.md, with a horizon far enough out to be the whole future,
 // `AppModel.agendaDays`) as sections: Overdue while something is
-// (overdue deadlines and tasks whose planned day has passed), Today,
+// (tasks whose planned day has passed), Today,
 // then every day ahead, empty ones too, for two weeks and on to the
 // last day with rows, as the Mac's Calendar has them
 // (`AgendaGroup.filled`). The filter menu's "Hide Empty Days"
@@ -113,7 +113,7 @@ struct AgendaView: View {
                 ContentUnavailableView(
                     "Nothing scheduled",
                     systemImage: "calendar",
-                    description: Text("Items with a date or deadline will show here.")
+                    description: Text("Items with a date will show here.")
                 )
             }
         }
@@ -137,7 +137,7 @@ struct AgendaView: View {
 /// calendar alone), its place when it has one and then
 /// the workspace when the row is not Personal's (ahead of those lines
 /// the assignee's small avatar, when an open item has one), and on the right the time when timed with a note under
-/// it for the tone (overdue in red, due today in orange) or the
+/// it for the tone (overdue in red) or the
 /// duration. The checkbox ticks; the rest of the row opens the sheet.
 /// An event has the event pill for a checkbox while it is open or its
 /// day has gone by (`AgendaEntry.showsCheck`). A task done today is
@@ -241,13 +241,7 @@ struct AgendaRowView: View {
     private var note: (text: String, color: Color)? {
         switch row.tone {
         case .overdue: return (String(localized: "Overdue"), .red)
-        case .warning: return (String(localized: "Deadline"), .secondary)
         case .neutral: break
-        }
-        // A deadline's own row says what it is; the length belongs to
-        // the `when`'s row.
-        if row.placedBy == .deadline {
-            return (String(localized: "Deadline"), .secondary)
         }
         if let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)

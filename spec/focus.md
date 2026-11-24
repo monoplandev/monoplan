@@ -295,7 +295,7 @@ the export format mirrors the doc layout.
   items, then **appends** them after any existing local Focus refs: additive
   import does not disturb local curation. Refs that don't resolve (unknown id,
   foreign-doc form, skipped empty-text item, non-Open item, duplicate) are
-  dropped silently, matching the malformed-`deadline` handling. The count of
+  dropped silently, matching the malformed-`when` handling. The count of
   re-established refs surfaces as `focus_added` / `focusAdded` on the import
   summary.
 

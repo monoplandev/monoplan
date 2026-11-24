@@ -39,7 +39,6 @@ const CLIP_DEBUG = true;
 export interface ClipItem {
   text: string;
   notes?: string;
-  deadline?: string;
   when?: string;
   /** The IANA zone a timed `when` is fixed to; `when` is the copying
    *  device's wall time either way. */
@@ -74,7 +73,6 @@ const STATES: ReadonlySet<string> = new Set<WorkflowState>([
 export const toClipItem = (it: ItemView): ClipItem => {
   const out: ClipItem = { text: it.text, state: it.state };
   if (it.notes) out.notes = it.notes;
-  if (it.deadline) out.deadline = it.deadline;
   if (it.when) out.when = it.when;
   if (it.when && it.whenZone) out.whenZone = it.whenZone;
   if (it.when && it.event) out.event = true;
@@ -212,8 +210,6 @@ const parseClip = (raw: string): ClipItem[] | null => {
           : "backlog",
     };
     if (typeof e.notes === "string" && e.notes) item.notes = e.notes;
-    if (typeof e.deadline === "string" && e.deadline)
-      item.deadline = e.deadline;
     if (typeof e.when === "string" && e.when) item.when = e.when;
     if (item.when && typeof e.whenZone === "string" && e.whenZone) item.whenZone = e.whenZone;
     if (item.when && e.event === true) item.event = true;

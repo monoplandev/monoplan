@@ -127,12 +127,6 @@ const KEY_LIFECYCLE: &str = "lifecycle";
 /// Reflection stamp: set (write-once) the first time the item enters
 /// In Progress; never cleared. Feeds analytics; no view reads it.
 const KEY_STARTED_AT: &str = "started_at";
-/// Optional date-only deadline: a floating local calendar date in
-/// `YYYY-MM-DD` format (no time, no timezone). Absent ≡ no deadline;
-/// the mutation deletes the key when cleared. Written on its own scalar
-/// register; malformed values never reach the doc (validated in
-/// `set_item_deadline`).
-const KEY_DEADLINE: &str = "deadline";
 /// Optional planned date: a floating local `YYYY-MM-DD` (all-day) or
 /// `YYYY-MM-DDTHH:MM` (timed) wall-clock intent. Absent ≡ unset; the
 /// mutation deletes the key when cleared. Shape-discriminated, one
@@ -646,10 +640,6 @@ pub struct ItemView {
     /// Unix millis the register's state was entered; `created_at` when
     /// the register is absent.
     pub lifecycle_at: i64,
-    /// Optional date-only deadline — a floating local calendar date in
-    /// `YYYY-MM-DD` format. `None` ≡ no deadline. The core stores and
-    /// echoes the raw string; it never parses it into a timestamp.
-    pub deadline: Option<String>,
     /// Optional planned date — `YYYY-MM-DD` (all-day) or
     /// `YYYY-MM-DDTHH:MM` (timed), as wall time on this device. `None` ≡
     /// unset. A floating value is the register's string; a fixed one
@@ -1019,10 +1009,6 @@ pub struct ExportItem {
     pub list_id: String,
     /// Workflow register (`{state, at}`), emitted for every item.
     pub lifecycle: ExportLifecycle,
-    /// Date-only deadline (`YYYY-MM-DD`). Skipped when unset to keep
-    /// pre-deadline dumps byte-identical.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub deadline: Option<String>,
     /// Planned date (`YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`). Skipped when
     /// unset so older dumps stay byte-identical.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -2253,7 +2239,7 @@ impl Doc {
     }
 
     /// Duplicate an item: a new item in the same list with the same
-    /// text, notes, deadline, `when`, duration and place. Returns the
+    /// text, notes, `when`, duration and place. Returns the
     /// copy's id. The copy of an open item keeps its workflow state and
     /// sits directly after the original; the copy of a closed one is a
     /// fresh Backlog item at the end of the list. Not copied: the id,
@@ -2283,9 +2269,6 @@ impl Doc {
             (WorkflowState::Backlog, usize::MAX)
         };
         let copy = self.add_item_in_state_at(&item.list_id, &item.text, state, index)?;
-        if let Some(deadline) = &item.deadline {
-            self.set_item_deadline(&copy, Some(deadline))?;
-        }
         if let Some(when) = item.when_stored() {
             // Before the duration: a timed `when` defaults one, which
             // the original's then replaces.
@@ -2438,7 +2421,6 @@ impl Doc {
                 started_at: (state == WorkflowState::InProgress).then_some(now),
                 done_at: None,
                 binned_at: None,
-                deadline: None,
                 when_zone: None,
                 when: None,
                 when_suggested: None,
@@ -2640,32 +2622,6 @@ impl Doc {
         Ok(())
     }
 
-    /// Set or clear an item's date-only deadline. `Some(date)` validates
-    /// a `YYYY-MM-DD` calendar date and writes the `deadline` register;
-    /// `None` deletes the key. One Loro commit. Malformed dates are
-    /// rejected with `Invalid` and never touch the doc. The stored value
-    /// is a floating local calendar date — the core never converts it to
-    /// a timestamp.
-    pub fn set_item_deadline(&self, item_id: &str, deadline: Option<&str>) -> Result<(), DocError> {
-        let normalized = match deadline {
-            Some(raw) => Some(parse_deadline(raw)?),
-            None => None,
-        };
-        let map = self.find_item(item_id)?;
-        match &normalized {
-            Some(date) => map.insert(KEY_DEADLINE, date.as_str())?,
-            None => {
-                let _ = map.delete(KEY_DEADLINE);
-            }
-        }
-        self.inner.commit();
-        self.push_event(AppEvent::ItemDeadlineChanged {
-            id: item_id.to_string(),
-            deadline: normalized,
-        });
-        Ok(())
-    }
-
     /// Set or clear an item's planned date. `Some(value)` validates a
     /// `YYYY-MM-DD` (all-day), `YYYY-MM-DDTHH:MM` (timed) or
     /// `YYYY-MM-DDTHH:MM[Zone]` (timed, fixed to a zone) value and
@@ -2682,8 +2638,8 @@ impl Doc {
     /// day has none); [`set_item_when_zone`](Self::set_item_when_zone)
     /// with `None` makes a timed value floating.
     ///
-    /// Mirrors `set_item_deadline`. The `duration` register moves with
-    /// it in the same commit at both ends: a timed value landing on an
+    /// The `duration` register moves with it in the same commit at both
+    /// ends: a timed value landing on an
     /// item with no duration writes `DEFAULT_DURATION_MINUTES` (a start
     /// implies an end; an existing length is left alone), and clearing
     /// the `when` clears any duration (a length without a start is
@@ -4516,7 +4472,7 @@ impl Doc {
     /// local Focus (additive import doesn't disturb local curation,
     /// and an item already here keeps whatever Focus state it has);
     /// refs to skipped or non-Open items are dropped silently, like
-    /// malformed `deadline` values. All writes land in a single Loro
+    /// malformed `when` values. All writes land in a single Loro
     /// commit; UI events are emitted via the standard pre/post
     /// state-diff.
     pub fn import_json(&self, export: &JsonExport) -> Result<ImportSummary, DocError> {
@@ -4711,7 +4667,7 @@ impl Doc {
 
     /// Write one item map under `id` from its export form: every field
     /// an [`ExportItem`] carries, with the caller's `text`, `notes`,
-    /// `location` and bin mask. A malformed deadline / when / duration /
+    /// `location` and bin mask. A malformed when / duration /
     /// place is dropped, not rejected. Shared by [`import_json`]
     /// (Self::import_json) and [`adopt_items`](Self::adopt_items); the
     /// caller writes the order entry and commits. Returns the workflow
@@ -4761,12 +4717,6 @@ impl Doc {
         }
         if let Some(t) = src.started_at {
             map.insert(KEY_STARTED_AT, t)?;
-        }
-        // Carry a well-formed deadline through; a malformed one in a
-        // hand-edited export is silently dropped rather than aborting
-        // the whole import.
-        if let Some(date) = src.deadline.as_deref().and_then(|d| parse_deadline(d).ok()) {
-            map.insert(KEY_DEADLINE, date.as_str())?;
         }
         if let Some(value) = src.when.as_deref().and_then(|w| parse_when(w).ok()) {
             map.insert(KEY_WHEN, value.as_str())?;
@@ -4859,8 +4809,7 @@ impl Doc {
     /// Ids are **preserved**, so item URLs and Focus refs keep
     /// resolving; an id this doc already holds (live, done or binned)
     /// rejects the whole call, as does a malformed or repeated one.
-    /// Every field travels (text, notes as plain content, deadline,
-    /// when, duration, place, workflow state and stamps, creator), with
+    /// Every field travels (text, notes as plain content, when, duration, place, workflow state and stamps, creator), with
     /// three exceptions: the item is located in `list_id`, it lands
     /// **not binned** (a move out of the Bin restores), and the
     /// assignee travels only when it is this doc's author. The mover is
@@ -5689,7 +5638,6 @@ impl Doc {
                     [
                         KEY_TEXT,
                         KEY_NOTES,
-                        KEY_DEADLINE,
                         KEY_ASSIGNEE,
                         KEY_SUBTASKS,
                         KEY_WHEN,
@@ -5827,12 +5775,6 @@ impl Doc {
                     let deltas = text_deltas_by_id.get(id).map(Vec::as_slice).unwrap_or(&[]);
                     self.emit_notes_delta(id, deltas, &view.notes);
                 }
-                if has(KEY_DEADLINE) {
-                    self.push_event(AppEvent::ItemDeadlineChanged {
-                        id: id.clone(),
-                        deadline: view.deadline.clone(),
-                    });
-                }
                 if has(KEY_ASSIGNEE) {
                     self.push_event(AppEvent::ItemAssigneeChanged {
                         id: id.clone(),
@@ -5941,7 +5883,6 @@ impl Doc {
                     started_at: view.started_at,
                     done_at: view.done_at,
                     binned_at: view.binned_at,
-                    deadline: view.deadline,
                     when_zone: zone_of(&view.when_zoned),
                     when: view.when,
                     when_suggested: view.when_suggested,
@@ -6012,7 +5953,6 @@ impl Doc {
                             started_at: view.started_at,
                             done_at: view.done_at,
                             binned_at: view.binned_at,
-                            deadline: view.deadline,
                             when_zone: zone_of(&view.when_zoned),
                             when: view.when,
                             when_suggested: view.when_suggested,
@@ -6307,7 +6247,6 @@ impl Doc {
                 started_at: item.started_at,
                 done_at: item.done_at,
                 binned_at: item.binned_at,
-                deadline: item.deadline,
                 when_zone: zone_of(&item.when_zoned),
                 when: item.when,
                 when_suggested: item.when_suggested,
@@ -6418,7 +6357,6 @@ impl Doc {
             // (`spec/data-model.md`).
             hasher.update([i.state as u8]);
             hasher.update(i.lifecycle_at.to_be_bytes());
-            hash_opt_str(&mut hasher, i.deadline.as_deref());
             // The register, not the device-local view of it.
             hash_opt_str(&mut hasher, i.when_stored());
             hash_opt_str(&mut hasher, i.when_suggested.as_deref());
@@ -6704,7 +6642,6 @@ fn export_item(item: ItemView) -> ExportItem {
             state: item.state.name().to_string(),
             at: item.lifecycle_at,
         },
-        deadline: item.deadline,
         when: item.when_zoned.or(item.when),
         when_suggested: item.when_suggested,
         event: item.event,
@@ -7168,17 +7105,17 @@ fn item_meta(map: &LoroMap) -> ItemMeta {
     }
 }
 
-/// Validate a date-only deadline and return it normalized. Accepts
+/// Validate a calendar date and return it normalized. Accepts
 /// exactly `YYYY-MM-DD` (4-digit year, 2-digit month, 2-digit day) that
 /// names a real calendar day (month 1–12, day within the month's length,
 /// leap years honored). Leading/trailing whitespace is trimmed before
 /// checking. Any other shape — a time component, unix millis, a
 /// single-digit field, an out-of-range day — is rejected. The value is a
 /// floating local date; no timezone is applied.
-fn parse_deadline(raw: &str) -> Result<String, DocError> {
+fn parse_date(raw: &str) -> Result<String, DocError> {
     let s = raw.trim();
     let bytes = s.as_bytes();
-    let invalid = || DocError::Invalid(format!("deadline must be YYYY-MM-DD: {raw:?}"));
+    let invalid = || DocError::Invalid(format!("date must be YYYY-MM-DD: {raw:?}"));
     if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return Err(invalid());
     }
@@ -7223,7 +7160,7 @@ fn when_is_timed(normalized: &str) -> bool {
 /// chars, hour `00..=23`, minute `00..=59`), both floating, and a timed
 /// value fixed to a zone, `YYYY-MM-DDTHH:MM[Zone]` (RFC 9557 with an
 /// IANA id, `spec/calendar-plan.md` "Fixed instants"). The date part
-/// goes through `parse_deadline`'s calendar check. Seconds, offsets and
+/// goes through `parse_date`'s calendar check. Seconds, offsets and
 /// a zone on an all-day value are rejected. The zone is checked by
 /// shape only and kept as written: whether this device's tzdb knows it
 /// is the writer's question (`Doc::set_item_when`), not the grammar's,
@@ -7240,7 +7177,7 @@ fn parse_when(raw: &str) -> Result<String, DocError> {
         return Err(invalid());
     }
     match wall.len() {
-        10 => parse_deadline(wall)
+        10 => parse_date(wall)
             .map(|_| s.to_string())
             .map_err(|_| invalid()),
         16 => {
@@ -7248,7 +7185,7 @@ fn parse_when(raw: &str) -> Result<String, DocError> {
             if bytes[10] != b'T' || bytes[13] != b':' {
                 return Err(invalid());
             }
-            parse_deadline(&wall[..10]).map_err(|_| invalid())?;
+            parse_date(&wall[..10]).map_err(|_| invalid())?;
             let two = |from: usize| -> Option<u32> {
                 let part = &wall[from..from + 2];
                 if part.bytes().all(|b| b.is_ascii_digit()) {
@@ -7299,7 +7236,6 @@ fn item_view(map: &LoroMap) -> Option<ItemView> {
         list_id: location,
         state,
         lifecycle_at,
-        deadline: read_string(map, KEY_DEADLINE).filter(|s| !s.is_empty()),
         when: stored_when.as_deref().map(zone::localize),
         when_zoned: stored_when.filter(|s| zone::split(s).1.is_some()),
         when_suggested: read_string(map, KEY_WHEN_SUGGESTED).filter(|s| !s.is_empty()),
@@ -7596,7 +7532,6 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     started_at: post_it.started_at,
                     done_at: post_it.done_at,
                     binned_at: post_it.binned_at,
-                    deadline: post_it.deadline.clone(),
                     when_zone: zone_of(&post_it.when_zoned),
                     when: post_it.when.clone(),
                     when_suggested: post_it.when_suggested.clone(),
@@ -7617,12 +7552,6 @@ fn diff_items(pre: &[ItemView], post: &[ItemView], out: &mut Vec<AppEvent>) {
                     out.push(AppEvent::ItemNotesChanged {
                         id: post_it.id.clone(),
                         notes: post_it.notes.clone(),
-                    });
-                }
-                if pre_it.deadline != post_it.deadline {
-                    out.push(AppEvent::ItemDeadlineChanged {
-                        id: post_it.id.clone(),
-                        deadline: post_it.deadline.clone(),
                     });
                 }
                 if pre_it.assignee != post_it.assignee {
@@ -8394,14 +8323,14 @@ mod tests {
         doc.set_default_view(&list, Some(DefaultView::BOARD))
             .unwrap();
 
-        // A list with every lifecycle represented, notes, a deadline, a
+        // A list with every lifecycle represented, notes, a date, a
         // manual reorder, and a Focus ref.
         let a = doc.add_item(&list, "a").unwrap();
         let b = doc.add_item(&list, "b").unwrap();
         let c = doc.add_item(&list, "c").unwrap();
         let d = doc.add_item(&list, "d").unwrap();
         set_notes(&doc, &a, "some notes");
-        doc.set_item_deadline(&a, Some("2026-09-01")).unwrap();
+        doc.set_item_when(&a, Some("2026-09-01")).unwrap();
         doc.set_item_lifecycle(&b, ItemLifecycle::InProgress)
             .unwrap();
         doc.set_item_done(&c, true).unwrap();
@@ -11295,7 +11224,6 @@ mod tests {
                 state: "backlog".to_string(),
                 at: 1,
             },
-            deadline: None,
             when: None,
             when_suggested: None,
             event: false,
@@ -11395,7 +11323,6 @@ mod tests {
                 state: "backlog".to_string(),
                 at: 1,
             },
-            deadline: None,
             when: None,
             when_suggested: None,
             event: false,
@@ -11486,105 +11413,40 @@ mod tests {
     }
 
     #[test]
-    fn set_and_clear_item_deadline() {
-        let doc = Doc::new().unwrap();
-        let id = doc.add_item(LIST_INBOX, "pay rent").unwrap();
-        let _ = doc.drain_events();
-
-        doc.set_item_deadline(&id, Some("2026-07-15")).unwrap();
-        assert_eq!(
-            doc.get_item(&id).unwrap().deadline.as_deref(),
-            Some("2026-07-15")
-        );
-        assert_eq!(
-            doc.drain_events(),
-            vec![AppEvent::ItemDeadlineChanged {
-                id: id.clone(),
-                deadline: Some("2026-07-15".into()),
-            }]
-        );
-
-        // Whitespace is trimmed before storage.
-        doc.set_item_deadline(&id, Some("  2026-08-01  ")).unwrap();
-        assert_eq!(
-            doc.get_item(&id).unwrap().deadline.as_deref(),
-            Some("2026-08-01")
-        );
-        let _ = doc.drain_events();
-
-        // Clearing deletes the key.
-        doc.set_item_deadline(&id, None).unwrap();
-        assert_eq!(doc.get_item(&id).unwrap().deadline, None);
-        assert_eq!(
-            doc.drain_events(),
-            vec![AppEvent::ItemDeadlineChanged {
-                id: id.clone(),
-                deadline: None,
-            }]
-        );
-    }
-
-    #[test]
-    fn set_item_deadline_rejects_malformed_dates() {
+    fn date_only_when_rejects_impossible_calendar_dates() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "task").unwrap();
         let _ = doc.drain_events();
 
         for bad in [
-            "2026-7-15",        // single-digit month
-            "2026-13-01",       // month out of range
-            "2026-02-30",       // day out of range for February
-            "2026-00-10",       // zero month
-            "2026-01-00",       // zero day
-            "07/15/2026",       // wrong separators
-            "2026-07-15T00:00", // has a time component
-            "1752566400000",    // unix millis
+            "2026-7-15",     // single-digit month
+            "2026-13-01",    // month out of range
+            "2026-02-30",    // day out of range for February
+            "2026-00-10",    // zero month
+            "2026-01-00",    // zero day
+            "07/15/2026",    // wrong separators
+            "1752566400000", // unix millis
             "not-a-date",
             "",
         ] {
-            let err = doc.set_item_deadline(&id, Some(bad)).unwrap_err();
+            let err = doc.set_item_when(&id, Some(bad)).unwrap_err();
             assert!(
                 matches!(err, DocError::Invalid(_)),
                 "expected Invalid for {bad:?}, got {err:?}"
             );
         }
         // Nothing was written and no event fired.
-        assert_eq!(doc.get_item(&id).unwrap().deadline, None);
+        assert_eq!(doc.get_item(&id).unwrap().when, None);
         assert!(doc.drain_events().is_empty());
 
         // A leap day in a leap year is accepted.
-        doc.set_item_deadline(&id, Some("2028-02-29")).unwrap();
+        doc.set_item_when(&id, Some("2028-02-29")).unwrap();
         assert_eq!(
-            doc.get_item(&id).unwrap().deadline.as_deref(),
+            doc.get_item(&id).unwrap().when.as_deref(),
             Some("2028-02-29")
         );
         // The same day in a non-leap year is rejected.
-        assert!(doc.set_item_deadline(&id, Some("2027-02-29")).is_err());
-    }
-
-    #[test]
-    fn export_import_preserves_deadline() {
-        let src = Doc::new().unwrap();
-        let a = src.add_item(LIST_INBOX, "with deadline").unwrap();
-        let _b = src.add_item(LIST_INBOX, "no deadline").unwrap();
-        src.set_item_deadline(&a, Some("2026-09-30")).unwrap();
-
-        let export = src.export_json();
-        // The raw dump carries the string.
-        assert!(
-            export
-                .items
-                .iter()
-                .any(|i| i.deadline.as_deref() == Some("2026-09-30"))
-        );
-
-        let dst = Doc::new().unwrap();
-        dst.import_json(&export).unwrap();
-        let imported: Vec<ItemView> = dst.iter_items().collect();
-        let with_deadline = imported.iter().find(|i| i.text == "with deadline").unwrap();
-        let no_deadline = imported.iter().find(|i| i.text == "no deadline").unwrap();
-        assert_eq!(with_deadline.deadline.as_deref(), Some("2026-09-30"));
-        assert_eq!(no_deadline.deadline, None);
+        assert!(doc.set_item_when(&id, Some("2027-02-29")).is_err());
     }
 
     #[test]
@@ -11877,42 +11739,6 @@ mod tests {
     }
 
     #[test]
-    fn deadline_converges_between_peers() {
-        let dek = Dek::generate();
-        let mut a = Doc::new().unwrap();
-        let id = a.add_item(LIST_INBOX, "sync me").unwrap();
-        let seed = a.pending_export(&dek).unwrap().unwrap();
-        a.mark_persisted();
-        let mut b = Doc::empty();
-        b.apply_remote(&dek, &seed).unwrap();
-        let _ = a.drain_events();
-        let _ = b.drain_events();
-
-        // Set a deadline on a, ship the frame to b.
-        a.set_item_deadline(&id, Some("2026-11-05")).unwrap();
-        let frame = a.pending_export(&dek).unwrap().unwrap();
-        b.apply_remote(&dek, &frame).unwrap();
-
-        assert_eq!(
-            b.get_item(&id).unwrap().deadline.as_deref(),
-            Some("2026-11-05")
-        );
-        assert_eq!(a.fingerprint(), b.fingerprint());
-        // b's consumer learns via a surgical ItemDeadlineChanged event.
-        assert!(b.drain_events().iter().any(|e| matches!(
-            e,
-            AppEvent::ItemDeadlineChanged { id: eid, deadline: Some(d) } if eid == &id && d == "2026-11-05"
-        )));
-
-        // Clearing also converges.
-        a.set_item_deadline(&id, None).unwrap();
-        let frame = a.pending_export(&dek).unwrap().unwrap();
-        b.apply_remote(&dek, &frame).unwrap();
-        assert_eq!(b.get_item(&id).unwrap().deadline, None);
-        assert_eq!(a.fingerprint(), b.fingerprint());
-    }
-
-    #[test]
     fn set_and_clear_item_when() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "plan me").unwrap();
@@ -11948,16 +11774,12 @@ mod tests {
         );
         let _ = doc.drain_events();
 
-        // Clearing deletes the key; deadline is independent and untouched.
-        // The timed sets above defaulted a duration, so the clear drops
-        // that too and says so.
-        doc.set_item_deadline(&id, Some("2026-10-31")).unwrap();
-        let _ = doc.drain_events();
+        // Clearing deletes the key. The timed sets above defaulted a
+        // duration, so the clear drops that too and says so.
         doc.set_item_when(&id, None).unwrap();
         let view = doc.get_item(&id).unwrap();
         assert_eq!(view.when, None);
         assert_eq!(view.duration, None);
-        assert_eq!(view.deadline.as_deref(), Some("2026-10-31"));
         assert_eq!(
             doc.drain_events(),
             vec![
@@ -12861,7 +12683,6 @@ mod tests {
         let a = doc.add_item(&l, "a").unwrap();
         let b = doc.add_item(&l, "b").unwrap();
         doc.set_item_lifecycle(&a, ItemLifecycle::Todo).unwrap();
-        doc.set_item_deadline(&a, Some("2026-12-01")).unwrap();
         doc.set_item_when(&a, Some("2026-11-20T09:30")).unwrap();
         doc.set_item_duration(&a, Some(45)).unwrap();
         doc.set_item_place(&a, Some(&place("Cafe", Some((-33.8, 151.2)))))
@@ -12885,7 +12706,6 @@ mod tests {
         assert_eq!(to.text, "a");
         assert_eq!(to.state, WorkflowState::Todo);
         assert_eq!(to.notes, "bring the form");
-        assert_eq!(to.deadline, from.deadline);
         assert_eq!(to.when, from.when);
         assert_eq!(to.duration, Some(45));
         assert_eq!(to.place, from.place);
@@ -13036,7 +12856,6 @@ mod tests {
                     state: "backlog".to_string(),
                     at: 1_700_000_000_000,
                 },
-                deadline: None,
                 when: None,
                 when_suggested: None,
                 event: false,
@@ -15430,7 +15249,6 @@ mod cross_doc_move_tests {
         let a = src.add_item(LIST_INBOX, "a").unwrap();
         let b = src.add_item(LIST_INBOX, "b").unwrap();
         let keep = src.add_item(LIST_INBOX, "keep").unwrap();
-        src.set_item_deadline(&a, Some("2026-12-01")).unwrap();
         src.set_item_when(&a, Some("2026-11-30T09:30")).unwrap();
         src.set_item_duration(&a, Some(45)).unwrap();
         src.apply_notes_delta(

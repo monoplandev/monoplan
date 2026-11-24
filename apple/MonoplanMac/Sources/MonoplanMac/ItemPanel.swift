@@ -1,8 +1,8 @@
 // The item panel: the selected row's item, at the right of the window.
 // The iOS item page (apple/MonoplanIOS/Monoplan/ItemView.swift) laid
 // out the same way, top to bottom: status, title, list, planned date,
-// deadline, place, subtasks (`SubtasksField.swift`),
-// notes, then the activity log. Read from
+// place, subtasks (`SubtasksField.swift`), notes, then the activity
+// log. Read from
 // `Engine.item` in the window's snapshot, so it is reread on every doc
 // change like the rest.
 //
@@ -140,8 +140,8 @@ struct ItemPanel: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// List, a rule, planned date, its time under it when timed,
-    /// deadline (only when set), a rule, then the place. The date and
+    /// List, a rule, planned date, its time under it when timed, a
+    /// rule, then the place. The date and
     /// place rows are always there, muted when empty. Each row is a
     /// box (`panelBox`): the list's is always filled, the others' only
     /// under the pointer.
@@ -252,9 +252,6 @@ struct ItemPanel: View {
             // something that happens then (spec/events-plan.md).
             if item.item.when != nil, item.item.binnedAt == nil {
                 EventToggle(event: item.item.event) { setEvent(item, $0) }
-            }
-            if let deadline = item.item.deadline {
-                PanelField(text: String(localized: "Due \(Self.dayText(deadline))")) { Image(systemName: "timer") }
             }
             PanelRule().padding(.vertical, 4)
             // The place row with no map or address under it ends the

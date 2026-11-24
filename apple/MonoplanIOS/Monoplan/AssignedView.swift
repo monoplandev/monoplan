@@ -61,8 +61,8 @@ struct AssignedView: View {
     }
 }
 
-/// One assigned row: the text, and underneath its date (the earlier of
-/// its planned day and deadline) when it has one, the list it lives in
+/// One assigned row: the text, and underneath its planned day when it
+/// has one, the list it lives in
 /// and, when that is not Personal's, its workspace.
 struct AssignedRowView: View {
     let item: Item
@@ -85,7 +85,7 @@ struct AssignedRowView: View {
     }
 
     private var note: String? {
-        let day = item.assignedDate.map { WhenText.dayLabel(String($0.prefix(10))) }
+        let day = item.when.map { WhenText.dayLabel(String($0.prefix(10))) }
         let parts = [day, listName, workspace].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

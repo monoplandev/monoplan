@@ -316,7 +316,7 @@ export function WhenField(props: {
           <Popover.Portal>
             <Popover.Content
               ref={contentRef}
-              class="deadline-dialog when-popover"
+              class="picker-card when-popover"
               // Focus belongs to the input, so typing works the moment the
               // popover is up, whichever way it was opened.
               onOpenAutoFocus={(e) => {
@@ -395,7 +395,7 @@ export function WhenField(props: {
             <Popover.Portal>
               <Popover.Content
                 ref={endContentRef}
-                class="deadline-dialog when-popover"
+                class="picker-card when-popover"
                 onOpenAutoFocus={(e) => {
                   e.preventDefault();
                   endInputRef?.focus();

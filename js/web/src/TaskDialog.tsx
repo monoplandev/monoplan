@@ -19,14 +19,12 @@ import {
   createMemo,
   createSignal,
   For,
-  on,
   onCleanup,
   Show,
   untrack,
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Avatar } from "./Avatar.tsx";
-import { DeadlineField } from "./DeadlineField.tsx";
 import { PlaceField } from "./PlaceField.tsx";
 import type { PlaceSuggestion } from "./placeSuggest.ts";
 import { WhenField } from "./WhenField.tsx";
@@ -70,7 +68,6 @@ import {
   isBinned,
   isCancelled,
   isClosed,
-  isOpen,
   isClosedState,
   isDone,
   EVENT_STATES,
@@ -217,14 +214,11 @@ export function TaskDialog(props: {
    *  re-lands the caret. Treated as true when omitted, and ignored for a
    *  new-item capture, which always lands the caret. */
   entered?: () => boolean;
-  /** The planned-date and deadline popovers' open state, owned by the
-   *  caller so it can open the surface with a popover already showing (a
-   *  row context menu's "Set date…" / "Set deadline…"). Cleared by the
-   *  surface as it closes. */
+  /** The planned-date popover's open state, owned by the caller so it
+   *  can open the surface with the popover already showing. Cleared by
+   *  the surface as it closes. */
   whenOpen: () => boolean;
   setWhenOpen: (v: boolean) => void;
-  deadlineOpen: () => boolean;
-  setDeadlineOpen: (v: boolean) => void;
   /** Called as the dialog closes so the owner can restore focus (to the
    *  list). Fires from Kobalte's close-auto-focus hook, which we take over
    *  to steer focus back to the listbox instead of the trigger. */
@@ -442,7 +436,6 @@ export function TaskDialog(props: {
   const [notes, setNotes] = createSignal("");
   // New-item mode's buffers: nothing exists to write to until the
   // capture commits, so picks are held here and applied after creation.
-  // (No deadline among them: one is set from an existing item's menu.)
   // The Event box is applied after `newWhen` (an event needs its date).
   const [newEvent, setNewEvent] = createSignal(false);
   // New-item mode's duration buffer, applied after `newWhen`.
@@ -816,12 +809,11 @@ export function TaskDialog(props: {
     loadedId = key;
     setAssignOpen(false);
     // Closed: the editors unmount; forgetting the target means reopening
-    // the same item re-pushes its content into fresh editors. The date /
-    // deadline popovers' open state is the caller's and outlives the
-    // surface, so drop it here rather than let the next open inherit it.
+    // the same item re-pushes its content into fresh editors. The date
+    // popover's open state is the caller's and outlives the surface, so
+    // drop it here rather than let the next open inherit it.
     if (key === null) {
       props.setWhenOpen(false);
-      props.setDeadlineOpen(false);
       return;
     }
     const it = id ? props.app.state.itemsById[id] : undefined;
@@ -1049,7 +1041,7 @@ export function TaskDialog(props: {
   // than leaving a half-typed item stranded in the pane. Only while the
   // capture is unpromoted: once its title has blurred it is an ordinary
   // entered item, which the selection moving away closes. Portaled layers
-  // (the lifecycle / deadline menus, the list picker) live outside the
+  // (the lifecycle menu, the list picker) live outside the
   // app root, so opening or clicking inside them doesn't count as leaving.
   // A row-phase draft capture is the row's to settle: the row has the
   // caret, and its blur (which any outside click causes) commits through
@@ -1279,22 +1271,11 @@ export function TaskDialog(props: {
   };
   const vDuration = () =>
     item() ? (item()?.duration ?? null) : newDuration();
-  // A capture has no deadline: it is set from an existing item's menu.
-  const vDeadline = () => item()?.deadline ?? null;
   const vPlace = () => (item() ? (item()?.place ?? null) : newPlace());
   // Closed / Binned: date fields render muted and the pin toggle hides
   // (neither can hold a Focus ref, spec/focus.md).
   const muted = () => vDone() || vBinned();
 
-  // The date and place bands are always there, empty or not (a
-  // placeholder reads as the absence). The deadline band is the one
-  // promote-on-set register (`spec/board.md` has none of this; it is the
-  // task surface's own layout rule): it shows while it holds a value or
-  // is being filled, "being filled" meaning its popover is open, which is
-  // already the caller's state (a row menu's "Set deadline…" opens the
-  // item onto it). Until set it is a menu entry only: the row's context
-  // menu and this surface's "…" menu.
-  const deadlineShown = () => vDeadline() !== null || props.deadlineOpen();
   // The assignee band (`spec/sharing-plan.md` §Assignment) is always
   // there on a shared workspace's item, as the date and place bands: a
   // muted "Assign" until it holds someone. A binned item only shows an
@@ -1309,26 +1290,6 @@ export function TaskDialog(props: {
     const a = assignment();
     return a !== null && (a.assignee !== null || !vBinned());
   };
-  // A band folded back without a value leaves focus on a detached input;
-  // put it on the "…" menu trigger instead. Only when the fold actually
-  // took the focus: the band also hides when the pane moves to an item
-  // without a deadline (arrowing along a board), and focus is the
-  // board's then, not ours to take.
-  let menuRef: HTMLButtonElement | undefined;
-  // A "…" menu pick that opens a popover, held until the menu has
-  // reported closed: opened while the menu is still closing, the menu's
-  // dismiss handling takes the new popover down with it.
-  let menuPick: (() => void) | null = null;
-  createEffect(
-    on(deadlineShown, (now, before) => {
-      if (!before || now) return;
-      queueMicrotask(() => {
-        const active = document.activeElement;
-        if (active && active !== document.body && active.isConnected) return;
-        menuRef?.focus();
-      });
-    }),
-  );
   const setDoneFlag = (done: boolean) => {
     const it = item();
     if (it) props.app.setDone(it.id, done);
@@ -1424,10 +1385,6 @@ export function TaskDialog(props: {
     if (it) props.app.setItemDuration(it.id, minutes);
     else setNewDuration(minutes);
   };
-  const onDeadlineChange = (stamp: string | null) => {
-    const it = item();
-    if (it) props.app.setItemDeadline(it.id, stamp);
-  };
   const onPlaceChange = (place: Place | null) => {
     const it = item();
     if (it) props.app.setItemPlace(it.id, place);
@@ -1487,20 +1444,12 @@ export function TaskDialog(props: {
           <Show when={!muted()}>
             <PinToggle pinned={vPinned} onToggle={onPinToggle} />
           </Show>
-          {/* Item menu (link, reveal, deadline, bin / restore / delete):
+          {/* Item menu (link, reveal, bin / restore / delete):
               only once the item exists. */}
           <Show when={item()}>
             {(it) => (
-              <DropdownMenu
-                onOpenChange={(open) => {
-                  if (open || !menuPick) return;
-                  const run = menuPick;
-                  menuPick = null;
-                  setTimeout(run, 0);
-                }}
-              >
+              <DropdownMenu>
                 <DropdownMenu.Trigger
-                  ref={(el) => (menuRef = el)}
                   class="icon-button"
                   aria-label={m().common.menu}
                   innerHTML={dotsHorizontalSvg}
@@ -1535,7 +1484,7 @@ export function TaskDialog(props: {
                       </DropdownMenu.Item>
                     </Show>
                     {/* The calendar jump, as on the row menu: an
-                        unbinned item with a date or a deadline, from
+                        unbinned item with a date, from
                         anywhere but the calendar. The item stays open,
                         now over the calendar. */}
                     <Show
@@ -1543,7 +1492,7 @@ export function TaskDialog(props: {
                         props.onReveal &&
                         !props.inCalendar?.() &&
                         !isBinned(it()) &&
-                        (!!it().when || !!it().deadline)
+                        !!it().when
                       }
                     >
                       <DropdownMenu.Item
@@ -1551,21 +1500,6 @@ export function TaskDialog(props: {
                         onSelect={() => props.onReveal?.(it().id, "calendar")}
                       >
                         {m().focus.openInCalendar}
-                      </DropdownMenu.Item>
-                    </Show>
-                    {/* The deadline's one way in from this surface: a
-                        pick opens its band under the dates, popover
-                        showing. Gone once the band is there (the band
-                        edits and removes it). Open items only, as on
-                        the row menu. */}
-                    <Show when={isOpen(it()) && !deadlineShown()}>
-                      <DropdownMenu.Item
-                        class="dropdown-menu-item"
-                        onSelect={() => {
-                          menuPick = () => props.setDeadlineOpen(true);
-                        }}
-                      >
-                        {m().deadline.setDate}
                       </DropdownMenu.Item>
                     </Show>
                     <Show when={!isBinned(it())}>
@@ -1689,7 +1623,7 @@ export function TaskDialog(props: {
           </section>
 
           {/* Date section: the planned date between the badges and the
-              deadline, always present. */}
+              place, always present. */}
           <section class="task-dialog-section task-dialog-dates">
             {/* An unanswered date suggestion stands in the date's place
                 until it is answered; "Set date…" from a menu still
@@ -1718,22 +1652,7 @@ export function TaskDialog(props: {
             </Show>
           </section>
 
-          {/* Deadline section under the dates, before the notes.
-              Clicking the field opens a popover (Today / Tomorrow /
-              calendar / Remove). */}
-          <Show when={deadlineShown()}>
-            <section class="task-dialog-section task-dialog-deadline">
-              <DeadlineField
-                deadline={vDeadline}
-                muted={muted}
-                onChange={onDeadlineChange}
-                open={props.deadlineOpen}
-                setOpen={props.setDeadlineOpen}
-              />
-            </section>
-          </Show>
-
-          {/* Place section under the deadline, always present: a typed
+          {/* Place section under the dates, always present: a typed
               label, or a lookup (`PlaceField`). */}
           <section class="task-dialog-section task-dialog-place-section">
             <PlaceField
@@ -1890,7 +1809,7 @@ export function TaskDialog(props: {
     if (shellRef && portalContains(shellRef, document.activeElement)) return;
     // Opened straight onto a date popover: focus is the popover's.
     // Untracked, so closing it doesn't pull the caret to the title.
-    if (untrack(props.whenOpen) || untrack(props.deadlineOpen)) return;
+    if (untrack(props.whenOpen)) return;
     focusOnOpen();
   });
   createEffect(() => {
@@ -1929,7 +1848,7 @@ export function TaskDialog(props: {
                   // (a caret landing in the title after it would read as an
                   // outside interaction and dismiss it).
                   e.preventDefault();
-                  if (!props.whenOpen() && !props.deadlineOpen()) focusOnOpen();
+                  if (!props.whenOpen()) focusOnOpen();
                 }}
               >
                 {body()}

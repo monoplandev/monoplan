@@ -360,19 +360,6 @@ impl Doc {
             .map_err(js_err)
     }
 
-    /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
-    /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
-    #[wasm_bindgen(js_name = setItemDeadline)]
-    pub fn set_item_deadline(
-        &self,
-        item_id: &str,
-        deadline: Option<String>,
-    ) -> Result<(), JsError> {
-        self.inner
-            .set_item_deadline(item_id, deadline.as_deref())
-            .map_err(js_err)
-    }
-
     /// Set (`Some`) or clear (`None`) an item's planned date. The value
     /// must be `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed) or
     /// the call rejects.
@@ -2060,19 +2047,6 @@ impl Replica {
             .map_err(js_err)
     }
 
-    /// Set (`Some`) or clear (`None`) an item's date-only deadline. The
-    /// value must be a `YYYY-MM-DD` calendar date or the call rejects.
-    #[wasm_bindgen(js_name = setItemDeadline)]
-    pub fn set_item_deadline(
-        &self,
-        item_id: &str,
-        deadline: Option<String>,
-    ) -> Result<(), JsError> {
-        self.doc()
-            .set_item_deadline(item_id, deadline.as_deref())
-            .map_err(js_err)
-    }
-
     /// Set (`Some`) or clear (`None`) an item's planned date. The value
     /// must be `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:MM` (timed) or
     /// the call rejects.
@@ -2654,13 +2628,12 @@ impl From<CoreEvent> for ReplicaEvent {
 ///
 /// Variant → fields:
 /// - `fullResync` — no fields; rematerialize current state once
-/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, subtasks? (JSON array, omitted when none), state, lifecycleAt, startedAt?, doneAt?, binnedAt?, deadline?, when?, whenSuggested?, event?, duration?, place?, openIndex?
+/// - `itemAdded` — id, listId, text, notes, createdAt, createdBy?, assignee?, subtasks? (JSON array, omitted when none), state, lifecycleAt, startedAt?, doneAt?, binnedAt?, when?, whenSuggested?, event?, duration?, place?, openIndex?
 /// - `itemRemoved` — id
 /// - `itemMoved` — id, openIndex?
 /// - `itemTextChanged` — id, text
 /// - `itemNotesChanged` — id, notes
 /// - `itemNotesDelta` — id, delta (JSON array of `{retain}` / `{insert}` / `{delete}`, UTF-16 units; only for items with a `subscribeNotes` subscription)
-/// - `itemDeadlineChanged` — id, deadline? (undefined = no deadline)
 /// - `itemAssigneeChanged` — id, assignee? (undefined = unassigned)
 /// - `itemSubtasksChanged` — id, subtasks (JSON array of `{id, text, done?}`, the whole list in order)
 /// - `itemWhenChanged` — id, when? (undefined = unset; `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, wall time on this device), whenZone? (the IANA zone it is fixed to; undefined = floating), openIndex? (a dated Inbox item is in no Open array: drop it when a date arrives; set when a cleared date brings it back, splice it in there)
@@ -2706,9 +2679,6 @@ pub struct AppEventJs {
     lifecycle_at: Option<i64>,
     /// Reflection stamp: first entry into In Progress, if any.
     started_at: Option<i64>,
-    /// Date-only deadline `YYYY-MM-DD` (`itemAdded` / `itemDeadlineChanged`);
-    /// `None` means no deadline.
-    deadline: Option<String>,
     /// Planned date (`itemAdded` / `itemWhenChanged`); `None` means unset.
     /// Always wall time on this device.
     when: Option<String>,
@@ -2861,10 +2831,6 @@ impl AppEventJs {
     pub fn started_at(&self) -> Option<i64> {
         self.started_at
     }
-    #[wasm_bindgen(getter, js_name = deadline)]
-    pub fn deadline(&self) -> Option<String> {
-        self.deadline.clone()
-    }
     #[wasm_bindgen(getter, js_name = when)]
     pub fn when(&self) -> Option<String> {
         self.when.clone()
@@ -2920,7 +2886,6 @@ impl From<CoreAppEvent> for AppEventJs {
             state: None,
             lifecycle_at: None,
             started_at: None,
-            deadline: None,
             when: None,
             when_zone: None,
             when_suggested: None,
@@ -2963,7 +2928,6 @@ impl From<CoreAppEvent> for AppEventJs {
                 started_at,
                 done_at,
                 binned_at,
-                deadline,
                 when,
                 when_zone,
                 when_suggested,
@@ -2986,7 +2950,6 @@ impl From<CoreAppEvent> for AppEventJs {
                 started_at,
                 done_at,
                 binned_at,
-                deadline,
                 when,
                 when_zone,
                 when_suggested,
@@ -3023,12 +2986,6 @@ impl From<CoreAppEvent> for AppEventJs {
                 kind: "itemNotesDelta",
                 id,
                 delta: Some(serde_json::to_string(&delta).unwrap_or_else(|_| "[]".into())),
-                ..blank
-            },
-            CoreAppEvent::ItemDeadlineChanged { id, deadline } => AppEventJs {
-                kind: "itemDeadlineChanged",
-                id,
-                deadline,
                 ..blank
             },
             CoreAppEvent::ItemAssigneeChanged { id, assignee } => AppEventJs {
@@ -3275,10 +3232,6 @@ fn item_to_json(it: &monoplan_core::ItemView) -> String {
     }
     if let Some(t) = it.binned_at {
         s.push_str(&format!(",\"binnedAt\":{t}"));
-    }
-    if let Some(d) = &it.deadline {
-        s.push_str(",\"deadline\":");
-        s.push_str(&json_string(d));
     }
     if let Some(w) = &it.when {
         s.push_str(",\"when\":");

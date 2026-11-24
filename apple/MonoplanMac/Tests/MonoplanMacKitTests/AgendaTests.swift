@@ -6,11 +6,11 @@ final class AgendaTests: XCTestCase {
     // `RowJson` shape in cli/src/commands/agenda.rs.
     let sample = """
     [{"day":"2026-10-26","today":true,"rows":[
-      {"id":"a","text":"Overdue report","list_id":"work","state":"todo","deadline":"2026-10-20","placed_by":"deadline","tone":"overdue"},
-      {"id":"b","text":"Standup","list_id":"inbox","state":"backlog","event":true,"when":"2026-10-26T09:00","duration":15,"placed_by":"when","tone":"neutral"},
-      {"id":"c","text":"Dentist","list_id":"errands","state":"backlog","event":true,"when":"2026-10-26T14:30","duration":60,"placed_by":"when","tone":"neutral"},
-      {"id":"d","text":"Groceries","list_id":"inbox","state":"done","when":"2026-10-26","placed_by":"when","tone":"neutral"},
-      {"id":"e","text":"Pay rent","list_id":"inbox","state":"todo","deadline":"2026-10-26","placed_by":"deadline","tone":"warning"}
+      {"id":"a","text":"Overdue report","list_id":"work","state":"todo","when":"2026-10-20","tone":"overdue"},
+      {"id":"b","text":"Standup","list_id":"inbox","state":"backlog","event":true,"when":"2026-10-26T09:00","duration":15,"tone":"neutral"},
+      {"id":"c","text":"Dentist","list_id":"errands","state":"backlog","event":true,"when":"2026-10-26T14:30","duration":60,"tone":"neutral"},
+      {"id":"d","text":"Groceries","list_id":"inbox","state":"done","when":"2026-10-26","tone":"neutral"},
+      {"id":"e","text":"Pay rent","list_id":"inbox","state":"todo","when":"2026-10-26","tone":"neutral"}
     ]},
     {"day":"2026-10-27","today":false,"rows":[]}]
     """
@@ -39,9 +39,9 @@ extension AgendaTests {
     func testMergedRowsCarryTheirWorkspace() throws {
         let json = """
         [{"day":"2026-09-09","today":true,"rows":[
-          {"id":"a","text":"Home row","list_id":"inbox","state":"todo","placed_by":"when","tone":"neutral",
+          {"id":"a","text":"Home row","list_id":"inbox","state":"todo","tone":"neutral",
            "when":"2026-09-09","doc_id":"00000000-0000-0000-0000-000000000001"},
-          {"id":"b","text":"Work row","list_id":"inbox","state":"todo","placed_by":"when","tone":"neutral",
+          {"id":"b","text":"Work row","list_id":"inbox","state":"todo","tone":"neutral",
            "when":"2026-09-09","doc_id":"00000000-0000-0000-0000-000000000002","doc_name":"Work"}]}]
         """
         let rows = try Agenda.parse(json)[0].rows

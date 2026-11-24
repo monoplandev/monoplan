@@ -157,7 +157,7 @@ The index is maintained incrementally from domain events via a **dirty set**, re
 
 - Every `AppEvent` core enqueues is inspected as it is pushed. Item events that affect indexed fields mark the item id dirty; `ListAdded` / `ListRemoved` / `ListRenamed` mark the list id dirty; `FullResync` and every bulk path that rebuilds the projection index (boot replay, import, translation fallback) mark the whole index dirty.
 - `search()` first drains the dirty set: a whole-dirty index rebuilds from `all_lists` + every item; otherwise each dirty list is re-read (indexed or dropped) and every item currently indexed under it is re-read for context tokens, then each dirty item is re-read (indexed or dropped).
-- Reconciling reads the doc, never the event payload, so the index only depends on an event naming the right id. Events that are pure ordering or touch unindexed registers (`when`, `deadline`, `place`, icons, settings) are ignored.
+- Reconciling reads the doc, never the event payload, so the index only depends on an event naming the right id. Events that are pure ordering or touch unindexed registers (`when`, `place`, icons, settings) are ignored.
 - Recency (`updatedAt`) is the item's `binned_at`, else its workflow transition time (`lifecycle_at`, which falls back to `created_at`); for lists it is `created_at`. It is read from the doc, so it is deterministic across clients and does not bump on a text edit.
 
 The required behaviors, stated per event kind, are unchanged:

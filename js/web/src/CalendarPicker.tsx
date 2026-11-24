@@ -1,10 +1,8 @@
-// The shared corvu month grid (`MonthGrid.tsx`) as a picker for a
-// deadline or a planned date (`kind`). `CalendarPicker` is the body (grid, Remove
-// footer), hosted in a Popover by the task surface's date and deadline
-// fields (`WhenField.tsx`, `DeadlineField.tsx`). There is no standalone
-// modal: a row's "Set date…" / "Set deadline…" opens the item with the
-// matching popover showing, and the time is edited in the task surface's
-// dates band (`WhenTimeRow`), not here.
+// The shared corvu month grid (`MonthGrid.tsx`) as a picker for a day or
+// a planned date (`kind`). `CalendarPicker` is the body (grid, Remove
+// footer), hosted in a Popover by the task surface's date fields
+// (`WhenField.tsx`). There is no standalone modal, and the time is edited
+// in the task surface's dates band (`WhenTimeRow`), not here.
 
 import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import {
@@ -20,10 +18,10 @@ import { MonthGrid } from "./MonthGrid.tsx";
 
 export interface CalendarPickerProps {
   setOpen: (v: boolean) => void;
-  /** `deadline` (default): date-only, `YYYY-MM-DD`. `when`: date plus an
-   *  optional time, `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`. Picks labels and
-   *  whether a pick carries the stored time along. */
-  kind?: "deadline" | "when";
+  /** `day` (default): date-only, `YYYY-MM-DD`. `when`: date plus an
+   *  optional time, `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`. Picks whether a
+   *  pick carries the stored time along. */
+  kind?: "day" | "when";
   /** Currently-set register value to preselect / open the calendar on, or
    *  null. */
   value: () => string | null;
@@ -69,8 +67,6 @@ export function CalendarPicker(props: CalendarPickerProps) {
   // The stored time part a `when` pick carries over to the new day.
   const time = () => whenTime(props.value() ?? "");
 
-  const labels = () => (isWhen() ? m().when : m().deadline);
-
   return (
     <>
       <MonthGrid
@@ -88,16 +84,16 @@ export function CalendarPicker(props: CalendarPickerProps) {
         }}
       />
       <Show when={props.onRemove && props.value()}>
-        <div class="deadline-dialog-footer">
+        <div class="picker-card-footer">
           <button
             type="button"
-            class="deadline-dialog-remove"
+            class="picker-card-remove"
             onClick={() => {
               props.onRemove?.();
               props.setOpen(false);
             }}
           >
-            {labels().remove}
+            {m().when.remove}
           </button>
         </div>
       </Show>

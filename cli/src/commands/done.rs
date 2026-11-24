@@ -175,7 +175,6 @@ mod tests {
             list_id: LIST_INBOX.to_string(),
             state,
             lifecycle_at: at,
-            deadline: None,
             when: None,
             when_zoned: None,
             when_suggested: None,

@@ -57,13 +57,12 @@ describe("store when", () => {
     expect(app.state.itemsById[id]?.when).toBe("2026-07-13T14:00");
   });
 
-  test("patches when on set, then clears it, deadline untouched", () => {
+  test("patches when on set, then clears it", () => {
     const doc = Doc.create();
     const id = doc.addItem("inbox", "task");
     const app = createSyncedApp(replicaFrom(doc));
     expect(app.state.itemsById[id]?.when).toBeUndefined();
 
-    app.setItemDeadline(id, "2026-10-31");
     app.setItemWhen(id, "2026-12-01");
     expect(app.state.itemsById[id]?.when).toBe("2026-12-01");
 
@@ -72,7 +71,6 @@ describe("store when", () => {
 
     app.setItemWhen(id, null);
     expect(app.state.itemsById[id]?.when).toBeUndefined();
-    expect(app.state.itemsById[id]?.deadline).toBe("2026-10-31");
   });
 
   test("the core rejects a malformed value", () => {

@@ -74,8 +74,7 @@ public struct WidgetRow: Equatable {
     public let text: String
     /// `HH:MM` when the row is timed.
     public let time: String?
-    /// The projection's tone: `overdue`, `warning` (due today) or
-    /// `neutral`.
+    /// The projection's tone: `overdue` or `neutral`.
     public let tone: String
 }
 

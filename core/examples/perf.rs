@@ -332,7 +332,6 @@ fn import(cfg: &Cfg) {
                     state: "backlog".to_string(),
                     at: 1_700_000_000_000 + i as i64,
                 },
-                deadline: None,
                 when: None,
                 when_suggested: None,
                 event: false,

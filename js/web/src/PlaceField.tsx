@@ -1,5 +1,5 @@
 // The task dialog's place control, in its own ruled band under the
-// deadline with the dates' anatomy (a pin glyph inset at the left edge,
+// dates with the dates' anatomy (a pin glyph inset at the left edge,
 // an inset ✕ that removes the place). The results card carries the same
 // removal as a Remove row pinned under the list while a place is set
 // (as the date and time inputs' pickers do), so starting an edit with a
@@ -436,7 +436,7 @@ export function PlaceField(props: {
           <Popover.Portal>
             <Popover.Content
               ref={contentRef}
-              class="deadline-dialog when-popover place-popover"
+              class="picker-card when-popover place-popover"
               // The input keeps focus while the results show: this is a
               // typeahead, not a dialog. Moving focus into the popover on
               // open would blur the input, which commits and closes.

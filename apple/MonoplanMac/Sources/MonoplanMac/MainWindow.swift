@@ -1099,27 +1099,17 @@ final class MainWindowModel: ObservableObject {
         write { try $0.setWhenZone(workspace: workspace, id: id, zone: zone) }
     }
 
-    /// Set or clear an item's deadline (`Engine.setDeadline`).
-    func setDeadline(workspace: String?, id: String, deadline: String?) {
-        write { try $0.setDeadline(workspace: workspace, id: id, deadline: deadline) }
-    }
-
     /// A Calendar row let go on `day` (`YYYY-MM-DD`): the item's `when`
-    /// moves there with its clock time and length kept, or its deadline
-    /// when that is its only date (`AgendaDrop`, the web's `dropOnDay`).
-    /// One write, so one undo step. A closed task stays where it is.
-    /// False when the drop writes nothing.
+    /// moves there with its clock time and length kept (`AgendaDrop`,
+    /// the web's `dropOnDay`). One write, so one undo step. A closed
+    /// task stays where it is. False when the drop writes nothing.
     @discardableResult
     func reschedule(_ row: AgendaEntry, to day: String) -> Bool {
         let closedTask = row.state.isClosed && !(row.event && row.when != nil)
-        switch AgendaDrop.write(when: row.when, deadline: row.deadline, closedTask: closedTask, day: day) {
-        case .when(let when):
-            setWhen(workspace: row.docId, id: row.id, when: when, duration: .keep)
-        case .deadline(let deadline):
-            setDeadline(workspace: row.docId, id: row.id, deadline: deadline)
-        case nil:
+        guard case .when(let when) = AgendaDrop.write(when: row.when, closedTask: closedTask, day: day) else {
             return false
         }
+        setWhen(workspace: row.docId, id: row.id, when: when, duration: .keep)
         return true
     }
 
@@ -1595,15 +1585,13 @@ final class MainWindowModel: ObservableObject {
     /// Where a Calendar row's item lives, for the line under its text:
     /// the list, without its emoji, then the workspace when it is not
     /// Personal's. An item with no list and a date lives on the
-    /// Calendar itself, so that says nothing; one there by its deadline
-    /// alone reads as the Inbox's.
+    /// Calendar itself, so that says nothing.
     func agendaListName(_ row: AgendaEntry) -> String? {
         var name: String?
         if row.listId != Self.inbox {
             name = sections.first { $0.workspace.docId == row.docId }?
                 .lists.first { $0.id == row.listId }?.name
         }
-        if name == nil, row.when == nil { name = Self.noListLabel(dated: false) }
         let parts = [name, row.docName].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -1779,7 +1767,7 @@ final class MainWindowModel: ObservableObject {
         let item = Item(
             id: capture.identity, text: capture.text, listId: capture.list, state: .backlog, lifecycleAt: now,
             createdAt: now, createdBy: nil, assignee: nil, startedAt: nil, doneAt: nil, binnedAt: nil,
-            deadline: nil, when: capture.when, whenZone: capture.zone, whenSuggested: nil, event: capture.event,
+            when: capture.when, whenZone: capture.zone, whenSuggested: nil, event: capture.event,
             duration: capture.duration.map(UInt32.init), place: capture.place)
         return ItemInfo(
             item: item, notes: "", subtasks: [],
@@ -2501,10 +2489,9 @@ struct MainWindowView: View {
     /// row does not while it is open (spec/events-plan.md: nothing asks
     /// for the tick) or once its day has gone by (it is a record of
     /// what was on): the event pill holds the box's place. One marked
-    /// done from today on shows the box, ticked, and a deadline's own
-    /// row is owed, so it keeps it.
+    /// done from today on shows the box, ticked.
     static func agendaRowShowsCheck(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
-        guard row.event, row.placedBy == .when else { return true }
+        guard row.event else { return true }
         return row.state.isClosed && !agendaRowIsPast(row, today: today)
     }
 
@@ -2512,7 +2499,7 @@ struct MainWindowView: View {
     /// days hold. (A task whose day has passed is in Overdue, not
     /// there.)
     static func agendaRowIsPast(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
-        guard row.event, row.placedBy == .when, let when = row.when, when.count >= 10 else { return false }
+        guard row.event, let when = row.when, when.count >= 10 else { return false }
         return String(when.prefix(10)) < today
     }
 
@@ -2582,7 +2569,6 @@ struct MainWindowView: View {
                 if let day = Self.overdueDay(row) {
                     Text(verbatim: day).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
-            case .warning: Text("Deadline").foregroundStyle(.secondary).fixedSize()
             case .neutral: EmptyView()
             }
             if TodayMenu.isTimed(row), let when = row.when {
@@ -2590,12 +2576,6 @@ struct MainWindowView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .fixedSize()
-            } else if row.placedBy == .deadline {
-                // A deadline's own row. One still ahead says so here;
-                // today's and a late one are handled above.
-                if row.tone == .neutral {
-                    Text("Deadline").foregroundStyle(.secondary).fixedSize()
-                }
             } else if row.event, row.when != nil {
                 // An event with a day and no clock time.
                 Text("All day").foregroundStyle(.secondary).fixedSize()
@@ -2782,11 +2762,11 @@ struct MainWindowView: View {
         .scrollContentBackground(.hidden)
     }
 
-    /// An overdue Calendar row's scheduled day (of the field that placed
-    /// it), with its year once that differs. Nil for one scheduled
-    /// earlier today: its time alone says when.
+    /// An overdue Calendar row's scheduled day, with its year once that
+    /// differs. Nil for one scheduled earlier today: its time alone
+    /// says when.
     static func overdueDay(_ row: AgendaEntry, now: Date = Date(), calendar: Calendar = .current) -> String? {
-        guard let scheduled = row.placedBy == .deadline ? row.deadline : row.when,
+        guard let scheduled = row.when,
               let date = Agenda.start(of: scheduled, calendar: calendar),
               !calendar.isDate(date, inSameDayAs: now)
         else { return nil }

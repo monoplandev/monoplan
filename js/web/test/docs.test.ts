@@ -251,7 +251,7 @@ describe("docs layer", () => {
     for (const id of [mine, dated, closed, binned]) other.setItemAssignee(id, "me");
     other.setItemAssignee(theirs, "them");
     home.setItemAssignee(inHome, "me");
-    other.setItemDeadline(dated, "2026-12-01");
+    other.setItemWhen(dated, "2026-12-01");
     other.setDone(closed, true);
     other.setBinnedMany([binned], true);
 
@@ -381,7 +381,7 @@ describe("cross-doc move", () => {
     const done = home.addItem("inbox", "done");
     const binned = home.addItem("inbox", "binned");
     const stays = home.addItem("inbox", "stays");
-    home.setItemDeadline(a, "2026-12-01");
+    home.setItemWhen(a, "2026-12-01");
     home.setItemNotes(a, "some notes");
     home.setDone(done, true);
     home.setBinned(binned, true);
@@ -398,7 +398,7 @@ describe("cross-doc move", () => {
     expect(moved.docId).toBe(OTHER);
     expect(moved.listId).toBe(list);
     expect(moved.text).toBe("a");
-    expect(moved.deadline).toBe("2026-12-01");
+    expect(moved.when).toBe("2026-12-01");
     expect(moved.notes).toBe("some notes");
     // Done stays Done; a binned row lands restored.
     expect(other.getItem(done)?.state).toBe("done");

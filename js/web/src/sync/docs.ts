@@ -151,7 +151,7 @@ export interface DocsLayer {
   focusRecentDone: Accessor<readonly FocusDoneEntry[]>;
   /** The Assigned lens (`spec/sharing-plan.md` §Assignment): every open
    *  doc's Open items whose assignee is `accountId`, dated ones first by
-   *  their earliest date (`when` or deadline), then the rest newest
+   *  their `when`, then the rest newest
    *  first. `keep` admits a closed, not-binned one as well: the view's
    *  linger beat for a row just ticked. */
   assignedItems(accountId: string, keep?: (it: ItemView) => boolean): ItemView[];
@@ -369,10 +369,6 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   };
   createEffect(pruneDeadForeignRefs);
 
-  const assignedDate = (it: ItemView): string | undefined => {
-    if (it.when && it.deadline) return it.when < it.deadline ? it.when : it.deadline;
-    return it.when ?? it.deadline;
-  };
   const assignedItems = (
     accountId: string,
     keep?: (it: ItemView) => boolean,
@@ -385,8 +381,8 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
           (!isClosed(it) || keep?.(it) === true),
       )
       .sort((a, b) => {
-        const da = assignedDate(a);
-        const db = assignedDate(b);
+        const da = a.when;
+        const db = b.when;
         if (da !== undefined && db !== undefined && da !== db) return da < db ? -1 : 1;
         if ((da === undefined) !== (db === undefined)) return da !== undefined ? -1 : 1;
         return b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1);
@@ -447,9 +443,6 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     },
     setItemNotes(id, notes) {
       forItem(id, (app) => app.setItemNotes(id, notes));
-    },
-    setItemDeadline(id, deadline) {
-      forItem(id, (app) => app.setItemDeadline(id, deadline));
     },
     setItemAssignee(id, assignee) {
       forItem(id, (app) => app.setItemAssignee(id, assignee));

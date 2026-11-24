@@ -101,7 +101,7 @@ export function MonthGrid(props: {
                   <Calendar.Nav
                     action="prev-month"
                     class="calendar-nav"
-                    aria-label={m().deadline.prevMonth}
+                    aria-label={m().calendar.prevMonth}
                   >
                     ‹
                   </Calendar.Nav>
@@ -111,7 +111,7 @@ export function MonthGrid(props: {
                   <Calendar.Nav
                     action="next-month"
                     class="calendar-nav"
-                    aria-label={m().deadline.nextMonth}
+                    aria-label={m().calendar.nextMonth}
                   >
                     ›
                   </Calendar.Nav>
@@ -126,8 +126,8 @@ export function MonthGrid(props: {
                   <button
                     type="button"
                     class="calendar-today"
-                    aria-label={m().deadline.today}
-                    title={m().deadline.today}
+                    aria-label={m().calendar.today}
+                    title={m().calendar.today}
                     onClick={() => props.onMonthChange(new Date(nowMs()))}
                   >
                     <ResetIcon />
@@ -138,14 +138,14 @@ export function MonthGrid(props: {
                 <Calendar.Nav
                   action="prev-month"
                   class="calendar-nav"
-                  aria-label={m().deadline.prevMonth}
+                  aria-label={m().calendar.prevMonth}
                 >
                   <Chevron up />
                 </Calendar.Nav>
                 <Calendar.Nav
                   action="next-month"
                   class="calendar-nav"
-                  aria-label={m().deadline.nextMonth}
+                  aria-label={m().calendar.nextMonth}
                 >
                   <Chevron />
                 </Calendar.Nav>

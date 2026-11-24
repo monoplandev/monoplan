@@ -269,8 +269,8 @@ struct HomeView: View {
     private static let todayLimit = 5
 
     /// What wants attention today, for the section under Home's menu:
-    /// the agenda's Today group (overdue deadlines and tasks whose
-    /// planned day has passed folded in, as on the Calendar page) less
+    /// the agenda's Today group (tasks whose planned day has passed
+    /// folded in, as on the Calendar page) less
     /// what is ticked, so the section shrinks as it is cleared and is
     /// not drawn on a clear day.
     private var today: [AgendaEntry] {

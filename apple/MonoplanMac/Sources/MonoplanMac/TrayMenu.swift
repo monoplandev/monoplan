@@ -11,12 +11,12 @@ import MonoplanMacKit
 struct MenuLine: Equatable {
     let id: String
     let title: String
-    /// Dimmed trailing note: "in 2h 15m", "now", "due today", or the
-    /// day an overdue row was due ("20 Oct").
+    /// Dimmed trailing note: "in 2h 15m", "now", or the day an overdue
+    /// row was planned for ("20 Oct").
     let note: String?
     let done: Bool
-    /// The row is past its deadline, or a task past its planned day:
-    /// it goes in the menu's Overdue section, above Today.
+    /// The row is a task past its planned day: it goes in the menu's
+    /// Overdue section, above Today.
     let overdue: Bool
     /// Where the item lives, which is what a click opens the window
     /// on: its list, in its workspace (nil for Home's).
@@ -52,19 +52,16 @@ enum TodayMenu {
         }
     }
 
-    /// The row shows a clock time: its `when` carries one, and the row is
-    /// the `when`'s. A deadline's own row is a day, whatever time the
-    /// item is planned for on another.
+    /// The row shows a clock time: its `when` carries one.
     static func isTimed(_ row: AgendaEntry) -> Bool {
-        row.placedBy == .when && (row.when?.count ?? 0) >= 16
+        (row.when?.count ?? 0) >= 16
     }
 
     static func note(for row: AgendaEntry, now: Date, calendar: Calendar) -> String? {
         switch row.tone {
-        // The day it was due; the Overdue header already says it is
-        // late. Nothing for one due earlier today.
+        // The day it was planned for; the Overdue header already says
+        // it is late. Nothing for one planned earlier today.
         case .overdue: return MainWindowView.overdueDay(row, now: now, calendar: calendar)
-        case .warning: return String(localized: "due today")
         case .neutral: break
         }
         guard row.state != .done, isTimed(row), let when = row.when,

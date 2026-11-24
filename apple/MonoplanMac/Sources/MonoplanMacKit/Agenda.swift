@@ -37,10 +37,8 @@ public struct AgendaRow: Decodable, Equatable {
     public let when: String?
     /// Minutes.
     public let duration: Int?
-    public let deadline: String?
     /// The item's place, when it has one.
     public let place: PlaceInfo?
-    public let placedBy: String
     public let tone: String
     /// `--all` only: the row's workspace. `docName` is nil for Home
     /// ("Personal") and for an unnamed doc.
@@ -48,10 +46,8 @@ public struct AgendaRow: Decodable, Equatable {
     public let docName: String?
 
     public var isDone: Bool { state == "done" }
-    /// The row shows a clock time: its `when` carries one, and the row is
-    /// the `when`'s. A deadline's own row is a day, whatever time the
-    /// item is planned for on another.
-    public var isTimed: Bool { placedBy == "when" && (when?.count ?? 0) >= 16 }
+    /// The row shows a clock time: its `when` carries one.
+    public var isTimed: Bool { (when?.count ?? 0) >= 16 }
 }
 
 public enum Agenda {

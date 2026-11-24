@@ -1,9 +1,7 @@
 // Day bucketing behind the Upcoming view (`spec/calendar-plan.md`
-// "Agenda"): overdue deadlines and tasks whose `when` has passed in a
-// leading Overdue group, events' past whens dropped, the `when` and the
-// `deadline` each placing a row of their own (one row per item per
-// group), tone, within-day ordering, and done rows kept on their `when`
-// day.
+// "Agenda"): tasks whose `when` has passed in a leading Overdue group,
+// events' past whens dropped, tone, within-day ordering, and closed
+// events kept on their `when` day.
 
 import { describe, expect, test } from "bun:test";
 
@@ -16,7 +14,6 @@ import {
   isoWeekNumber,
   weekStarts,
   weekStartOf,
-  isDueRow,
   whenSpan,
 } from "../src/dayGroups.ts";
 import type { ItemView } from "../src/sync/store.ts";
@@ -31,7 +28,7 @@ const TODAY = "2026-09-09";
 let seq = 0;
 function item(
   id: string,
-  dates: { when?: string; deadline?: string },
+  dates: { when?: string },
   extra: Partial<ItemView> = {},
 ): ItemView {
   seq += 1;
@@ -58,15 +55,13 @@ function closedOn(day: string, hour = 12, state = "done"): Partial<ItemView> {
 const ids = (g: { rows: { item: ItemView }[] }) => g.rows.map((r) => r.item.id);
 
 describe("groupByDay", () => {
-  test("each date places its own row; overdue deadlines and slipped tasks go to Overdue", () => {
+  test("the when places the row; slipped tasks go to Overdue", () => {
     const groups = groupByDay(
       [
         item("past-when", { when: "2026-09-01" }),
-        item("overdue", { deadline: "2026-09-05" }),
-        item("both-late", { when: "2026-09-20", deadline: "2026-09-08" }),
-        item("both", { when: "2026-09-12", deadline: "2026-09-30" }),
-        item("dl-first", { when: "2026-09-15", deadline: "2026-09-11" }),
-        item("due-today", { deadline: TODAY }),
+        item("today", { when: TODAY }),
+        item("fri", { when: "2026-09-11" }),
+        item("sat", { when: "2026-09-12" }),
         item("undated", {}),
       ],
       TODAY,
@@ -74,39 +69,26 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, g.urgency, ids(g)])).toEqual([
-      ["overdue", "overdue", ["past-when", "overdue", "both-late"]],
-      [TODAY, "today", ["due-today"]],
-      ["2026-09-11", "future", ["dl-first"]],
-      ["2026-09-12", "future", ["both"]],
-      ["2026-09-15", "future", ["dl-first"]],
-      ["2026-09-20", "future", ["both-late"]],
-      ["2026-09-30", "future", ["both"]],
+      ["overdue", "overdue", ["past-when"]],
+      [TODAY, "today", ["today"]],
+      ["2026-09-11", "future", ["fri"]],
+      ["2026-09-12", "future", ["sat"]],
     ]);
     expect(groups[0]!.label).toBe("Overdue");
-    expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
-      ["when", "overdue"],
-      ["deadline", "overdue"],
-      ["deadline", "overdue"],
-    ]);
-    expect(groups[1]!.rows.map((r) => r.tone)).toEqual(["warning"]);
-    expect(groups[2]!.rows[0]!.placedBy).toBe("deadline");
-    expect(groups[2]!.rows[0]!.tone).toBe("neutral");
+    expect(groups[0]!.rows.map((r) => r.tone)).toEqual(["overdue"]);
     expect(groups[2]!.label).toBe("Fri");
-    // The date row and the deadline row of one item, on their own days.
-    expect(groups.slice(3).map((g) => [g.rows[0]!.placedBy, g.rows[0]!.tone])).toEqual([
-      ["when", "neutral"],
-      ["when", "neutral"],
-      ["when", "neutral"],
-      ["deadline", "neutral"],
+    expect(groups.slice(1).map((g) => g.rows[0]!.tone)).toEqual([
+      "neutral",
+      "neutral",
+      "neutral",
     ]);
   });
 
-  test("within a day: all-day events and deadlines, then timed, then untimed tasks", () => {
+  test("within a day: all-day events, then timed, then untimed tasks", () => {
     const groups = groupByDay(
       [
         item("task-a", { when: "2026-09-12" }),
         item("t14", { when: "2026-09-12T14:00" }),
-        item("due", { deadline: "2026-09-12" }),
         item("birthday", { when: "2026-09-12" }, { event: true }),
         item("gig09", { when: "2026-09-12T09:00" }, { event: true }),
         item("task-b", { when: "2026-09-12" }),
@@ -117,7 +99,6 @@ describe("groupByDay", () => {
     );
     // Inside a band: raw string (all the same day), then createdAt.
     expect(ids(groups[1]!)).toEqual([
-      "due",
       "birthday",
       "gig09",
       "t14",
@@ -126,14 +107,13 @@ describe("groupByDay", () => {
     ]);
   });
 
-  test("Overdue orders deadlines and slipped whens together, oldest first, then createdAt", () => {
+  test("Overdue orders slipped whens oldest first, then createdAt", () => {
     const groups = groupByDay(
       [
-        item("over-b", { deadline: "2026-09-08" }),
-        item("over-a", { deadline: "2026-09-08" }),
-        item("over-old", { when: "2026-09-30", deadline: "2026-08-20" }),
-        item("over-past-when", { when: "2026-09-01", deadline: "2026-09-02" }),
-        item("past-when", { when: "2026-09-07" }),
+        item("over-b", { when: "2026-09-08" }),
+        item("over-a", { when: "2026-09-08" }),
+        item("over-old", { when: "2026-08-20" }),
+        item("past-timed", { when: "2026-09-07T08:00" }),
         item("own", { when: TODAY }),
       ],
       TODAY,
@@ -141,28 +121,17 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      ["overdue", ["over-old", "over-past-when", "past-when", "over-b", "over-a"]],
+      ["overdue", ["over-old", "past-timed", "over-b", "over-a"]],
       [TODAY, ["own"]],
-      // Owed since August, and still on the day it is planned for.
-      ["2026-09-30", ["over-old"]],
     ]);
-    // Both dates past: the deadline places the row, it is what is owed.
-    expect(groups[0]!.rows.map((r) => [r.placedBy, r.tone])).toEqual([
-      ["deadline", "overdue"],
-      ["deadline", "overdue"],
-      ["when", "overdue"],
-      ["deadline", "overdue"],
-      ["deadline", "overdue"],
-    ]);
+    expect(groups[0]!.rows.every((r) => r.tone === "overdue")).toBe(true);
   });
 
-  test("a task's past when is Overdue whatever its deadline; a span still running is not", () => {
+  test("a task's past when is Overdue; a span still running is not", () => {
     const groups = groupByDay(
       [
         item("past-when", { when: "2026-09-07" }),
         item("past-timed", { when: "2026-09-08T09:00" }),
-        item("past-due-today", { when: "2026-09-01", deadline: TODAY }),
-        item("past-due-later", { when: "2026-09-01T09:00", deadline: "2026-09-20" }),
         // Started yesterday, runs three days: under way, not slipped.
         item("running", { when: "2026-09-08" }, { duration: 3 * 1440 }),
         // Ended yesterday.
@@ -173,18 +142,12 @@ describe("groupByDay", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [
-        "overdue",
-        ["past-due-today", "past-due-later", "span-over", "past-when", "past-timed"],
-      ],
-      // A deadline still to come keeps its own row on its day.
-      [TODAY, ["past-due-today", "running"]],
+      ["overdue", ["span-over", "past-when", "past-timed"]],
+      [TODAY, ["running"]],
       ["2026-09-10", ["running"]],
-      ["2026-09-20", ["past-due-later"]],
     ]);
-    expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "deadline", tone: "warning" });
     for (const row of groups[0]!.rows) {
-      expect(row).toMatchObject({ placedBy: "when", tone: "overdue" });
+      expect(row).toMatchObject({ tone: "overdue" });
       expect(row.span).toBeUndefined();
     }
   });
@@ -194,9 +157,9 @@ describe("groupByDay", () => {
       [
         item("own-timed", { when: "2026-09-09T10:00" }),
         item("past-new", { when: "2026-09-07T08:00" }),
-        item("over-new", { deadline: "2026-09-08" }),
+        item("over-new", { when: "2026-09-08" }),
         item("past-old", { when: "2026-09-01" }),
-        item("over-old", { deadline: "2026-08-20" }),
+        item("over-old", { when: "2026-08-20" }),
         item("own-allday", { when: TODAY }),
       ],
       TODAY,
@@ -213,10 +176,9 @@ describe("groupByDay", () => {
         item("done-today", { when: TODAY }, closedOn(TODAY, 10)),
         item("open-today", { when: TODAY }),
         item("done-early", { when: `${TODAY}T08:00` }, closedOn(TODAY, 9)),
-        item("binned", { deadline: TODAY }, { binnedAt: 1 }),
+        item("binned", { when: TODAY }, { binnedAt: 1 }),
         item("future", { when: "2026-09-10" }),
-        item("done-both", { when: "2026-09-10", deadline: "2026-09-05" }, closedOn(TODAY, 11)),
-        item("done-deadline", { deadline: "2026-09-12" }, closedOn(TODAY, 12)),
+        item("done-ahead", { when: "2026-09-10" }, closedOn(TODAY, 11)),
         item("done-past", { when: TODAY }, closedOn("2026-09-01")),
         item("cancelled", { when: "2026-09-10" }, closedOn(TODAY, 13, "cancelled")),
         item("skewed", { when: TODAY }, closedOn("2026-09-11")),
@@ -230,7 +192,7 @@ describe("groupByDay", () => {
       [TODAY, ["open-today"]],
       ["2026-09-10", ["event-done", "future"]],
     ]);
-    expect(groups[1]!.rows[0]).toMatchObject({ placedBy: "when" });
+    expect(groups[1]!.rows[0]).toMatchObject({ tone: "neutral" });
   });
 
   test("a lingering closed task stays where it was while open", () => {
@@ -281,7 +243,7 @@ describe("groupByDay", () => {
 describe("groupByDay: events", () => {
   const event = (
     id: string,
-    dates: { when?: string; deadline?: string },
+    dates: { when?: string },
     extra: Partial<ItemView> = {},
   ) => item(id, dates, { event: true, ...extra });
 
@@ -289,9 +251,6 @@ describe("groupByDay: events", () => {
     const groups = groupByDay(
       [
         event("gig", { when: "2026-09-12T19:00" }),
-        // A deadline on an event is legitimate: its own row, as usual.
-        event("tickets", { when: "2026-09-12", deadline: "2026-09-10" }),
-        event("owed", { when: "2026-09-12", deadline: "2026-09-01" }),
         // Went by: nothing to place. A task in the same spot is overdue.
         event("past", { when: "2026-09-01" }),
         item("slipped", { when: "2026-09-02" }),
@@ -303,10 +262,9 @@ describe("groupByDay: events", () => {
       "en",
     );
     expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      ["overdue", ["owed", "slipped"]],
+      ["overdue", ["slipped"]],
       [TODAY, []],
-      ["2026-09-10", ["tickets"]],
-      ["2026-09-12", ["tickets", "owed", "done", "cancelled", "gig"]],
+      ["2026-09-12", ["done", "cancelled", "gig"]],
     ]);
   });
 });
@@ -412,63 +370,6 @@ describe("groupByDay: multi-day spans", () => {
       ["2026-09-10", ["done-conf", "late"]],
     ]);
   });
-
-  test("a deadline is one day beside the span; an overdue one is in Overdue besides", () => {
-    const groups = groupByDay(
-      [
-        item("dl-first", { when: "2026-09-12", deadline: "2026-09-11" }, { duration: 3 * 1440 }),
-        item("owed", { when: "2026-09-10", deadline: "2026-09-01" }, { duration: 3 * 1440 }),
-      ],
-      TODAY,
-      LABELS,
-      "en",
-    );
-    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      ["overdue", ["owed"]],
-      [TODAY, []],
-      ["2026-09-10", ["owed"]],
-      ["2026-09-11", ["dl-first", "owed"]],
-      ["2026-09-12", ["owed", "dl-first"]],
-      ["2026-09-13", ["dl-first"]],
-      ["2026-09-14", ["dl-first"]],
-    ]);
-    expect(groups[3]!.rows[0]).toMatchObject({ placedBy: "deadline" });
-    expect(groups[3]!.rows[0]!.span).toBeUndefined();
-  });
-
-  test("a deadline on a day the when covers rides on that row", () => {
-    const groups = groupByDay(
-      [
-        item("same-day", { when: "2026-09-12T10:00", deadline: "2026-09-12" }),
-        item("in-span", { when: "2026-09-14", deadline: "2026-09-15" }, { duration: 3 * 1440 }),
-        item("today", { when: `${TODAY}T10:00`, deadline: TODAY }),
-        item("done", { when: "2026-09-12", deadline: "2026-09-12" }, { state: "done", event: true }),
-      ],
-      TODAY,
-      LABELS,
-      "en",
-    );
-    // One row per item per day, all of them the `when`'s.
-    expect(groups.map((g) => [g.key, ids(g)])).toEqual([
-      [TODAY, ["today"]],
-      ["2026-09-12", ["done", "same-day"]],
-      ["2026-09-14", ["in-span"]],
-      ["2026-09-15", ["in-span"]],
-      ["2026-09-16", ["in-span"]],
-    ]);
-    for (const g of groups) {
-      for (const r of g.rows) expect(r.placedBy).toBe("when");
-    }
-    // The row on the deadline's day says so; due today is the warning.
-    const due = groups.flatMap((g) =>
-      g.rows.filter((r) => isDueRow(r, g.key)).map((r) => [g.key, r.item.id, r.tone]),
-    );
-    expect(due).toEqual([
-      [TODAY, "today", "warning"],
-      ["2026-09-12", "same-day", "neutral"],
-      ["2026-09-15", "in-span", "neutral"],
-    ]);
-  });
 });
 
 describe("attentionBadge", () => {
@@ -484,20 +385,18 @@ describe("attentionBadge", () => {
     expect(badge).toEqual({ count: 1, tone: "neutral" });
   });
 
-  test("counts overdue deadlines, slipped tasks and today's open rows; future days count for nothing", () => {
+  test("counts slipped tasks and today's open rows; future days count for nothing", () => {
     const badge = attentionBadge(
       [
-        item("over", { deadline: "2026-09-08" }),
-        item("due-today", { when: "2026-09-20", deadline: TODAY }),
-        item("on-today", { when: `${TODAY}T10:00`, deadline: "2026-09-20" }),
+        item("on-today", { when: `${TODAY}T10:00` }),
+        item("all-day-today", { when: TODAY }),
         item("past-when", { when: "2026-09-07" }),
-        item("past-when-future-due", { when: "2026-09-01", deadline: "2026-09-20" }),
         item("future", { when: "2026-09-10" }),
         item("undated", {}),
       ],
       TODAY,
     );
-    expect(badge).toEqual({ count: 5, tone: "overdue" });
+    expect(badge).toEqual({ count: 3, tone: "overdue" });
     // A slipped task alone turns the badge overdue.
     expect(attentionBadge([item("past-when", { when: "2026-09-07" })], TODAY)).toEqual({
       count: 1,
@@ -505,13 +404,7 @@ describe("attentionBadge", () => {
     });
   });
 
-  test("tone is the most urgent counted: warning for a deadline today, else neutral", () => {
-    expect(
-      attentionBadge(
-        [item("on", { when: TODAY }), item("due", { deadline: TODAY })],
-        TODAY,
-      ),
-    ).toEqual({ count: 2, tone: "warning" });
+  test("without a slipped task the tone is neutral", () => {
     expect(attentionBadge([item("on", { when: TODAY })], TODAY)).toEqual({
       count: 1,
       tone: "neutral",
@@ -522,8 +415,8 @@ describe("attentionBadge", () => {
     const badge = attentionBadge(
       [
         item("done", { when: TODAY }, { state: "done" }),
-        item("cancelled", { deadline: "2026-09-01" }, { state: "cancelled" }),
-        item("binned", { deadline: TODAY }, { binnedAt: 1 }),
+        item("cancelled", { when: "2026-09-01" }, { state: "cancelled" }),
+        item("binned", { when: TODAY }, { binnedAt: 1 }),
       ],
       TODAY,
     );
@@ -531,7 +424,7 @@ describe("attentionBadge", () => {
   });
 
   test("an event's past `when` counts for nothing; one on today counts once", () => {
-    const event = (id: string, dates: { when?: string; deadline?: string }) =>
+    const event = (id: string, dates: { when?: string }) =>
       item(id, dates, { event: true });
     expect(
       attentionBadge(
@@ -559,8 +452,6 @@ describe("groupByDay with a floor (the days gone by)", () => {
         item("done", { when: "2026-09-02" }, closedOn("2026-09-05")),
         item("older", { when: "2026-08-20" }, { event: true }),
         item("slipped", { when: "2026-09-03" }),
-        item("late", { deadline: "2026-09-04" }),
-        item("done-deadline", { deadline: "2026-09-04" }, closedOn("2026-09-05", 13)),
         item("before-floor", { when: "2026-07-31" }, { event: true }),
         item("ahead", { when: "2026-09-10" }),
       ],
@@ -572,7 +463,7 @@ describe("groupByDay with a floor (the days gone by)", () => {
     expect(shape(groups)).toEqual([
       ["2026-08-20", "past", ["older"]],
       ["2026-09-02", "past", ["event"]],
-      ["overdue", "overdue", ["slipped", "late"]],
+      ["overdue", "overdue", ["slipped"]],
       [TODAY, "today", []],
       ["2026-09-10", "future", ["ahead"]],
     ]);
@@ -613,11 +504,11 @@ describe("groupByDay with a floor (the days gone by)", () => {
     ]);
   });
 
-  test("an event that went by with a deadline ahead is on both days", () => {
+  test("an event gone by counts at its past day", () => {
     const groups = groupByDay(
       [
-        item("both", { when: "2026-09-02", deadline: "2026-09-12" }, { event: true }),
         item("gone", { when: "2026-09-01" }, { event: true }),
+        item("ahead", { when: "2026-09-12" }, { event: true }),
       ],
       TODAY,
       LABELS,
@@ -626,13 +517,12 @@ describe("groupByDay with a floor (the days gone by)", () => {
     );
     expect(shape(groups)).toEqual([
       ["2026-09-01", "past", ["gone"]],
-      ["2026-09-02", "past", ["both"]],
       [TODAY, "today", []],
-      ["2026-09-12", "future", ["both"]],
+      ["2026-09-12", "future", ["ahead"]],
     ]);
     expect(agendaItems(groups).map((r) => [r.item.id, r.group])).toEqual([
       ["gone", "2026-09-01"],
-      ["both", "2026-09-12"],
+      ["ahead", "2026-09-12"],
     ]);
   });
 });
@@ -642,7 +532,7 @@ describe("fillEmptyDays", () => {
     const groups = groupByDay(
       [
         item("past", { when: "2026-09-06" }, { event: true }),
-        item("late", { deadline: "2026-09-01" }),
+        item("late", { when: "2026-09-01" }),
         item("soon", { when: "2026-09-11" }),
       ],
       TODAY,
@@ -685,26 +575,15 @@ describe("fillEmptyDays", () => {
 
 describe("dropOnDay", () => {
   test("moves the when, keeping the clock time", () => {
-    expect(dropOnDay(item("a", { when: "2026-09-10T14:30" }), "2026-09-12")).toEqual({
-      field: "when",
-      value: "2026-09-12T14:30",
-    });
-    expect(dropOnDay(item("b", { when: "2026-09-10" }), "2026-09-01")).toEqual({
-      field: "when",
-      value: "2026-09-01",
-    });
-  });
-
-  test("an item with both dates moves its when; deadline-only moves the deadline", () => {
-    const both = item("c", { when: "2026-09-10", deadline: "2026-09-15" });
-    expect(dropOnDay(both, "2026-09-11")).toEqual({ field: "when", value: "2026-09-11" });
-    const due = item("d", { deadline: "2026-09-15" });
-    expect(dropOnDay(due, "2026-09-11")).toEqual({ field: "deadline", value: "2026-09-11" });
+    expect(dropOnDay(item("a", { when: "2026-09-10T14:30" }), "2026-09-12")).toBe(
+      "2026-09-12T14:30",
+    );
+    expect(dropOnDay(item("b", { when: "2026-09-10" }), "2026-09-01")).toBe("2026-09-01");
   });
 
   test("a span moves its start; same day, closed tasks and undated items are no-ops", () => {
     const span = item("e", { when: "2026-09-08" }, { duration: 3 * 1440 });
-    expect(dropOnDay(span, "2026-09-20")).toEqual({ field: "when", value: "2026-09-20" });
+    expect(dropOnDay(span, "2026-09-20")).toBe("2026-09-20");
     expect(dropOnDay(item("f", { when: "2026-09-10T09:00" }), "2026-09-10")).toBeNull();
     expect(
       dropOnDay(item("g", { when: "2026-09-10" }, { state: "done" }), "2026-09-11"),

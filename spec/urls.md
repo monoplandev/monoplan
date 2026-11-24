@@ -91,7 +91,7 @@ Opening `#item_<id>`:
 
 Opening `#upcoming_<id>` resolves the id the same way (including the
 pending retry) but lands on the calendar whatever the item's home: a
-task with a `when` or `deadline` from any list, a ticked task still on
+task with a `when` from any list, a ticked task still on
 today's agenda, an event. Only a binned item still goes to the Bin,
 since the agenda never shows one. This is the token an agenda-shaped
 surface jumps with: the macOS tray's Today rows send it, its Starred

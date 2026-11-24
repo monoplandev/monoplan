@@ -44,7 +44,6 @@ describe("toClipItem", () => {
       toClipItem(
         item({
           notes: "2 litres",
-          deadline: "2026-10-01",
           when: "2026-09-30T09:00",
           duration: 30,
           state: "in_progress",
@@ -54,7 +53,6 @@ describe("toClipItem", () => {
     ).toEqual({
       text: "Buy milk",
       notes: "2 litres",
-      deadline: "2026-10-01",
       when: "2026-09-30T09:00",
       duration: 30,
       state: "in_progress",

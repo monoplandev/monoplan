@@ -43,8 +43,7 @@ One child `LoroMap` under `items`, keyed by `ItemId`.
 | `lifecycle` | value | **atomic workflow register** — a plain `LoroValue` list `[state, at]`: the current workflow state (integer `0..=5`, see "Lifecycle") and the unix millis it was entered. Absent ≡ `[Backlog, created_at]`; new items omit it. |
 | `inbox_at` | i64? | unix millis the item last **deliberately arrived** in Inbox (a move in, a cross-doc move into Inbox, `delete_list`); never written by capture, lifecycle changes or a move out. Absent ≡ `created_at`. Inbox's queue key, ignored while the item is elsewhere. Plain LWW register (`spec/inbox-plan.md`). |
 | `binned_at` | i64? | **bin mask** — unix millis when the item was binned. Present ≡ binned (masking the workflow state); absent ≡ not binned. Restore deletes the key, revealing the preserved workflow state. Orthogonal to `lifecycle`. |
-| `deadline` | string? | optional **date-only** deadline, a floating local calendar date in `YYYY-MM-DD` format (no time, no timezone, not unix millis). Absent ≡ no deadline; clearing deletes the key. Values that are not a well-formed `YYYY-MM-DD` calendar date are rejected by the mutation. Means "owed by": past it the item is overdue. |
-| `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). No seconds. Floating wall-clock by default; a timed value may carry an RFC 9557 `[Zone]` suffix with an IANA id (`2026-07-13T14:00[Europe/London]`, 2026-11-23), which fixes it to one instant. Views never see the suffix: the core hands them the value as wall time in the device's zone, in the 16-char shape, with the zone beside it (`calendar-plan.md` "Fixed instants"). Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). Independent of `deadline`. See `calendar-plan.md`. |
+| `when` | string? | optional **planned date**, shape-discriminated: `YYYY-MM-DD` (all-day, 10 chars) or `YYYY-MM-DDTHH:MM` (timed, 16 chars, `HH` 00–23, `MM` 00–59). No seconds. Floating wall-clock by default; a timed value may carry an RFC 9557 `[Zone]` suffix with an IANA id (`2026-07-13T14:00[Europe/London]`, 2026-11-23), which fixes it to one instant. Views never see the suffix: the core hands them the value as wall time in the device's zone, in the 16-char shape, with the zone beside it (`calendar-plan.md` "Fixed instants"). Absent ≡ unset; clearing deletes the key. One register so date and time cannot tear under concurrent edit; sorts by plain string compare (all-day leads its day). Means "happens on" or "act on". Fixed: never rewritten or rolled over by the clock, and never red past its day. A past `when` has gone by like an event: there is no "slipped" state (decided 2026-09-30, `calendar-plan.md`). See `calendar-plan.md`. A date-only `deadline` register sat beside it until 2026-11-24, when deadlines were removed: nothing reads or writes the key, and one written by an older build stays in the doc, ignored. |
 | `when_suggested` | string? | optional **pending date suggestion** (2026-11-13), `when`-shaped and validated the same. A date a client read out of the title as it was typed, resolved at that moment and held until the user answers: yes moves it into `when` (`accept_item_when_suggestion`, one commit), no deletes the key, so a declined suggestion leaves nothing behind. Never a plan by itself: the web shows it only in the task surface, on an open item with no `when`. `set_item_when(Some)` deletes it in the same commit. Independent of `when` at the register level, so a concurrent suggestion beside a set `when` is harmless and ignored. See `spec/calendar-plan.md`, "Typed date phrases". |
 | `event` | bool? | optional **event flag** (2026-11-16, `events-plan.md`): `true` says the `when` is when the item happens, not when to do it, so a passed `when` has gone by instead of being overdue. Effective only beside a `when` (`is_event` needs both; a flag left without a date by concurrent edits is inert). Where the item shows, `location`, lifecycle and every other register are untouched. Absent ≡ not an event; clearing deletes the key, and `set_item_when(None)` deletes it in the same commit. |
 | `duration` | i64? | optional **length in whole minutes**, `1..=525600` (one year of days). A length rather than an end so that moving `when` on one device and setting the length on another can never produce an item that ends before it starts; the end is derived (`when` + `duration`). Read by the shape of `when`: minutes from a timed start, whole days (`ceil(minutes / 1440)`, the last day being that many minus one past the start) beside an all-day one, ignored beside an absent one; the register is never cross-checked against `when` (no invalid state under concurrent edit). Absent ≡ unset; clearing deletes the key. Written by `set_item_when` too: a timed `when` on an item with no duration defaults it to 60 minutes in the same commit, and clearing `when` deletes it; timed → all-day keeps it. Out-of-range values read as unset. See `calendar-plan.md`. |
@@ -394,7 +393,7 @@ without destroying anything. It is a single-register write on the ListMeta row
 (`archived_at`), and **nothing else**:
 
 - Item `location` registers, placements, and order containers are untouched.
-- Item lifecycle, timestamps, notes, deadlines, and planned dates are untouched.
+- Item lifecycle, timestamps, notes, and planned dates are untouched.
 - Focus refs are untouched.
 - The list keeps its id, name, icon, saved view, `created_at`, and its position
   in the `lists` MovableList.
@@ -491,16 +490,13 @@ Doc-level synced settings that are not owned by any specific `ListMeta`.
 All mutations go through Loro APIs internally; the core exposes typed helpers:
 
 - `add_item(list_id, text) -> ItemId`
-- `duplicate_item(item_id) -> ItemId` — a new item in the same list carrying the original's text, notes, deadline, `when`, duration and place. An open original's copy keeps its workflow state and sits directly after it; a closed one's is a Backlog item appended to the list. Not copied: stamps, `when_suggested`, Starred references. Rejects a binned item with `Invalid`. Composed from the setters below: one commit per copied field.
+- `duplicate_item(item_id) -> ItemId` — a new item in the same list carrying the original's text, notes, `when`, duration and place. An open original's copy keeps its workflow state and sits directly after it; a closed one's is a Backlog item appended to the list. Not copied: stamps, `when_suggested`, Starred references. Rejects a binned item with `Invalid`. Composed from the setters below: one commit per copied field.
 - `move_item(item_id, target_list_id, target_index)` — in-list reorder when
   `target_list_id` equals the current list (order `mov`, placement kept);
   cross-list move otherwise (fresh placement, atomic location write,
   entry delete+insert). One commit either way.
 - `set_item_lifecycle(item_id, lifecycle)` / `set_items_lifecycle(item_ids, lifecycle)` — move one or many items to an `ItemLifecycle` (`Backlog | Todo | InProgress | Review | Done | Cancelled | Binned`) in a single commit, writing the `[state, at]` register / `binned_at` mask (plus reflection stamps) per the transition table above. This is the primitive the board uses; the `done`/`bin`/`restore`/`un-done` helpers below are convenience wrappers over it.
 - `edit_item_text(item_id, text)`
-- `set_item_deadline(item_id, deadline)` — `Some(date)` validates a `YYYY-MM-DD`
-  calendar date and writes the `deadline` register; `None` deletes the key. One
-  commit. Rejects malformed dates with `Invalid`.
 - `set_item_when(item_id, when)` — `Some(value)` validates `YYYY-MM-DD` or
   `YYYY-MM-DDTHH:MM` and writes the `when` register with the trimmed value;
   `None` deletes the key. One commit. Rejects anything else (seconds, offsets,
@@ -556,7 +552,7 @@ The wire format for updates is whatever Loro emits — opaque bytes from the ser
 
 `export_json()` is the **semantic portability dump**: settings, every list
 (reserved rows flagged `builtin`), every item with its lifecycle register,
-reflection stamps, `deadline` / `when` / `duration` / `place` / `created_by`
+reflection stamps, `when` / `duration` / `place` / `created_by`
 / `assignee` / `subtasks` when set, and the Focus refs in order. It is not a CRDT backup — no Loro
 history rides it — and its ids are the doc's real ids.
 
@@ -596,7 +592,7 @@ history rides it — and its ids are the doc's real ids.
   existing local refs, so preserved ids can never produce a duplicate ref.
 - Everything else is lenient the same way: a blank `text` skips the item
   (`items_skipped`), an unrecognised lifecycle name degrades to Backlog, and a
-  malformed `deadline` / `when` / `duration` / `place` / `view` is dropped
+  malformed `when` / `duration` / `place` / `view` is dropped
   rather than failing the file. One Loro commit, one undo step.
 
 ## Schema versioning & compatibility
