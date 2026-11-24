@@ -513,6 +513,8 @@ export type Messages = {
     fixedEvent: string;
     /** Tooltip of the event switch: what turning it on changes. */
     eventHint: string;
+    /** The Event switch's hint while a multi-day span holds it on. */
+    eventLockedHint: string;
     /** Beside a timed row later today: how long until it starts,
      *  `span` already formatted ("2h 15m"). */
     startsIn: (span: string) => string;
@@ -951,6 +953,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Evento",
       fixedEvent: "Evento",
       eventHint: "Ocurre en esta fecha: pasa sin más, en lugar de quedar atrasado",
+      eventLockedHint: "Lo que dura más de un día siempre es un evento",
       startsIn: (span) => `en ${span}`,
       spanDay: (day) => `Día ${day}`,
       spanUntil: (time) => `hasta ${time}`,
@@ -1368,6 +1371,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       event: "Event",
       fixedEvent: "Event",
       eventHint: "Happens on this date: it goes by instead of going overdue",
+      eventLockedHint: "Anything longer than a day is always an event",
       startsIn: (span) => `in ${span}`,
       spanDay: (day) => `Day ${day}`,
       spanUntil: (time) => `until ${time}`,

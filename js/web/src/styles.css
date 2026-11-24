@@ -4040,6 +4040,8 @@ button.file-name:hover {
   margin-top: 0;
   padding: 0 0 0 6px;
   font-size: inherit;
+  /* Off, the label reads in the placeholder tone of the fields above. */
+  color: var(--text-empty);
 }
 
 .task-dialog-event-toggle .done-switch-label {
@@ -4048,6 +4050,15 @@ button.file-name:hover {
 
 .task-dialog-event-toggle[data-checked] {
   color: var(--text);
+}
+
+/* Held on by a multi-day span: on, and not the user's to turn off. */
+.task-dialog-event-toggle[data-disabled] .done-switch-control {
+  opacity: 0.5;
+}
+
+.task-dialog-event-toggle[data-disabled] .done-switch-label {
+  cursor: default;
 }
 
 /* The ✕ inset at the start field's right edge (rendered only while a

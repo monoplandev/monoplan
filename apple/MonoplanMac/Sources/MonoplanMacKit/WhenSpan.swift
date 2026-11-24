@@ -38,6 +38,16 @@ public enum WhenSpan {
         return minutes == 0 ? 0 : (minutes + day - 1) / day - 1
     }
 
+    /// The span runs past one day, which makes the item an event
+    /// whatever its Event switch says (the core's `spans_days`,
+    /// spec/events-plan.md "Multi-day is an event"): all-day, two days
+    /// or more; beside a time, 24 hours or more. A timed span under 24
+    /// hours that crosses midnight is one sitting and stays what it is.
+    public static func spansDays(when: String?, duration: Int?) -> Bool {
+        guard let when, let minutes = duration, minutes > 0 else { return false }
+        return clock(of: when) != nil ? minutes >= day : minutes > day
+    }
+
     /// The length that ends the span `offset` days past its start day:
     /// 0 for none stored, nil when the register cannot hold that day
     /// (before the start; with a timed start, the start day itself

@@ -191,7 +191,10 @@ Item register, integer minutes, optional. `1..=525600` (one year of days).
   start. Beside an all-day `when` it counts whole days (added
   2026-10-07, see "Multi-day all-day spans" below); beside an absent one
   views ignore it. Clearing `when` deletes `duration` in the same commit;
-  timed → all-day keeps it so re-adding a time restores the end.
+  timed → all-day keeps it so re-adding a time restores the end. The
+  one reading the core does make of the pair (2026-11-25): a span past
+  one day makes the item an event, derived on read and never written
+  (`events-plan.md` "Multi-day is an event").
 - **A start implies an end (added 2026-09-22).** `set_item_when` with a
   timed value on an item that has no duration writes the default of 60
   minutes (`DEFAULT_DURATION_MINUTES`) in the same commit and reports it

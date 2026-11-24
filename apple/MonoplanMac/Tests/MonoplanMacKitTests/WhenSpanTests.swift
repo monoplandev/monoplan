@@ -20,6 +20,17 @@ final class WhenSpanTests: XCTestCase {
         XCTAssertEqual(WhenSpan.endOffset(when: "2026-11-18T09:00", duration: 2 * day + 60), 2)
     }
 
+    func testSpansDaysIsTwoDaysAllDayOrADayTimed() {
+        XCTAssertFalse(WhenSpan.spansDays(when: nil, duration: 3 * day))
+        XCTAssertFalse(WhenSpan.spansDays(when: "2026-11-18", duration: nil))
+        XCTAssertFalse(WhenSpan.spansDays(when: "2026-11-18", duration: day))
+        XCTAssertTrue(WhenSpan.spansDays(when: "2026-11-18", duration: 2 * day))
+        // Across midnight in under 24 hours is one sitting.
+        XCTAssertFalse(WhenSpan.spansDays(when: "2026-11-18T23:00", duration: 120))
+        XCTAssertFalse(WhenSpan.spansDays(when: "2026-11-18T09:00", duration: day - 1))
+        XCTAssertTrue(WhenSpan.spansDays(when: "2026-11-18T09:00", duration: day))
+    }
+
     func testEndLengthAllDay() {
         XCTAssertNil(WhenSpan.endLength(when: "2026-11-18", duration: nil, offset: -1))
         XCTAssertEqual(WhenSpan.endLength(when: "2026-11-18", duration: 3 * day, offset: 0), 0)

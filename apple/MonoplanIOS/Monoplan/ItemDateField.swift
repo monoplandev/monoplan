@@ -260,8 +260,11 @@ struct ItemDateEditor: View {
                 Divider()
                 // What the date means: something to do by then, or
                 // something that happens then (spec/events-plan.md).
+                // A span past one day is an event whatever the switch
+                // says: on, and locked until it is one day again.
+                let eventLocked = WhenSpan.spansDays(when: item.when, duration: item.duration)
                 Toggle(isOn: Binding(
-                    get: { item.event },
+                    get: { item.event || eventLocked },
                     set: { model.setEvent(ref, event: $0) }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -272,6 +275,7 @@ struct ItemDateEditor: View {
                     }
                 }
                 .frame(minHeight: 36)
+                .disabled(eventLocked)
             }
         }
     }

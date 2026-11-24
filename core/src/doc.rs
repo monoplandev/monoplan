@@ -162,6 +162,9 @@ pub const MAX_DURATION_MINUTES: u32 = 365 * 24 * 60;
 /// duration yet: a start implies an end, and an hour is the calendar
 /// default. See `set_item_when`.
 pub const DEFAULT_DURATION_MINUTES: u32 = 60;
+/// Minutes in a day: where a span stops being one sitting and becomes
+/// an event (`spans_days`).
+const DAY_MINUTES: u32 = 24 * 60;
 /// Optional place register (`spec/place-plan.md`): one atomic plain
 /// `LoroValue` map `{label, lat?, lon?, address?, ref?}` so a label and
 /// its coordinates can never be torn apart by concurrent edits (the
@@ -2949,6 +2952,11 @@ impl Doc {
         let open_index = if was_dated != is_dated(&map) {
             self.sync_item_openness(item_id, &map)
         } else {
+            // A change of shape can flip the event (24 hours timed is
+            // an event, one whole day is not): keep the index's copy.
+            if was_event != is_event(&map) {
+                self.sync_item_openness(item_id, &map);
+            }
             None
         };
         self.push_event(AppEvent::ItemWhenChanged {
@@ -2961,7 +2969,8 @@ impl Doc {
             open_index,
         });
         // A `when` coming or going beside a set flag flips the effective
-        // event (the flag can outlive its date under concurrent edits).
+        // event (the flag can outlive its date under concurrent edits),
+        // and so can a change of shape beside a day-long duration.
         if was_event != is_event(&map) {
             self.push_event(AppEvent::ItemEventChanged {
                 id: item_id.to_string(),
@@ -2989,7 +2998,10 @@ impl Doc {
     /// needs a `when` (`Invalid` without one: the flag is a property of
     /// the date); `false` deletes the key. One Loro commit; a write that
     /// would change nothing makes none. Nothing else about the item
-    /// changes, where it shows included.
+    /// changes, where it shows included. An item that spans days is an
+    /// event whatever the flag says (`spans_days`), so `false` there
+    /// clears the flag and changes nothing a view shows until the span
+    /// is back to one day.
     pub fn set_item_event(&self, item_id: &str, event: bool) -> Result<(), DocError> {
         let map = self.find_item(item_id)?;
         if event_flag(&map) == event {
@@ -3075,7 +3087,10 @@ impl Doc {
     /// `Invalid`; `None` deletes the key. One Loro commit. Independent of
     /// `when` at the register level (no cross-field check, so concurrent
     /// edits can never leave the doc invalid); a duration beside an
-    /// all-day or absent `when` is simply ignored by views.
+    /// absent `when` is simply ignored by views. A length that takes
+    /// the span past one day makes the item an event, and one that
+    /// brings it back makes it what its flag says (`spans_days`):
+    /// reported by an `ItemEventChanged` after the `ItemDurationChanged`.
     pub fn set_item_duration(&self, item_id: &str, duration: Option<u32>) -> Result<(), DocError> {
         if let Some(n) = duration
             && (n == 0 || n > MAX_DURATION_MINUTES)
@@ -3085,6 +3100,7 @@ impl Doc {
             )));
         }
         let map = self.find_item(item_id)?;
+        let was_event = is_event(&map);
         match duration {
             Some(n) => map.insert(KEY_DURATION, i64::from(n))?,
             None => {
@@ -3096,6 +3112,14 @@ impl Doc {
             id: item_id.to_string(),
             duration,
         });
+        let event = is_event(&map);
+        if was_event != event {
+            self.sync_item_openness(item_id, &map);
+            self.push_event(AppEvent::ItemEventChanged {
+                id: item_id.to_string(),
+                event,
+            });
+        }
         Ok(())
     }
 
@@ -8018,10 +8042,32 @@ fn is_dated(map: &LoroMap) -> bool {
     read_string(map, KEY_WHEN).is_some_and(|s| !s.is_empty())
 }
 
-/// The item is an event: flagged **and** dated. The one definition
-/// behind `ItemView::event` and the projection.
+/// The item's span runs past one day: an all-day `when` covering two
+/// days or more, or a timed one lasting 24 hours or more. A timed span
+/// under 24 hours that crosses midnight is one sitting and does not
+/// count. Read off `when` and `duration`, never stored.
+fn spans_days(map: &LoroMap) -> bool {
+    let Some(when) = read_string(map, KEY_WHEN).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Some(minutes) = read_duration(map) else {
+        return false;
+    };
+    if when_is_timed(&when) {
+        minutes >= DAY_MINUTES
+    } else {
+        minutes > DAY_MINUTES
+    }
+}
+
+/// The item is an event: dated, and either flagged or spanning days
+/// (`spans_days`: a multi-day item cannot be a task, since ticking it
+/// on one of its days would tick all of them). The one definition
+/// behind `ItemView::event` and the projection. Derived, so no
+/// concurrent edit of `event`, `when` and `duration` can leave a
+/// multi-day task behind.
 fn is_event(map: &LoroMap) -> bool {
-    event_flag(map) && is_dated(map)
+    is_dated(map) && (event_flag(map) || spans_days(map))
 }
 
 fn hash_str(hasher: &mut Sha256, s: &str) {
@@ -9863,6 +9909,101 @@ mod tests {
         );
         assert_eq!(doc.open_item_ids(&list), vec![a, b, c]);
         assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn a_span_past_one_day_is_an_event_whatever_the_flag() {
+        let (doc, _list, [a, b, _c]) = doc_with_dated_item();
+        let is_event = |id: &str| doc.get_item(id).unwrap().is_event();
+
+        // Timed: under 24 hours is one sitting, even across midnight.
+        doc.set_item_duration(&b, Some(23 * 60)).unwrap();
+        assert!(!is_event(&b));
+        let _ = doc.drain_events();
+        doc.set_item_duration(&b, Some(24 * 60)).unwrap();
+        assert!(is_event(&b));
+        assert_eq!(
+            doc.drain_events(),
+            vec![
+                AppEvent::ItemDurationChanged {
+                    id: b.clone(),
+                    duration: Some(24 * 60),
+                },
+                AppEvent::ItemEventChanged {
+                    id: b.clone(),
+                    event: true,
+                },
+            ]
+        );
+        // Unticking cannot make it a task while it spans days.
+        doc.set_item_event(&b, false).unwrap();
+        assert!(is_event(&b));
+        assert!(doc.drain_events().is_empty());
+        // Back to one sitting: a task again, the flag never having been set.
+        doc.set_item_duration(&b, Some(60)).unwrap();
+        assert!(!is_event(&b));
+        assert!(doc.drain_events().contains(&AppEvent::ItemEventChanged {
+            id: b.clone(),
+            event: false,
+        }));
+
+        // All-day: one whole day is a task, two are an event.
+        doc.set_item_when(&a, Some("2026-12-01")).unwrap();
+        doc.set_item_duration(&a, Some(24 * 60)).unwrap();
+        assert!(!is_event(&a));
+        doc.set_item_duration(&a, Some(2 * 24 * 60)).unwrap();
+        assert!(is_event(&a));
+        // A flag ticked by hand survives the span shrinking.
+        doc.set_item_event(&a, true).unwrap();
+        doc.set_item_duration(&a, None).unwrap();
+        assert!(is_event(&a));
+        // No date, no event, and the length goes with the date.
+        doc.set_item_duration(&a, Some(3 * 24 * 60)).unwrap();
+        doc.set_item_when(&a, None).unwrap();
+        assert!(!is_event(&a));
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn a_change_of_shape_at_exactly_a_day_flips_the_event() {
+        let (doc, _list, [_a, b, _c]) = doc_with_dated_item();
+        doc.set_item_duration(&b, Some(24 * 60)).unwrap();
+        assert!(doc.get_item(&b).unwrap().is_event());
+        let _ = doc.drain_events();
+        // 24 hours timed is an event; the same length all-day is one day.
+        doc.set_item_when(&b, Some("2026-12-01")).unwrap();
+        assert!(!doc.get_item(&b).unwrap().is_event());
+        assert!(doc.drain_events().contains(&AppEvent::ItemEventChanged {
+            id: b.clone(),
+            event: false,
+        }));
+        assert_open_projection_matches_doc(&doc);
+    }
+
+    #[test]
+    fn a_remote_duration_past_one_day_arrives_as_an_event() {
+        let dek = Dek::generate();
+        let mut a = Doc::new().unwrap();
+        let id = a.add_item(LIST_INBOX, "conference").unwrap();
+        a.set_item_when(&id, Some("2026-12-01")).unwrap();
+        let mut b = sync_fresh_peer(&mut a, &dek);
+        let _ = b.drain_events();
+
+        a.set_item_duration(&id, Some(3 * 24 * 60)).unwrap();
+        let from_a = a.pending_export(&dek).unwrap().unwrap();
+        b.apply_remote(&dek, &from_a).unwrap();
+
+        assert!(b.get_item(&id).unwrap().is_event());
+        let evs = b.drain_events();
+        assert!(
+            evs.contains(&AppEvent::ItemEventChanged {
+                id: id.clone(),
+                event: true,
+            }),
+            "events: {evs:?}"
+        );
+        assert_open_projection_matches_doc(&b);
+        assert_eq!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]
@@ -12854,12 +12995,20 @@ mod tests {
         let view = doc.get_item(&id).unwrap();
         assert_eq!(view.duration, None);
         assert_eq!(view.when.as_deref(), Some("2026-07-13T14:00"));
+        // The year-long span was an event; without it the item is a
+        // task again.
         assert_eq!(
             doc.drain_events(),
-            vec![AppEvent::ItemDurationChanged {
-                id: id.clone(),
-                duration: None,
-            }]
+            vec![
+                AppEvent::ItemDurationChanged {
+                    id: id.clone(),
+                    duration: None,
+                },
+                AppEvent::ItemEventChanged {
+                    id: id.clone(),
+                    event: false,
+                },
+            ]
         );
     }
 

@@ -63,6 +63,7 @@ import {
   todayStamp,
   whenDay,
   whenFromParts,
+  spansDays,
   whenTime,
 } from "./format.tsx";
 import arrowRightSvg from "./icons/arrow-right.svg?raw";
@@ -142,6 +143,9 @@ export function WhenField(props: {
   // so every change writes straight through. The row only renders against
   // a set date; today is a fallback for the type, not a path taken.
   const time = () => whenTime(props.when() ?? "");
+  // A span past one day is an event whatever the box says: the switch
+  // shows on and cannot be turned off until the span is one day again.
+  const eventLocked = () => spansDays(props.when(), props.duration());
   const onTimeChange = (t: { hour: number; minute: number } | null) => {
     const w = props.when();
     const day = w ? whenDay(w) : todayStamp(nowMs());
@@ -456,8 +460,9 @@ export function WhenField(props: {
             passed) or something that happens (it goes by). */}
         <Switch
           class="done-switch task-dialog-event-toggle"
-          title={m().upcoming.eventHint}
-          checked={props.event()}
+          title={eventLocked() ? m().upcoming.eventLockedHint : m().upcoming.eventHint}
+          checked={props.event() || eventLocked()}
+          disabled={eventLocked()}
           onChange={props.onEventChange}
         >
           <Switch.Input class="done-switch-input" />

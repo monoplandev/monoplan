@@ -251,7 +251,10 @@ struct ItemPanel: View {
             // What the date means: something to do by then, or
             // something that happens then (spec/events-plan.md).
             if item.item.when != nil, item.item.binnedAt == nil {
-                EventToggle(event: item.item.event) { setEvent(item, $0) }
+                EventToggle(
+                    event: item.item.event,
+                    locked: WhenSpan.spansDays(when: item.item.when, duration: item.item.duration.map(Int.init))
+                ) { setEvent(item, $0) }
             }
             PanelRule().padding(.vertical, 4)
             // The place row with no map or address under it ends the
@@ -662,23 +665,27 @@ private struct PanelField<Icon: View>: View {
 
 /// The event flag of a dated item, as a small switch at the row's
 /// leading edge with its name after it, as on the web. The whole row
-/// takes the click.
+/// takes the click. `locked` is a span past one day holding it on: such
+/// an item is an event whatever the switch says, so it cannot be turned
+/// off until the span is one day again.
 private struct EventToggle: View {
     let event: Bool
+    var locked = false
     let set: (Bool) -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Toggle("Event", isOn: Binding(get: { event }, set: set))
+            Toggle("Event", isOn: Binding(get: { event || locked }, set: set))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+                .disabled(locked)
             Text("Event")
                 .lineLimit(1)
-                .foregroundStyle(event ? .primary : .secondary)
+                .foregroundStyle(event || locked ? .primary : .secondary)
         }
         .panelBox(filled: false)
-        .onTapGesture { set(!event) }
+        .onTapGesture { if !locked { set(!event) } }
         .help("Goes by when its day passes, instead of going overdue.")
         .accessibilityElement(children: .combine)
     }

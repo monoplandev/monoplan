@@ -26,6 +26,7 @@ Companion to `calendar-plan.md` (the `when` register, the agenda),
 | Question | Decision |
 |---|---|
 | What is an event? | **An item whose `event` register is `true` and which has a `when`.** Both, always: the flag without a date is inert. One predicate, `is_event` (`ItemView::event` carries the effective value to every client). |
+| A task that spans days? | **There is none** (2026-11-25). A dated item whose span runs past one day is an event whatever its flag says: see "Multi-day is an event". |
 | What does the flag change? | **What a passed `when` means** (it went by, not overdue) **and how the status reads** (Event / Done / Cancelled). Nothing about where the item shows. |
 | Where is the flag in the UI? | **A checkbox under the date**, shown once the item has one. Off by default; the calendar's Add ticks it. |
 | Where do events show? | **Where any dated item does:** on the calendar, and as a row in their list when they have one. One with no list is not in Inbox, like every dated item. |
@@ -62,6 +63,37 @@ Two rules keep that harmless:
 
 `set_item_event(true)` on an item with no `when` is refused (`Invalid`).
 
+### Multi-day is an event (2026-11-25)
+
+A task has one tick, so a task shown on several days is wrong on every
+day but one: ticking "day two" ticks the whole thing. A dated item whose
+span runs past one day is therefore an event, whatever its flag says.
+
+- **Past one day** (`spans_days`) is read off `when` and `duration`:
+  an all-day `when` covering two days or more (`duration > 1440`), or a
+  timed one lasting 24 hours or more (`duration >= 1440`). A timed span
+  under 24 hours that crosses midnight (23:00 to 01:00) is one sitting
+  and stays what its flag says; it is the same line the agenda draws for
+  its "Day 2" labels. The two registers store no other distinction
+  between "multi-day" and "runs past midnight".
+- **Derived, not written.** `is_event` is dated and (flagged or
+  `spans_days`). Nothing writes the flag when an end date is set, so no
+  concurrent edit of `event`, `when` and `duration` can leave a
+  multi-day task behind, and import, the CLI and old docs need no
+  repair.
+- **Shortening the span** to one day makes the item what its flag says:
+  a task again unless Event was ticked by hand.
+- **`set_item_event(false)`** on such an item clears the flag and
+  changes nothing a view shows. It is not refused: a client restoring a
+  saved state writes the flag and the length in either order.
+- **`ItemEventChanged`** follows the `ItemDurationChanged` (or the
+  `ItemWhenChanged`, for a change of shape at exactly a day) that
+  flipped the effective value, local or remote.
+- **Clients** show the Event switch on and disabled while the span is
+  past one day (web `spansDays` in `format.tsx` with a hint of its own,
+  the Kit's `WhenSpan.spansDays` for the macOS item panel and the iOS
+  date editor; the new-item buffers mirror the rule).
+
 ## Core
 
 - Register `event` (bool) on the item map. Absent ≡ false; clearing
@@ -69,8 +101,9 @@ Two rules keep that harmless:
 - `Doc::set_item_event(item_id, bool)`: one commit, no-op when unchanged.
 - `ItemView::event` (effective), `is_event()`.
 - `AppEvent::ItemEventChanged { id, event }` when the effective value
-  flips: a flag write, or a `when` coming or going beside a set flag
-  (local, remote or undo). `ItemAdded` carries `event`. No projection
+  flips: a flag write, a `when` coming or going beside a set flag, or a
+  `duration` taking the span past one day or back (local, remote or
+  undo). `ItemAdded` carries `event`. No projection
   depends on the flag.
 - **Export / import.** `event: true` on the item, skipped when false.
   Cross-doc moves carry it. `duplicate_item` copies it.

@@ -288,6 +288,19 @@ export function allDayEndOffset(minutes: number | null | undefined): number {
   return Math.ceil(minutes / DAY_MINUTES) - 1;
 }
 
+/** The span runs past one day, which makes the item an event whatever
+ *  its Event box says (the core's `spans_days`, `spec/events-plan.md`
+ *  "Multi-day is an event"): an all-day `when` covering two days or
+ *  more, or a timed one lasting 24 hours or more. A timed span under 24
+ *  hours that crosses midnight is one sitting and stays what it is. */
+export function spansDays(
+  when: string | null | undefined,
+  minutes: number | null | undefined,
+): boolean {
+  if (!when || !minutes) return false;
+  return whenTime(when) ? minutes >= DAY_MINUTES : minutes > DAY_MINUTES;
+}
+
 /** The last day an all-day span can reach: a year of days, so 364 past
  *  the start. */
 export const MAX_ALL_DAY_OFFSET = MAX_DURATION_MINUTES / DAY_MINUTES - 1;

@@ -43,6 +43,7 @@ import {
   formatDialogStamp,
   formatElapsed,
   nowMs,
+  spansDays,
   whenTime,
 } from "./format.tsx";
 import { applySuggestionChange, raisedDate, titleDate } from "./whenSuggest.ts";
@@ -1262,7 +1263,9 @@ export function TaskDialog(props: {
   // ladder collapsed to one choice: Event / Done / Cancelled.
   const vEvent = () => {
     const it = item();
-    return it ? isEvent(it) : newEvent() && newWhen() !== null;
+    if (it) return isEvent(it);
+    // The buffer mirrors the core: a span past one day is an event.
+    return newWhen() !== null && (newEvent() || spansDays(newWhen(), newDuration()));
   };
   const vPinned = () => (item() ? focused() : newFocus());
   const vWhen = () => (item() ? (item()?.when ?? null) : newWhen());
