@@ -25,6 +25,9 @@ export function MonthGrid(props: {
   /** `YYYY-MM-DD` of a day to mark softly (a suggestion under the
    *  cursor), or null. */
   previewDay?: string | null;
+  /** `YYYY-MM-DD` of a day to mark as related without selecting it
+   *  (the mini calendar's: the shown item's date), or null. */
+  markedDay?: string | null;
   /** Always draw six weeks (the extra filled from the next month), so
    *  the grid keeps one height as the months page by. */
   fixedWeeks?: boolean;
@@ -185,6 +188,9 @@ export function MonthGrid(props: {
                             class="calendar-cell-trigger"
                             data-preview={
                               localDateStamp(day) === props.previewDay ? "" : undefined
+                            }
+                            data-marked={
+                              localDateStamp(day) === props.markedDay ? "" : undefined
                             }
                             data-outside={
                               day.getMonth() !== cal.month.getMonth()

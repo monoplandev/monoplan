@@ -4,10 +4,12 @@
 // a day opens the agenda at that day (Workspace's `showAgendaDay`). The
 // sidebar's blank-space context menu (`nav.tsx`) shows and hides it, a
 // device preference in localStorage like `navWidth.ts`: shown by
-// default, only "hidden" is stored.
+// default, only "hidden" is stored. The item the task surface shows has
+// its date marked, and the grid pages to that date's month when it
+// changes.
 
-import { createSignal } from "solid-js";
-import { localDateStamp, nowMs } from "./format.tsx";
+import { createEffect, createSignal, on } from "solid-js";
+import { localDateStamp, nowMs, parseLocalDateParts } from "./format.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 
 const KEY = "monoplan.nav.miniCalendarHidden";
@@ -36,12 +38,30 @@ export function setMiniCalendarShown(shown: boolean): void {
 export function MiniCalendar(props: {
   /** A day clicked, as `YYYY-MM-DD`. */
   onPickDay: (day: string) => void;
+  /** `YYYY-MM-DD` to mark: the shown item's date, or null. */
+  markedDay?: string | null;
 }) {
   const [month, setMonth] = createSignal(new Date(nowMs()));
+  // Page to a newly marked day so it is in view; clearing the mark
+  // leaves the month where it is.
+  createEffect(
+    on(
+      () => props.markedDay ?? null,
+      (day) => {
+        const d = day ? parseLocalDateParts(day) : null;
+        if (!d) return;
+        const cur = month();
+        if (d.getFullYear() !== cur.getFullYear() || d.getMonth() !== cur.getMonth()) {
+          setMonth(d);
+        }
+      },
+    ),
+  );
   return (
     <div class="mini-calendar">
       <MonthGrid
         value={null}
+        markedDay={props.markedDay ?? null}
         month={month()}
         onMonthChange={setMonth}
         // Pinned above the nav list: a five-week month would shift the

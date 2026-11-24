@@ -480,6 +480,10 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   sidebar's blank-space context menu (beside "Show list counts") shows
   and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.
+  The item the task surface shows (entered, or followed in the side
+  pane) has its `when` day marked, a tinted cell, not a selection
+  (2026-11-24); a newly marked day in another month pages the grid
+  there, and clearing the mark leaves the month as it is.
 - **Columns** (web, built 2026-11-23; decisions in
   `agenda-columns-plan.md`): the segmented control that stands in for the
   view's title picks "List" (the days down the page, everything above) or

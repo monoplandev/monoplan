@@ -48,6 +48,8 @@
   --error-text: #991b1b;
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
+  /* Today's number in the month grids. */
+  --calendar-today: #dc2626;
   --dnd-select-bg: #dbeafe;
   /* Divider under a selected row: a blue-grey a step darker than the
      selection fill so the row's edge still reads against it. */
@@ -91,6 +93,7 @@
   --error-text: #f87171;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
+  --calendar-today: #f87171;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #293a5b;
@@ -4518,12 +4521,19 @@ input.task-check:hover {
 
 .calendar-cell-trigger[data-today] {
   font-weight: 700;
-  color: var(--link);
+  color: var(--calendar-today);
 }
 
 .calendar-cell-trigger[data-selected] {
   background: var(--link);
   color: #fff;
+}
+
+/* A related day marked without selecting it (the mini calendar's
+   shown item's date): the fill alone, so the day keeps its own text
+   (today's red included). Before preview so a preview wins. */
+.calendar-cell-trigger[data-marked] {
+  background: color-mix(in srgb, var(--link) 18%, var(--bg));
 }
 
 /* A soft selection previews a suggestion without changing the saved date. */

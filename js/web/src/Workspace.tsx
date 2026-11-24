@@ -62,7 +62,7 @@ import {
 import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
 import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
 
-import { addDaysToStamp, nowMs, todayStamp } from "./format.tsx";
+import { addDaysToStamp, nowMs, todayStamp, whenDay } from "./format.tsx";
 import { storedWhen } from "./zones.ts";
 import { applySuggestionChange } from "./whenSuggest.ts";
 import { restoreCapturedPositions } from "./linger.ts";
@@ -3207,6 +3207,13 @@ export function Workspace(props: {
   createEffect(() => {
     if (shownItemId() === null) setLiveEdit(null);
   });
+  // The shown item's date, marked on the mini calendar. `when` is
+  // device-local already (a zoned value arrives converted).
+  const shownItemDay = createMemo((): string | null => {
+    const id = shownItemId();
+    const when = id !== null ? docs.getItem(id)?.when : undefined;
+    return when ? whenDay(when) : null;
+  });
 
   // An entered item follows the selection out: moving to a different row,
   // or growing to several, drops it, so the URL falls back to the view and
@@ -3449,7 +3456,7 @@ export function Workspace(props: {
         }
         header={
           <Show when={miniCalendarShown()}>
-            <MiniCalendar onPickDay={showAgendaDay} />
+            <MiniCalendar onPickDay={showAgendaDay} markedDay={shownItemDay()} />
           </Show>
         }
       />
