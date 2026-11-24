@@ -284,7 +284,7 @@ private struct SignOutConfirmation: ViewModifier {
             Button("Sign Out", role: .destructive) { model.signOut() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the account's data from this iPhone. It stays on the server and your other devices.")
+            Text("Signing out removes this device's local copy of your data.")
         }
     }
 }

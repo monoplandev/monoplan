@@ -764,7 +764,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       logOut: "Cerrar sesión",
       logOutTitle: "¿Cerrar sesión en Monoplan?",
       logOutConfirm:
-        "Esto elimina la copia local de tus datos de este navegador, incluidos los cambios que aún no se han sincronizado. Lo que ya está sincronizado permanece en el servidor y vuelve cuando inicias sesión de nuevo.",
+        "Cerrar sesión elimina la copia local de tus datos en este dispositivo.",
       exportJson: "Exportar JSON",
       exportFailed: "No se pudo exportar",
       importJson: "Importar JSON",
@@ -1168,7 +1168,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       logOut: "Log out",
       logOutTitle: "Sign out of Monoplan?",
       logOutConfirm:
-        "This removes the local copy of your data from this browser, including any changes that haven't synced yet. Everything already synced stays on the server and comes back when you sign in again.",
+        "Signing out removes this device's local copy of your data.",
       exportJson: "Export JSON",
       exportFailed: "Could not export",
       importJson: "Import JSON",

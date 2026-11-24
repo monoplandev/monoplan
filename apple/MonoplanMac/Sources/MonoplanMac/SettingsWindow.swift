@@ -192,7 +192,7 @@ final class SettingsModel: ObservableObject {
     static func confirmSignOut() -> Bool {
         let alert = NSAlert()
         alert.messageText = String(localized: "Sign out of Monoplan?")
-        alert.informativeText = String(localized: "This removes the local copy of your data from this Mac and starts a fresh local workspace. Your data stays on the server and comes back when you sign in again.")
+        alert.informativeText = String(localized: "Signing out removes this device's local copy of your data.")
         alert.alertStyle = .warning
         alert.addButton(withTitle: String(localized: "Sign Out"))
         alert.addButton(withTitle: String(localized: "Cancel"))

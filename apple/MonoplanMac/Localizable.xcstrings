@@ -2580,6 +2580,16 @@
         }
       }
     },
+    "Signing out removes this device's local copy of your data." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrar sesión elimina la copia local de tus datos en este dispositivo."
+          }
+        }
+      }
+    },
     "Signing out…" : {
       "localizations" : {
         "es" : {
@@ -2852,17 +2862,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Este Mac ahora se sincroniza con tu cuenta."
-          }
-        }
-      }
-    },
-    "This removes the local copy of your data from this Mac and starts a fresh local workspace. Your data stays on the server and comes back when you sign in again." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esto elimina la copia local de tus datos de este Mac y crea un espacio de trabajo local nuevo. Tus datos permanecen en el servidor y vuelven cuando inicias sesión de nuevo."
           }
         }
       }

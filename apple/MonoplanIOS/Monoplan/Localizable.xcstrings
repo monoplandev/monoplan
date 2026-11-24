@@ -3136,6 +3136,16 @@
         }
       }
     },
+    "Signing out removes this device's local copy of your data." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cerrar sesión elimina la copia local de tus datos en este dispositivo."
+          }
+        }
+      }
+    },
     "Signing up with" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3398,16 +3408,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Este elemento será visible para todas las personas de %@."
-          }
-        }
-      }
-    },
-    "This removes the account's data from this iPhone. It stays on the server and your other devices." : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esto elimina los datos de la cuenta de este iPhone. Permanecen en el servidor y en tus otros dispositivos."
           }
         }
       }
