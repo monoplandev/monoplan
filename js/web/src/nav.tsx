@@ -654,6 +654,13 @@ function DocSection(props: {
   };
   const [adding, setAdding] = createSignal(false);
   const [name, setName] = createSignal("");
+  // Icon picked in the new-list row, applied with the name on submit.
+  const [newIcon, setNewIcon] = createSignal<string | undefined>(undefined);
+  const stopAdding = () => {
+    setName("");
+    setNewIcon(undefined);
+    setAdding(false);
+  };
   const [collapsed, setCollapsed] = createSignal(loadSectionCollapsed(docId, props.entry.home));
   const setCollapsedPersisted = (next: boolean) => {
     setCollapsed(next);
@@ -694,9 +701,14 @@ function DocSection(props: {
     e.preventDefault();
     const t = name().trim();
     if (!t) return;
-    const id = app.addList(t);
-    setName("");
-    setAdding(false);
+    const icon = newIcon();
+    // Name and icon land as one undo step.
+    const id = app.withActionBatch(() => {
+      const id = app.addList(t);
+      if (icon) app.setListIcon(id, icon);
+      return id;
+    });
+    stopAdding();
     open(id);
   };
   // Archive is non-destructive (globally undoable, trivially reversible
@@ -1323,8 +1335,10 @@ function DocSection(props: {
         <NewListForm
           name={name()}
           setName={setName}
+          icon={newIcon()}
+          setIcon={setNewIcon}
           onSubmit={submit}
-          onDismiss={() => setAdding(false)}
+          onDismiss={stopAdding}
         />
       </Show>
       </Show>
@@ -1524,31 +1538,106 @@ export function NavMenu(props: {
   );
 }
 
+/** The sidebar's new-list row: an icon button (the default glyph, or the
+ *  picked emoji) opening the same emoji picker as a list's own icon, then
+ *  the name field. The field takes focus on mount; Shift+Tab reaches the
+ *  icon button, Enter or Space opens the picker, and picking or dismissing
+ *  it hands focus back to the field. The row commits (or dismisses, when
+ *  the name is empty) only when focus leaves both the row and the picker. */
 function NewListForm(props: {
   name: string;
   setName: (v: string) => void;
+  icon: string | undefined;
+  setIcon: (v: string | undefined) => void;
   onSubmit: (e: Event) => void;
   onDismiss: () => void;
 }) {
   const { m } = useAppI18n();
+  let formRef!: HTMLFormElement;
   let inputRef!: HTMLInputElement;
+  let pickerRef: HTMLDivElement | undefined;
+  const [iconOpen, setIconOpen] = createSignal(false);
+  // Set when the picker closes on a click outside it: that click is the
+  // user leaving the row, so it commits instead of refocusing the field.
+  let leftOutside = false;
   onMount(() => inputRef.focus());
+  const finish = (e: Event) => {
+    if (props.name.trim()) props.onSubmit(e);
+    else props.onDismiss();
+  };
   return (
-    <form onSubmit={props.onSubmit}>
+    <form
+      ref={formRef}
+      class="nav-item nav-new-list"
+      onSubmit={props.onSubmit}
+      // Blur commits a typed name (same as Enter) and dismisses an empty
+      // row, so clicking away never strands it in entry mode. Focus moving
+      // between the icon button, the field and the picker is not a blur.
+      onFocusOut={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (iconOpen()) return;
+        if (next && (formRef.contains(next) || pickerRef?.contains(next))) return;
+        finish(e);
+      }}
+    >
+      <Popover open={iconOpen()} onOpenChange={setIconOpen} placement="bottom-start" gutter={6}>
+        <Popover.Trigger
+          type="button"
+          class="nav-item-icon nav-new-list-icon"
+          classList={{ "nav-item-icon-emoji": !!props.icon }}
+          tabIndex={0}
+          aria-label={m().workspace.listIcon}
+          title={m().workspace.listIcon}
+        >
+          <Show when={props.icon} fallback={<span innerHTML={fileSvg} />}>
+            {(icon) => icon()}
+          </Show>
+        </Popover.Trigger>
+        <Popover.Portal>
+          {/* The picker focuses its own search field on open; on close
+              focus returns to the name field, not the trigger. */}
+          <Popover.Content
+            ref={pickerRef}
+            class="list-icon-popover"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              const target = e.target as Node | null;
+              leftOutside = !(target && formRef.contains(target));
+            }}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              if (leftOutside) {
+                leftOutside = false;
+                finish(e);
+              } else inputRef.focus();
+            }}
+          >
+            <EmojiPicker
+              selected={props.icon}
+              onPick={(icon) => {
+                props.setIcon(icon);
+                setIconOpen(false);
+              }}
+              onClear={
+                props.icon
+                  ? () => {
+                      props.setIcon(undefined);
+                      setIconOpen(false);
+                    }
+                  : undefined
+              }
+            />
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover>
       <input
         ref={inputRef}
-        class="nav-item nav-item-input"
+        class="nav-new-list-input"
         type="text"
         placeholder={m().nav.newList}
+        aria-label={m().nav.newList}
         value={props.name}
         onInput={(e) => props.setName(e.currentTarget.value)}
-        // Blur and Escape both commit a typed name (same as Enter) and
-        // dismiss an empty input, so clicking away never strands the
-        // field in entry mode.
-        onBlur={(e) => {
-          if (props.name.trim()) props.onSubmit(e);
-          else props.onDismiss();
-        }}
         // Escape uses a native listener + stopPropagation so the
         // document-level Escape handlers (side panel close, dnd selection
         // clear) don't also fire on the same keystroke.
@@ -1556,8 +1645,7 @@ function NewListForm(props: {
           if (e.key !== "Escape") return;
           e.preventDefault();
           e.stopPropagation();
-          if (props.name.trim()) props.onSubmit(e);
-          else props.onDismiss();
+          finish(e);
         }}
       />
     </form>

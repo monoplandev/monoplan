@@ -1192,15 +1192,48 @@ body {
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
 }
-.nav-item-input {
+/* New-list row (NewListForm): the form is the row, holding the icon
+   button and the name field; the row lights while either has focus. */
+.nav-new-list {
+  cursor: default;
+}
+
+.nav-new-list:focus-within {
+  background: var(--bg-hover);
+}
+
+.nav-new-list-icon {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.nav-new-list-icon:hover,
+.nav-new-list-icon[data-expanded] {
+  background: var(--bg-active);
+}
+
+.nav-new-list-icon:focus-visible {
+  outline: 1.5px solid var(--link);
+  outline-offset: -1.5px;
+}
+
+.nav-new-list-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
   border: 0;
   outline: none;
   background: transparent;
-  box-sizing: border-box;
-}
-
-.nav-item-input:focus {
-  background: var(--bg-hover);
+  font: inherit;
+  color: inherit;
 }
 
 .nav-item-label[contenteditable="true"] {
