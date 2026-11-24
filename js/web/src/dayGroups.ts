@@ -331,10 +331,9 @@ export const AGENDA_ALL_DAYS_AHEAD = 13;
  *  empty group for each missing day from today through to the later of
  *  the last placed day and `today + ahead`. Days gone by are never
  *  filled: a past day shows only when something is on it. Overdue keeps
- *  its place between the days gone by and Today. `reach` (a day the
- *  sidebar's mini calendar jumped to) widens the range ahead to take it
- *  in, so the jump lands on that day's own section; a jump to an empty
- *  past day lands on the next section after it. Labels follow
+ *  its place between the days gone by and Today. `reach` (how far the
+ *  agenda has been scrolled or jumped ahead) widens the range to that
+ *  day; a day before the range's end changes nothing. Labels follow
  *  `groupByDay`'s rules. */
 export function fillEmptyDays(
   groups: readonly DayGroup[],
@@ -374,6 +373,37 @@ export function fillEmptyDays(
       rows: [],
     });
   }
+  return out;
+}
+
+/** The agenda with a section for `day` (the day the sidebar's mini
+ *  calendar jumped to), empty when nothing is on it, so the jump lands
+ *  on that day itself: a past day, which is otherwise never shown empty,
+ *  or any day while empty days are hidden. A past day goes among the
+ *  days gone by, before Overdue. `groups` comes back as it is when the
+ *  day already has its section. */
+export function withDay(
+  groups: readonly DayGroup[],
+  day: string,
+  today: string,
+  labels: DayGroupLabels,
+  locale: string,
+): DayGroup[] {
+  if (groups.some((g) => g.key === day)) return groups as DayGroup[];
+  const gone = day < today;
+  let at = groups.findIndex((g) =>
+    g.key === OVERDUE_KEY ? gone : g.key > day,
+  );
+  if (at < 0) at = groups.length;
+  const out = groups.slice();
+  out.splice(at, 0, {
+    key: day,
+    label: day === today
+      ? labels.today
+      : (formatDayLabel(day, today, labels, locale) ?? day),
+    urgency: gone ? "past" : day === today ? "today" : "future",
+    rows: [],
+  });
   return out;
 }
 

@@ -56,6 +56,9 @@ import {
   agendaItems,
   attentionBadge,
   fillEmptyDays,
+  withDay,
+  AGENDA_ALL_DAYS_AHEAD,
+  OVERDUE_KEY,
   groupByDay,
   isClosedTask,
   type DayGroup,
@@ -865,9 +868,13 @@ export function Workspace(props: {
   const [agendaMode, setAgendaMode] = createSignal<AgendaMode>(
     AGENDA_COLUMNS ? loadAgendaMode() : "list",
   );
-  // A day the sidebar's mini calendar jumped to, so the agenda's empty
-  // days reach it (`fillEmptyDays`); dropped when the agenda is left.
+  // How far ahead the agenda's empty days run (`fillEmptyDays`): moved
+  // on as the scroll nears the end (`extendAgenda`) and by a mini
+  // calendar jump, so the days ahead never run out. `agendaPicked` is
+  // the day the mini calendar jumped to, which has a section whatever is
+  // on it (`withDay`). Both dropped when the agenda is left.
   const [agendaReach, setAgendaReach] = createSignal<string | null>(null);
+  const [agendaPicked, setAgendaPicked] = createSignal<string | null>(null);
   // The agenda's days on screen, shaded on the mini calendar; null
   // while it is not open (the view clears it as it goes).
   const [agendaRange, setAgendaRange] = createSignal<DayRange | null>(null);
@@ -875,7 +882,10 @@ export function Workspace(props: {
   // there, and is not shown while it is on screen.
   const [todayPlace, setTodayPlace] = createSignal<TodayPlace>("here");
   createEffect(() => {
-    if (view().kind !== "upcoming") setAgendaReach(null);
+    if (view().kind !== "upcoming") {
+      setAgendaReach(null);
+      setAgendaPicked(null);
+    }
   });
   const upcomingGroups = createMemo((): DayGroup[] => {
     const today = todayStamp(nowMs());
@@ -887,18 +897,33 @@ export function Workspace(props: {
       tomorrow: m().calendar.tomorrow,
     };
     const lingering = agendaLinger(now).ids;
+    // The past reads a year back, or as far as the picked day.
+    const picked = agendaPicked();
+    let floor = addDaysToStamp(today, -AGENDA_PAST_DAYS);
+    if (picked !== null && picked < floor) floor = picked;
     const groups = groupByDay(
       docs.calendarItems(),
       today,
       labels,
       locale(),
-      addDaysToStamp(today, -AGENDA_PAST_DAYS),
+      floor,
       (it) => lingering.has(it.id),
     );
-    return hideEmptyDays()
+    const days = hideEmptyDays()
       ? groups
       : fillEmptyDays(groups, today, labels, locale(), undefined, agendaReach());
+    return picked === null ? days : withDay(days, picked, today, labels, locale());
   });
+  // The agenda's scroll is near its end: two more weeks of empty days
+  // after the last one. Nothing while empty days are hidden, where the
+  // agenda ends at the last day something is on.
+  const extendAgenda = () => {
+    if (hideEmptyDays()) return;
+    const groups = untrack(upcomingGroups);
+    const last = groups[groups.length - 1]?.key;
+    if (!last || last === OVERDUE_KEY) return;
+    setAgendaReach(addDaysToStamp(last, AGENDA_ALL_DAYS_AHEAD + 1));
+  };
   // One timeout for the linger group to move; re-armed as a close
   // extends it. Only while the agenda is the view.
   createEffect(() => {
@@ -3346,7 +3371,13 @@ export function Workspace(props: {
   // a frame later so a freshly mounted agenda has laid out (and has
   // taken in the widened range) first.
   const showAgendaDay = (day: string) => {
-    setAgendaReach(day);
+    // Four weeks on from the day, so there is a pane of days under it
+    // and its header can sit at the top.
+    const reach = addDaysToStamp(day, 2 * (AGENDA_ALL_DAYS_AHEAD + 1));
+    batch(() => {
+      setAgendaPicked(day);
+      setAgendaReach((r) => (r !== null && r > reach ? r : reach));
+    });
     if (view().kind !== "upcoming") navigateTo({ kind: "upcoming" });
     requestAnimationFrame(() => {
       upcomingHandle?.scrollToDay(day);
@@ -4320,6 +4351,7 @@ export function Workspace(props: {
             onDraftInput={setDraftText}
             onDraftSettle={settleAgendaDraft}
             onVisibleRange={setAgendaRange}
+            onNearEnd={extendAgenda}
             onTodayPlace={setTodayPlace}
           />
           )}

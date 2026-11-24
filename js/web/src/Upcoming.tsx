@@ -164,8 +164,8 @@ export interface UpcomingImperative {
    *  Overdue's header or Today's when nothing is overdue. */
   scrollToToday(): void;
   /** The mini calendar's pick: put day `YYYY-MM-DD`'s header at the
-   *  top of the pane. A day with no section (empty days hidden) lands
-   *  on the next day that has one, else the last. */
+   *  top of the pane. A day with no section lands on the next day that
+   *  has one, else the last (the Workspace gives a picked day one). */
   scrollToDay(day: string): void;
 }
 
@@ -229,6 +229,9 @@ export function Upcoming(props: {
   /** The days on screen, first and last (`YYYY-MM-DD`), when they
    *  change; null on leaving. For the mini calendar's shading. */
   onVisibleRange?: (range: DayRange | null) => void;
+  /** Less than a pane of days is left past the end of the pane (read
+   *  with the range, not mid-flight): the Workspace adds days ahead. */
+  onNearEnd?: () => void;
   /** Where Today sits against the pane, when it changes (the header's
    *  "Today" points at it, and is gone while it is on screen). */
   onTodayPlace?: (place: TodayPlace) => void;
@@ -638,6 +641,18 @@ export function Upcoming(props: {
     lastPlace = place;
     props.onTodayPlace(place);
   };
+  // The end of the days is under a pane away. Not during a flight (its
+  // layout is the faked one, and new days would re-aim it); landing
+  // schedules another read.
+  const publishNearEnd = () => {
+    if (!props.onNearEnd || !hostEl?.isConnected || flying) return;
+    const pane = cols ? hostEl.clientWidth : hostEl.clientHeight;
+    if (pane === 0) return;
+    const left = cols
+      ? hostEl.scrollWidth - hostEl.scrollLeft - pane
+      : hostEl.scrollHeight - hostEl.scrollTop - pane;
+    if (left < pane) props.onNearEnd();
+  };
   let rangeFrame = 0;
   const scheduleRange = () => {
     if (rangeFrame) return;
@@ -645,6 +660,7 @@ export function Upcoming(props: {
       rangeFrame = 0;
       publishRange();
       publishTodayPlace();
+      publishNearEnd();
     });
   };
   createEffect(() => {

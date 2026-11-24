@@ -402,7 +402,12 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
 - **Empty days** (web, 2026-11-22): by default every day from today on
   has a section, to the later of the last placed day and two weeks ahead
   (`fillEmptyDays`); a past day never shows empty, only when something
-  is on it. "Hide empty days" in
+  is on it. The days ahead do not run out (2026-11-25, not
+  browser-checked): with less than a pane of days left under the pane,
+  two more weeks are added (`Upcoming`'s `onNearEnd`, the Workspace's
+  `agendaReach`), back to the default range when the agenda is left.
+  The past does not grow this way, and nothing is added while empty
+  days are hidden. "Hide empty days" in
   the view's filter menu (a device preference, unchecked by default, not
   counted as a filter and not cleared by Clear) shows only the days
   something is on. An empty day is its heading over a blank row-height
@@ -476,10 +481,12 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   the top of the sidebar, above the nav list, for orientation. It is the date pickers' corvu
   grid (`MonthGrid.tsx`) with nothing selected and today marked. A
   click on a day opens the agenda with that day's header at the top of
-  the pane. With empty days shown, the agenda's range widens ahead to
-  take in a future picked day until the agenda is left. With them
-  hidden, or for an empty past day, the jump lands on the next day that
-  has a section. "Show mini calendar" in the
+  the pane. The picked day always has a section, empty if nothing is
+  on it, until the agenda is left (2026-11-25, `withDay`): a past day
+  too, the one case of an empty past day, a day with empty days hidden,
+  and a day more than a year back, which moves the past's floor back to
+  it. With empty days shown the range also runs four weeks on from a
+  picked day, so its header can reach the top. "Show mini calendar" in the
   sidebar's blank-space context menu (beside "Show list counts") shows
   and hides it, a device preference (shown by default). The URL
   does not change: the `upcoming_<day>` anchor (§URLs) stays unbuilt.

@@ -10,6 +10,7 @@ import {
   attentionBadge,
   dropOnDay,
   fillEmptyDays,
+  withDay,
   groupByDay,
   isoWeekNumber,
   weekStarts,
@@ -557,6 +558,35 @@ describe("fillEmptyDays", () => {
     const back = fillEmptyDays([], TODAY, LABELS, "en", undefined, "2026-09-01");
     expect(back[0]!.key).toBe(TODAY);
     expect(back[back.length - 1]!.key).toBe("2026-09-22");
+  });
+
+  test("a picked day gets its own empty section, a past one before Overdue", () => {
+    const groups = groupByDay(
+      [
+        item("past", { when: "2026-09-06" }, { event: true }),
+        item("late", { when: "2026-09-01" }),
+        item("soon", { when: "2026-09-11" }),
+      ],
+      TODAY,
+      LABELS,
+      "en",
+      "2025-09-09",
+    );
+    const keys = (day: string) =>
+      withDay(groups, day, TODAY, LABELS, "en").map((g) => g.key);
+    expect(keys("2026-09-07")).toEqual([
+      "2026-09-06", "2026-09-07", "overdue", TODAY, "2026-09-11",
+    ]);
+    expect(keys("2026-09-02")[0]).toBe("2026-09-02");
+    expect(keys("2026-09-10")).toEqual([
+      "2026-09-06", "overdue", TODAY, "2026-09-10", "2026-09-11",
+    ]);
+    expect(keys("2026-12-01").at(-1)).toBe("2026-12-01");
+    const past = withDay(groups, "2026-09-07", TODAY, LABELS, "en")[1]!;
+    expect(past.urgency).toBe("past");
+    expect(past.rows).toEqual([]);
+    // Already there: the same groups back.
+    expect(withDay(groups, "2026-09-11", TODAY, LABELS, "en")).toBe(groups);
   });
 
   test("reaches past two weeks to the last placed day", () => {
