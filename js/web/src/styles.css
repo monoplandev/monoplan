@@ -51,10 +51,14 @@
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
   /* Today's number in the month grids and today's agenda heading: a
-     yellow highlighter fill under black text, flipped in the dark theme to a faint
-     yellow wash under the pastel as text. */
-  --calendar-today-bg: #fdffb3;
+     yellow disc (behind the number, beside the heading), paler in the
+     dark theme, and the number's black on it. */
+  --calendar-today-bg: #ffc882;
   --calendar-today-text: #000;
+  /* TEMP trial: the today mark's shape (a mask). From Tabler Icons by
+     Paweł Kuna, MIT:
+     https://github.com/tabler/tabler-icons/blob/master/LICENSE */
+  --calendar-today-shape: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.81 2c2.018 0 3.478 1.232 3.874 3.129l.016.089l.172-.057c.34-.104.684-.16 1.055-.175l.227-.005c2.09 0 3.925 1.93 3.925 4.094c0 1.095-.51 2.087-1.364 2.835l-.118.098l.06.048c.88.737 1.36 1.605 1.416 2.656l.006.213c0 2.24-1.739 4.094-3.925 4.094c-.445 0-.923-.084-1.374-.233l-.043.193c-.395 1.736-1.806 2.933-3.662 3.016l-.208.005c-2.018 0-3.477-1.232-3.873-3.13l-.03-.161l-.011.006a4.1 4.1 0 0 1-1.26.243l-.226.005c-2.09 0-3.925-1.93-3.925-4.094c0-1.096.51-2.087 1.378-2.84l.073-.062l-.03-.023c-.88-.737-1.359-1.605-1.415-2.656l-.006-.213c0-2.239 1.74-4.094 3.925-4.094c.44 0 .92.098 1.391.27l.036.013l.008-.048c.331-1.84 1.776-3.125 3.7-3.211z'/%3E%3C/svg%3E");
   --dnd-select-bg: #dbeafe;
   /* Divider under a selected row: a blue-grey a step darker than the
      selection fill so the row's edge still reads against it. */
@@ -100,8 +104,7 @@
   --error-text: #f87171;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
-  --calendar-today-bg: color-mix(in srgb, #fdffb3 16%, var(--bg));
-  --calendar-today-text: #fdffb3;
+  --calendar-today-bg: #fdffb3;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #293a5b;
@@ -555,12 +558,19 @@ body {
   color: var(--text-muted);
 }
 
-/* Today's heading in the mini calendar's today highlight. */
-.upcoming-day[data-urgency="today"] .upcoming-day-label {
+/* Today's heading led by a disc in the mini calendar's today yellow. */
+.upcoming-day[data-urgency="today"] .upcoming-day-label::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 6px;
+  position: relative;
+  top: 2px;
+  /* Drawn at 120% without taking more room in the line. */
+  transform: scale(1.2);
   background: var(--calendar-today-bg);
-  color: var(--calendar-today-text);
-  border-radius: 3px;
-  padding: 2px 6px;
+  mask: var(--calendar-today-shape) center / contain no-repeat;
 }
 
 /* The blank slot of an empty day, one row high: the day's drop
@@ -4724,8 +4734,25 @@ button.file-name:hover {
 
 .calendar-cell-trigger[data-today] {
   font-weight: 500;
-  background: var(--calendar-today-bg);
   color: var(--calendar-today-text);
+  position: relative;
+  isolation: isolate;
+}
+
+/* The today disc behind today's number. Off under a selection or a preview, which fill the cell. */
+.calendar-cell-trigger[data-today]::before {
+  content: "";
+  position: absolute;
+  /* 120% of the cell: the mark spills 10% past each edge. */
+  inset: -10%;
+  z-index: -1;
+  background: var(--calendar-today-bg);
+  mask: var(--calendar-today-shape) center / contain no-repeat;
+}
+
+.calendar-cell-trigger[data-today][data-selected]::before,
+.calendar-cell-trigger[data-today][data-preview]::before {
+  display: none;
 }
 
 .calendar-cell-trigger[data-selected] {
