@@ -230,7 +230,7 @@ export function Upcoming(props: {
    *  change; null on leaving. For the mini calendar's shading. */
   onVisibleRange?: (range: DayRange | null) => void;
   /** Where Today sits against the pane, when it changes (the header's
-   *  "Today" points at it, and greys out while it is on screen). */
+   *  "Today" points at it, and is gone while it is on screen). */
   onTodayPlace?: (place: TodayPlace) => void;
 }) {
   const { m, locale } = useAppI18n();

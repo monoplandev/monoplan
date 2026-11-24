@@ -872,7 +872,7 @@ export function Workspace(props: {
   // while it is not open (the view clears it as it goes).
   const [agendaRange, setAgendaRange] = createSignal<DayRange | null>(null);
   // Where Today is against the agenda's pane: the header's "Today" points
-  // there, and is disabled while it is on screen.
+  // there, and is not shown while it is on screen.
   const [todayPlace, setTodayPlace] = createSignal<TodayPlace>("here");
   createEffect(() => {
     if (view().kind !== "upcoming") setAgendaReach(null);
@@ -4044,14 +4044,13 @@ export function Workspace(props: {
             </Show>
             {/* The calendar's "Today": back to where the view opens
                 (Overdue's header, else Today's), as the Mac toolbar's.
-                Its arrow points the way there; disabled while Today is
+                Its arrow points the way there; not shown while Today is
                 on screen. */}
-            <Show when={view().kind === "upcoming"}>
+            <Show when={view().kind === "upcoming" && todayPlace() !== "here"}>
               <button
                 type="button"
                 class="icon-button header-text-button today-button"
                 tabIndex={-1}
-                disabled={todayPlace() === "here"}
                 data-place={todayPlace()}
                 data-layout={agendaMode()}
                 onClick={() => {

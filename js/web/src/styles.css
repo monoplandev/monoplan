@@ -547,6 +547,11 @@ body {
   color: var(--text-muted);
 }
 
+/* Today's heading in the mini calendar's today red. */
+.upcoming-day[data-urgency="today"] .upcoming-day-label {
+  color: var(--calendar-today);
+}
+
 /* The blank slot of an empty day, one row high: the day's drop
    target-to-be. */
 .upcoming-day-slot {
@@ -974,11 +979,6 @@ body {
 
 .today-button-arrow {
   display: inline-flex;
-}
-
-/* On Today: no arrow, its room kept so the header does not shift. */
-.today-button[data-place="here"] .today-button-arrow {
-  visibility: hidden;
 }
 
 .today-button[data-place="after"] .today-button-arrow svg {
