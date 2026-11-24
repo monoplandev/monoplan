@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use argon2::Argon2;
 use argon2::password_hash::PasswordHasher;
 use clap::{Parser, Subcommand};
+use monoplan_server::files::{BlobStore, DirStore, spawn_purge_task};
 use monoplan_server::{AppState, Config, build_info, router};
 
 #[derive(Parser, Debug)]
@@ -66,10 +67,13 @@ async fn main() -> anyhow::Result<()> {
         .await?
         .with_secure_cookies(cfg.secure_cookies)
         .with_snapshot_threshold_blobs(cfg.snapshot_threshold_blobs)
-        .with_max_workspaces(cfg.max_workspaces);
+        .with_max_workspaces(cfg.max_workspaces)
+        .with_blob_store(BlobStore::Dir(DirStore::open(cfg.attachments_path())?))
+        .with_max_account_file_bytes(cfg.max_account_file_bytes);
     if let Some(password_hash) = cfg.admin_password_hash.as_deref() {
         state = state.with_admin_password_hash(password_hash)?;
     }
+    spawn_purge_task(state.clone());
     let app = router(state);
 
     let addr = cfg.bind_addr()?;

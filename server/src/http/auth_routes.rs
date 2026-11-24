@@ -358,6 +358,10 @@ pub async fn delete(
     // account merely belonged to close for the account only.
     let mut told = 0;
     for doc_id in &deleted.purged_docs {
+        // Attachment rows went in the transaction; the bytes go here.
+        if let Err(err) = state.blobs.delete_doc(*doc_id).await {
+            tracing::error!(doc_id = %doc_id, error = %err, "account deleted but not a doc's attachment bytes");
+        }
         told += state
             .sync_sessions
             .close_doc(*doc_id, Some(auth.device_id), "account deleted");

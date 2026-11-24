@@ -372,6 +372,9 @@ fn purge_rows_under_doc(tx: &Transaction<'_>, doc_bytes: &[u8]) -> rusqlite::Res
     for sql in [
         "DELETE FROM updates WHERE doc_id = ?",
         "DELETE FROM snapshots WHERE doc_id = ?",
+        // The stored bytes go after the commit, by the route
+        // (`BlobStore::delete_doc`).
+        "DELETE FROM doc_files WHERE doc_id = ?",
         "DELETE FROM device_doc_frontiers WHERE doc_id = ?",
         "DELETE FROM doc_sequences WHERE doc_id = ?",
         "DELETE FROM doc_invites WHERE doc_id = ?",

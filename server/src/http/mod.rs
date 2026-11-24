@@ -5,6 +5,7 @@ mod admin_routes;
 mod auth_routes;
 mod device_routes;
 mod doc_routes;
+mod file_routes;
 mod invite_routes;
 #[cfg(feature = "bundled-web")]
 mod web;
@@ -12,7 +13,7 @@ mod web;
 use axum::Router;
 use axum::http::{Method, header};
 use axum::middleware;
-use axum::routing::{any, delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post, put};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::state::AppState;
@@ -28,6 +29,7 @@ pub fn router(state: AppState) -> Router {
             Method::GET,
             Method::POST,
             Method::PATCH,
+            Method::PUT,
             Method::DELETE,
             Method::OPTIONS,
         ])
@@ -76,6 +78,21 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/docs/{doc_id}/members/{account_id}",
             delete(invite_routes::remove_member_route),
+        )
+        .route("/api/docs/{doc_id}/files", get(file_routes::list))
+        .route(
+            "/api/docs/{doc_id}/files/{file_id}",
+            put(file_routes::upload)
+                .get(file_routes::download)
+                .delete(file_routes::tombstone),
+        )
+        .route(
+            "/api/docs/{doc_id}/files/{file_id}/restore",
+            post(file_routes::restore),
+        )
+        .route(
+            "/api/docs/{doc_id}/files/{file_id}/copy",
+            post(file_routes::copy),
         )
         .route("/api/invites/{invite_id}", get(invite_routes::fetch))
         .route(

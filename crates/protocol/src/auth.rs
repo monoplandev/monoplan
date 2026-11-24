@@ -317,6 +317,50 @@ pub struct DocsListResponse {
     pub memberships: Vec<Membership>,
 }
 
+// ---------- /api/docs/:doc_id/files (attachments) ----------
+//
+// The blob itself travels as a raw body (`PUT` / `GET` on
+// `/api/docs/:doc_id/files/:file_id`), never JSON. File ids are 32
+// lowercase hex characters, chosen by the attaching client.
+
+/// One stored blob, as the server sees it: no name, no type, no owner
+/// item (those live in the doc, sealed).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredFile {
+    pub id: String,
+    /// Stored (ciphertext) size.
+    pub bytes: u64,
+    /// Unix millis.
+    pub created_at: i64,
+    /// Set once tombstoned; the row and its bytes are purged after the
+    /// grace period unless restored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<i64>,
+}
+
+/// `GET /api/docs/:doc_id/files`. Tombstoned rows count towards neither
+/// figure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilesListResponse {
+    /// Stored bytes in this doc.
+    pub doc_bytes: u64,
+    /// The quota figures: stored bytes across every doc the owner of
+    /// this one owns, against the owner's allowance. Sent to that owner
+    /// only; a member learns the allowance is full from a 507.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_bytes: Option<u64>,
+    pub files: Vec<StoredFile>,
+}
+
+/// `POST /api/docs/:doc_id/files/:file_id/copy`: duplicate the blob
+/// into another doc the caller is a member of, under the same id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopyFileRequest {
+    pub to_doc_id: String,
+}
+
 // ---------- invites (sharing links) ----------
 //
 // A sharing link is a 32-byte secret in a URL fragment. The client

@@ -164,3 +164,20 @@ CREATE TABLE snapshots (
   created_at            INTEGER NOT NULL
 );
 CREATE INDEX snapshots_doc_id_idx ON snapshots (doc_id, id DESC);
+
+-- One row per stored attachment blob (spec/attachments.md). The row is
+-- the record: the bytes sit in the blob store under <doc_id>/<id>, and
+-- a stored object with no row is garbage. The server cannot read the
+-- doc, so it never knows whether a blob is still referenced; clients
+-- tombstone (`deleted_at`) and the purge task removes the row and the
+-- bytes after the grace period. Quota sums `bytes` over live rows.
+CREATE TABLE doc_files (
+  doc_id        BLOB NOT NULL REFERENCES docs(id),
+  id            BLOB NOT NULL,                                 -- 16 bytes, client-chosen
+  bytes         INTEGER NOT NULL,                              -- stored (ciphertext) size
+  device_id     BLOB,                                          -- uploader; not surfaced to clients
+  created_at    INTEGER NOT NULL,
+  deleted_at    INTEGER,                                       -- tombstone; purged after the grace period
+  PRIMARY KEY (doc_id, id)
+);
+CREATE INDEX doc_files_deleted_at_idx ON doc_files (deleted_at) WHERE deleted_at IS NOT NULL;

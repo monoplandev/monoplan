@@ -5,6 +5,7 @@ use argon2::{Argon2, PasswordHash, PasswordVerifier};
 
 use crate::config::DEFAULT_MAX_WORKSPACES;
 use crate::db::Db;
+use crate::files::{BlobStore, DEFAULT_MAX_ACCOUNT_FILE_BYTES, DirStore, MemStore};
 use crate::sync::{SnapshotCoordinator, SyncSessions};
 
 #[derive(Clone)]
@@ -19,6 +20,11 @@ pub struct AppState {
     /// Mirror of `Config::max_workspaces`: the most docs one account
     /// may own, Home included.
     pub max_workspaces: u32,
+    /// Where attachment bytes live (`spec/attachments.md`).
+    pub blobs: BlobStore,
+    /// Mirror of `Config::max_account_file_bytes`: the most stored
+    /// attachment bytes one account may hold across the docs it owns.
+    pub max_account_file_bytes: u64,
     admin_auth: Option<AdminAuth>,
 }
 
@@ -47,8 +53,16 @@ impl AdminAuth {
 }
 
 impl AppState {
+    /// Attachments default to an `attachments` directory beside the
+    /// database; `with_blob_store` overrides.
     pub async fn open(path: &Path) -> anyhow::Result<Self> {
+        let attachments = path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join("attachments");
         Ok(Self {
+            blobs: BlobStore::Dir(DirStore::new(attachments)),
+            max_account_file_bytes: DEFAULT_MAX_ACCOUNT_FILE_BYTES,
             db: Db::open(path).await?,
             clock: Arc::new(SystemClock),
             sync_sessions: SyncSessions::new(),
@@ -61,6 +75,8 @@ impl AppState {
 
     pub async fn open_in_memory() -> anyhow::Result<Self> {
         Ok(Self {
+            blobs: BlobStore::Mem(MemStore::default()),
+            max_account_file_bytes: DEFAULT_MAX_ACCOUNT_FILE_BYTES,
             db: Db::open_in_memory().await?,
             clock: Arc::new(SystemClock),
             sync_sessions: SyncSessions::new(),
@@ -78,6 +94,16 @@ impl AppState {
 
     pub fn with_max_workspaces(mut self, max: u32) -> Self {
         self.max_workspaces = max;
+        self
+    }
+
+    pub fn with_blob_store(mut self, blobs: BlobStore) -> Self {
+        self.blobs = blobs;
+        self
+    }
+
+    pub fn with_max_account_file_bytes(mut self, max: u64) -> Self {
+        self.max_account_file_bytes = max;
         self
     }
 

@@ -142,7 +142,23 @@ CREATE TABLE snapshots (
   created_at            INTEGER NOT NULL
 );
 CREATE INDEX snapshots_doc_id_idx ON snapshots (doc_id, id DESC);
+
+-- One row per stored attachment blob (attachments.md). The bytes sit in
+-- the blob store under <doc_id>/<id>, never in sqlite; the row is the
+-- record, and a stored object with no row is garbage.
+CREATE TABLE doc_files (
+  doc_id        BLOB NOT NULL REFERENCES docs(id),
+  id            BLOB NOT NULL,              -- 16 bytes, client-chosen
+  bytes         INTEGER NOT NULL,           -- stored (ciphertext) size
+  device_id     BLOB,                       -- uploader; not surfaced to clients
+  created_at    INTEGER NOT NULL,
+  deleted_at    INTEGER,                    -- tombstone; purged after the grace period
+  PRIMARY KEY (doc_id, id)
+);
+CREATE INDEX doc_files_deleted_at_idx ON doc_files (deleted_at) WHERE deleted_at IS NOT NULL;
 ```
+
+Attachment bytes live outside the database, behind the blob store (`attachments.md` §Server): by default an `attachments` directory beside the database file, one subdirectory per doc. The quota is the doc owner's: the sum of `bytes` over rows with `deleted_at IS NULL` across every doc that account owns. Deleting a doc or an account deletes the rows in the same transaction as everything else under the doc, and the stored bytes right after it.
 
 Snapshot rows form one linear **chain** per doc: a full snapshot (`from_seq IS NULL`) followed by zero or more deltas, each linking to the row before it (`from_seq = previous.up_to_seq`, enforced in the insert transaction). The bootstrap payload is the chain from the latest full row onward, in `id` order. The latest row's `compaction_floor_seq` is the doc's floor. See `sync-protocol.md` §"Snapshot orchestration" for shapes and cadence.
 

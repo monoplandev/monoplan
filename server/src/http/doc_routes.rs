@@ -97,6 +97,12 @@ pub async fn delete(
             let told = state
                 .sync_sessions
                 .close_doc(doc_id, Some(auth.device_id), "doc deleted");
+            // The rows went with the doc; the bytes go now, no grace
+            // period. A failure leaves objects no row names (garbage),
+            // not a reason to fail a delete that already happened.
+            if let Err(err) = state.blobs.delete_doc(doc_id).await {
+                tracing::error!(doc_id = %doc_id, error = %err, "doc deleted but not its attachment bytes");
+            }
             tracing::info!(doc_id = %doc_id, live_sessions_closed = told, "doc deleted");
             Ok(())
         }

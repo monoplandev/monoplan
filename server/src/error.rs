@@ -32,6 +32,15 @@ pub enum ApiError {
     #[error("workspace limit reached: an account can own at most {0} workspaces")]
     WorkspaceLimit(u32),
 
+    #[error("Content-Length is required")]
+    LengthRequired,
+
+    #[error("file too large: at most {0} bytes")]
+    PayloadTooLarge(u64),
+
+    #[error("attachment quota reached: a workspace owner can store at most {0} bytes of files")]
+    Quota(u64),
+
     #[error("recovery not enrolled")]
     RecoveryNotEnrolled,
 
@@ -57,6 +66,9 @@ impl ApiError {
             Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             Gone(_) => (StatusCode::GONE, "gone"),
             WorkspaceLimit(_) => (StatusCode::FORBIDDEN, "workspace_limit"),
+            LengthRequired => (StatusCode::LENGTH_REQUIRED, "length_required"),
+            PayloadTooLarge(_) => (StatusCode::PAYLOAD_TOO_LARGE, "too_large"),
+            Quota(_) => (StatusCode::INSUFFICIENT_STORAGE, "quota"),
             RecoveryNotEnrolled => (StatusCode::FORBIDDEN, "recovery_not_enrolled"),
             RecoverySessionInvalid => (StatusCode::FORBIDDEN, "recovery_session_invalid"),
             Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),

@@ -1,6 +1,8 @@
 # Attachments
 
-Status: **plan, not built. Decided 2026-11-24.**
+Status: **decided 2026-11-24. Phase 1 (server) built the same day; the rest is
+plan.** What the server does that this text did not first say is under
+"As built".
 
 Files attached to items. The bytes are online-only: they live on the server as
 encrypted blobs and are fetched on demand. The doc carries only the metadata
@@ -133,8 +135,7 @@ CREATE TABLE doc_files (
 );
 ```
 
-In `001_init.sql`, edited in place. `storage.md` takes the authoritative copy
-when this is built.
+In `001_init.sql`, edited in place; `storage.md` holds the authoritative copy.
 
 ### Routes
 
@@ -147,23 +148,35 @@ GET    /api/docs/:doc_id/files/:file_id           -- the blob; 410 if tombstoned
 DELETE /api/docs/:doc_id/files/:file_id           -- tombstone (any member)
 POST   /api/docs/:doc_id/files/:file_id/restore   -- clear a tombstone (any member)
 POST   /api/docs/:doc_id/files/:file_id/copy      -- { to_doc_id }; member of both
-GET    /api/docs/:doc_id/files                    -- { used_bytes, limit_bytes, files: [{ id, bytes, created_at, deleted_at? }] }
+GET    /api/docs/:doc_id/files                    -- { doc_bytes, used_bytes?, limit_bytes?, files: [{ id, bytes, created_at, deleted_at? }] }
 ```
 
 - **PUT** is a single request, no chunking or resume. `Content-Length` is
   required and capped at 25 MiB plus the 40 bytes of nonce and tag: 413 over
-  the cap, 507 `quota` if it would take the doc over its limit. The body is
+  the cap, 507 `quota` if it would take the doc's owner over their allowance. The body is
   stored, then the row is inserted (the directory backend writes a temp file
   and renames it into place, and removes stray temp files at startup). An id that already exists is 409, which a
   retrying client treats as success (the id is random and its own).
-- **Quota** is per doc: the sum of `bytes` over rows that are not tombstoned,
-  against one server-wide `max_doc_file_bytes` (default 1 GiB). No per-account
-  plan logic.
+- **Quota** belongs to the **doc owner's account**, pooled over every doc
+  that account owns (decided 2026-11-24, replacing a per-doc limit: with a
+  per-doc limit each new workspace was more space). It is the sum of `bytes`
+  over the rows that are not tombstoned in those docs, against one
+  server-wide `max_account_file_bytes` (default 1 GiB). A member's upload to
+  a shared workspace counts against its owner, not the member. The list
+  route gives `doc_bytes` (this doc alone) to every member, and the pooled
+  `used_bytes` / `limit_bytes` to the owner only: to a member they would
+  say something about workspaces the member is not in. No per-account
+  override and no plan logic yet.
 - **Tombstone, never delete.** `DELETE` stamps `deleted_at`. A purge task
   removes the row and the bytes **30 days** later. `restore` clears the stamp
-  inside that window.
+  inside that window, and is 507 `quota` if the bytes no longer fit: a
+  tombstoned row does not count towards the quota, so an unchecked restore
+  would let delete / upload / restore store without bound.
 - **Copy** duplicates the row and the bytes into the target doc under the same
-  id, counted against the target's quota. 409 if the id exists there.
+  id, counted against the target owner's quota. 409 if the id exists there.
+  A copy between two docs of one owner needs room for both, because the
+  source is only tombstoned afterwards; a nearly full account cannot move a
+  large file between its own workspaces.
 - **Cascade.** Deleting a doc (`DELETE /api/docs/:id`, account deletion)
   removes its rows and its stored objects outright, no grace period. A removed
   member loses every route from the commit, as with the doc itself, and keeps
@@ -231,20 +244,53 @@ after the window.
 - Thumbnails and inline previews in rows.
 - Files shared between items; attachments on a duplicate.
 - Chunked or resumable upload; a cap above 25 MiB.
-- Per-account quota and plans.
+- A per-account override of the allowance, and plans.
 - An export archive that includes the files.
 
 ## Build order
 
 | Phase | Scope |
 |---|---|
-| 1 | Server: table, blob store interface with the directory backend, the six routes, quota, purge task, doc / account delete cascade; integration tests |
+| 1 | **Built 2026-11-24.** Server: table, blob store interface with the directory backend, the six routes, quota, purge task, doc / account delete cascade; integration tests |
 | 2 | Core: `files` container, mutations, `ItemView.files`, events, hard-delete cleanup, export form, cross-doc adopt / release |
 | 3 | Web: attach, list, open, rename, remove in the task surface; the row count; the owner's sweep |
 | 4 | CLI (`item attach` / `item files`), then the typed api / FFI and the iOS and macOS item surfaces |
 | 5 | Notes images on top (`notes-plan.md` phase 4) |
 
+## As built
+
+Phase 1, the server (`server/src/files/`, `server/src/http/file_routes.rs`,
+tests in `server/tests/files.rs`).
+
+- **Blob store** is an enum, `BlobStore::{Dir, Mem}`, not a trait object; S3
+  is a third variant. `Mem` exists so the other test suites need no directory.
+- **Config.** `attachments_dir` (`MONOPLAN_ATTACHMENTS_DIR`; unset means an
+  `attachments` directory beside the database file, which is already inside
+  the writable path of the systemd unit and the Docker volume) and
+  `max_account_file_bytes` (`MONOPLAN_MAX_ACCOUNT_FILE_BYTES`).
+- **PUT refusals come from the headers**, before the body is read: 411
+  `length_required` with no `Content-Length`, 413 `too_large` over the cap,
+  400 under 40 bytes (not a sealed file), 400 for an id that is not 32
+  lowercase hex characters, 409 for an id already there (tombstoned
+  included), 507 `quota`. The quota is checked again in the transaction that
+  inserts the row; bytes stored for a row that then fails that check are
+  removed.
+- **Restore checks the quota** (above). Restoring a live file is a no-op 200.
+- **Repeating `DELETE` keeps the first stamp**, so it cannot extend the grace
+  period.
+- **Copy** of a tombstoned source is 410.
+- **Purge** runs at startup and hourly. It deletes the row first (re-checking
+  the tombstone, so a restore that lands mid-pass keeps the file) and the
+  bytes second. With PUT's bytes-then-row order this means a crash can leave
+  a stored object with no row, never a live row with no bytes. Nothing
+  collects such objects yet.
+- **Bodies are buffered whole** in memory on the way in and out, which the
+  25 MiB cap allows.
+
 ## Open
+
+- A scrub for stored objects that have no row (a crash between store and
+  insert, or between a purge's row delete and its byte delete).
 
 - Whether the item surface fetches image attachments on open to show them, or
   waits for a click like any other file.

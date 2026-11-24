@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::files::DEFAULT_MAX_ACCOUNT_FILE_BYTES;
 use crate::sync::snapshot::SNAPSHOT_THRESHOLD_BLOBS;
 
 const DEFAULT_CONFIG_PATH: &str = "local/server.toml";
@@ -56,6 +57,17 @@ pub struct Config {
     /// the value never touches workspaces that already exist.
     #[serde(default = "default_max_workspaces")]
     pub max_workspaces: u32,
+    /// Directory the attachment bytes are stored under, one
+    /// subdirectory per doc (`spec/attachments.md`). Unset: an
+    /// `attachments` directory beside the database file.
+    #[serde(default)]
+    pub attachments_dir: Option<PathBuf>,
+    /// Most stored attachment bytes one account may hold across every
+    /// doc it owns (uploads by other members of those docs included).
+    /// `PUT` refuses with 507 `quota` past it. Lowering the value never touches files
+    /// that already exist.
+    #[serde(default = "default_max_account_file_bytes")]
+    pub max_account_file_bytes: u64,
 }
 
 impl Default for Config {
@@ -68,6 +80,8 @@ impl Default for Config {
             snapshot_threshold_blobs: default_snapshot_threshold_blobs(),
             admin_password_hash: None,
             max_workspaces: default_max_workspaces(),
+            attachments_dir: None,
+            max_account_file_bytes: default_max_account_file_bytes(),
         }
     }
 }
@@ -107,6 +121,10 @@ fn default_snapshot_threshold_blobs() -> u64 {
 
 fn default_max_workspaces() -> u32 {
     DEFAULT_MAX_WORKSPACES
+}
+
+fn default_max_account_file_bytes() -> u64 {
+    DEFAULT_MAX_ACCOUNT_FILE_BYTES
 }
 
 impl Config {
@@ -152,8 +170,27 @@ impl Config {
                 .parse()
                 .unwrap_or_else(|e| panic!("invalid MONOPLAN_MAX_WORKSPACES={v:?}: {e}"));
         }
+        if let Ok(v) = std::env::var("MONOPLAN_ATTACHMENTS_DIR") {
+            config.attachments_dir = (!v.is_empty()).then(|| PathBuf::from(v));
+        }
+        if let Ok(v) = std::env::var("MONOPLAN_MAX_ACCOUNT_FILE_BYTES") {
+            config.max_account_file_bytes = v
+                .parse()
+                .unwrap_or_else(|e| panic!("invalid MONOPLAN_MAX_ACCOUNT_FILE_BYTES={v:?}: {e}"));
+        }
 
         (config, source)
+    }
+
+    /// Where the directory blob store keeps its bytes: the configured
+    /// directory, or `attachments` beside the database.
+    pub fn attachments_path(&self) -> PathBuf {
+        self.attachments_dir.clone().unwrap_or_else(|| {
+            self.db
+                .parent()
+                .unwrap_or_else(|| Path::new(""))
+                .join("attachments")
+        })
     }
 
     pub fn bind_addr(&self) -> anyhow::Result<SocketAddr> {
