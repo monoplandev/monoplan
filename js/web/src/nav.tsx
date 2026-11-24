@@ -1,4 +1,5 @@
 import {
+  children,
   createEffect,
   createMemo,
   createSignal,
@@ -319,6 +320,10 @@ export function Nav(props: {
   // frame (with a couple of retries) so a list created and opened in the
   // same tick has its row in the DOM before we look for it. A section
   // expanding bumps `sectionTick` so the row it reveals is scrolled to.
+  // Resolved once: a JSX prop is a getter that builds its elements on
+  // every read, so `<Show when={props.footer}>{props.footer}</Show>`
+  // mounted the footer twice (and with it two auto-opening auth dialogs).
+  const footer = children(() => props.footer);
   let navScrollEl!: HTMLDivElement;
   const [sectionTick, setSectionTick] = createSignal(0);
   const revealActiveNav = () => {
@@ -478,8 +483,8 @@ export function Nav(props: {
         )}
       </For>
       </div>
-      <Show when={props.footer}>
-        <div class="nav-footer">{props.footer}</div>
+      <Show when={footer()}>
+        <div class="nav-footer">{footer()}</div>
       </Show>
       <ConfirmDialog
         open={emptyBinConfirmOpen()}
