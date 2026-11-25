@@ -3872,14 +3872,6 @@ button.file-name:hover {
   height: 12px;
 }
 
-/* The section under the title: the list picker's row, then the assignee
-   band on a shared workspace, stacked like the date rows. */
-.task-dialog-filing {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 /* Control row under the title: list picker, then the "more" menu. In the
    780px modal they run inline at their natural widths; the narrow shells
    below rearrange them. */
@@ -3927,6 +3919,13 @@ button.file-name:hover {
 
 .task-panel .task-dialog-badges .task-dialog-list-caret {
   margin-left: auto;
+}
+
+/* The assignee's section: a column, so the band's inline-flex anchor
+   stretches to the full width instead of shrinking to its text. */
+.task-dialog-assignee-section {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Assignee band (AssigneeField.tsx): a row of its own in the manner of

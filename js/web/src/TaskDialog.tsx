@@ -1624,11 +1624,9 @@ export function TaskDialog(props: {
             />
           </section>
 
-          {/* Where the item sits and whose it is, in one section: the
-              move-to-list picker (the pin toggle lives in the header),
-              then, on a shared workspace, the assignee band: who the
-              item is assigned to, or a muted "Assign". */}
-          <section class="task-dialog-section task-dialog-filing">
+          {/* Where the item sits: the move-to-list picker (the pin
+              toggle lives in the header). */}
+          <section class="task-dialog-section">
             <div class="task-dialog-badges">
               <ListPicker
                 options={listOptions}
@@ -1637,8 +1635,15 @@ export function TaskDialog(props: {
                 onChange={onListChange}
               />
             </div>
-            <Show when={assigneeShown() && assignment()}>
-              {(a) => (
+          </section>
+
+          {/* Whose it is, on a shared workspace, in a section of its own
+              (ruled off from the list above and the date below): the
+              assignee band, who the item is assigned to or a muted
+              "Assign". */}
+          <Show when={assigneeShown() && assignment()}>
+            {(a) => (
+              <section class="task-dialog-section task-dialog-assignee-section">
                 <AssigneeField
                   assignment={a}
                   onChange={(who) => {
@@ -1648,9 +1653,9 @@ export function TaskDialog(props: {
                   open={assignOpen}
                   setOpen={setAssignOpen}
                 />
-              )}
-            </Show>
-          </section>
+              </section>
+            )}
+          </Show>
 
           {/* Date section: the planned date between the badges and the
               place, always present. */}

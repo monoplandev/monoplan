@@ -140,8 +140,9 @@ struct ItemPanel: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// List, a rule, planned date, its time under it when timed, a
-    /// rule, then the place. The date and
+    /// List, a rule, the assignee on a shared workspace, a rule,
+    /// planned date, its time under it when timed, a rule, then the
+    /// place. The date and
     /// place rows are always there, muted when empty. Each row is a
     /// box (`panelBox`): the list's is always filled, the others' only
     /// under the pointer.
@@ -157,6 +158,8 @@ struct ItemPanel: View {
             // place fields' included.
             .zIndex(3)
             if let assignment, assignment.others || item.item.assignee != nil {
+                // Whose it is, ruled off from where it sits.
+                PanelRule().padding(.vertical, 4)
                 AssigneeField(
                     assignee: item.item.assignee, assignment: assignment,
                     locked: item.item.binnedAt != nil
