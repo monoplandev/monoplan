@@ -1186,11 +1186,12 @@ final class MainWindowModel: ObservableObject {
 
     /// What the item panel's assignee row offers for an item of
     /// `workspace` (spec/sharing-plan.md "Assignment"): nil for Home,
-    /// where there is no row; otherwise whether the workspace has
-    /// anyone else in it, and its members when the list is known.
+    /// where there is no row; any other workspace has one, a
+    /// workspace of one included, with its members when the list is
+    /// known.
     func assignment(workspace: String?) -> PanelAssignment? {
         guard let workspace, sharedWorkspaceName(workspace) != nil else { return nil }
-        return PanelAssignment(others: hasOtherMembers(workspace), members: members[workspace])
+        return PanelAssignment(members: members[workspace])
     }
 
     /// Mark a dated item an event, or a task again (`Engine.setEvent`).

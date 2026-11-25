@@ -568,12 +568,12 @@ struct ItemView: View {
     /// (spec/sharing-plan.md "Assignment"), with a divider under it. A
     /// plain row, no box until it is pressed; a tap hands the sheet to
     /// the assignee editor (`ItemAssigneeEditor`), as the list field
-    /// does with its own. Not shown on the Personal workspace, nor on a
-    /// workspace of one unless the item is already assigned (so that
-    /// can be cleared). A binned item stays as it is.
+    /// does with its own. Not shown on the Personal workspace; any
+    /// other workspace has it, a workspace of one included. A binned
+    /// item stays as it is.
     @ViewBuilder
     private func assigneeField(_ item: ItemInfo) -> some View {
-        if let docId = ref.docId, workspace != nil, model.hasOtherMembers(docId) || item.assignee != nil {
+        if let docId = ref.docId, workspace != nil {
             let name = item.assignee.map { ItemAssigneeEditor.name(of: $0, in: model.members[docId]) }
             Button {
                 edit(.assignee)

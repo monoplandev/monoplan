@@ -157,7 +157,7 @@ struct ItemPanel: View {
             // Its list floats over every row under it, the date and
             // place fields' included.
             .zIndex(3)
-            if let assignment, assignment.others || item.item.assignee != nil {
+            if let assignment {
                 // Whose it is, ruled off from where it sits.
                 PanelRule().padding(.vertical, 4)
                 AssigneeField(
@@ -573,11 +573,10 @@ struct PanelGlyph: View {
     }
 }
 
-/// What the assignee row needs of the item's workspace: whether anyone
-/// else is in it, and its members when the list is known (nil while it
-/// is loading or the server cannot be reached).
+/// What the assignee row needs of the item's workspace: its members
+/// when the list is known (nil while it is loading or the server
+/// cannot be reached).
 struct PanelAssignment {
-    let others: Bool
     let members: [WorkspaceMember]?
 }
 

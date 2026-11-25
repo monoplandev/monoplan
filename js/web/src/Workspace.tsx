@@ -1206,13 +1206,11 @@ export function Workspace(props: {
     return { accountId: who, email: members.emailOf(item.docId, who) ?? null };
   };
   // What the task surface's assignee control offers: the doc's members,
-  // oneself first. Null (no control) on Home, and on a workspace known
-  // to have one member unless the item is already assigned, so a stale
-  // assignment can still be seen and cleared.
+  // oneself first. Null (no control) on Home only: any other workspace
+  // offers it, a workspace of one included (oneself, before sharing).
   const assignmentOf = (item: ItemView): Assignment | null => {
     if (item.docId === docs.homeDocId) return null;
     const assignee = assigneeOf(item);
-    if (assignee === null && members.countOf(item.docId) === 1) return null;
     const me = session.session().anonymous ? null : session.session().accountId;
     const people = members.listOf(item.docId);
     return {
