@@ -12,7 +12,9 @@ import { createSyncedApp } from "../src/sync/store.ts";
 import {
   applySuggestionChange,
   raisedDate,
+  shownSuggestion,
   suggestionChange,
+  suggestionFor,
   suggestionLabel,
   titleDate,
 } from "../src/whenSuggest.ts";
@@ -173,5 +175,52 @@ describe("applying a title change", () => {
       opts,
     );
     expect(other.app.state.itemsById[other.id]?.whenSuggested).toBeUndefined();
+  });
+
+  test("an item with a day and no time takes the phrase's time, on that day", () => {
+    const { app, id } = appWith("dentist");
+    app.setItemWhen(id, "2026-12-01");
+    // A time alone, and a phrase naming another day: the picked day stands.
+    applySuggestionChange(app, id, view(app, id), "dentist 8:30", null, opts);
+    expect(app.state.itemsById[id]?.whenSuggested).toBe("2026-12-01T08:30");
+    applySuggestionChange(
+      app,
+      id,
+      view(app, id),
+      "dentist friday 9:15",
+      keyOf("dentist 8:30"),
+      opts,
+    );
+    expect(app.state.itemsById[id]?.whenSuggested).toBe("2026-12-01T09:15");
+    // A phrase that lost its time has nothing left to add.
+    applySuggestionChange(
+      app,
+      id,
+      view(app, id),
+      "dentist friday",
+      keyOf("dentist friday 9:15"),
+      opts,
+    );
+    expect(app.state.itemsById[id]?.whenSuggested).toBeUndefined();
+
+    // Yes sets the time on the picked day.
+    app.setItemWhenSuggested(id, "2026-12-01T08:30");
+    app.acceptItemWhenSuggestion(id);
+    expect(app.state.itemsById[id]?.when).toBe("2026-12-01T08:30");
+    // A date with a time takes no suggestion.
+    applySuggestionChange(app, id, view(app, id), "dentist 10:00", null, opts);
+    expect(app.state.itemsById[id]?.whenSuggested).toBeUndefined();
+  });
+
+  test("what a phrase suggests, and what shows, beside a date", () => {
+    expect(suggestionFor("2026-11-06T08:30", null)).toBe("2026-11-06T08:30");
+    expect(suggestionFor("2026-11-06T08:30", "2026-12-01")).toBe("2026-12-01T08:30");
+    expect(suggestionFor("2026-11-06", "2026-12-01")).toBeNull();
+    expect(suggestionFor("2026-11-06T08:30", "2026-12-01T10:00")).toBeNull();
+
+    expect(shownSuggestion("2026-11-06", null)).toBe("2026-11-06");
+    expect(shownSuggestion("2026-12-01T08:30", "2026-12-01")).toBe("2026-12-01T08:30");
+    expect(shownSuggestion("2026-11-06T08:30", "2026-12-01")).toBeNull();
+    expect(shownSuggestion("2026-12-01T08:30", "2026-12-01T10:00")).toBeNull();
   });
 });

@@ -611,10 +611,24 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   - Yes moves the value into `when` (one commit, one undo step; the
     default hour's `duration` beside a timed value, as any `when` write
     gives). Setting a date any other way also clears the suggestion.
-  - It shows only in the task surface, on an open item with no `when`:
-    in the dates band in place of the date input, shaped like it, with
-    a tick and a ✕ at the right edge (a "Set date…" from a menu still
-    opens the field). While a title is being
+  - **A day with no time takes the phrase's time** (2026-11-25, web
+    only, not browser-checked): on an item whose `when` is all-day, a
+    phrase with a time ("dentist 8:30", "friday night") suggests that
+    time on the day already picked, whatever day the phrase names:
+    the picked day stands. A phrase with no time adds nothing, and a
+    timed `when` takes no suggestion. The register then holds the
+    picked day with the time, beside the `when`; a surface shows it
+    only when it is a time on the `when`'s own day (`shownSuggestion`).
+    Picking another day in the task surface carries a pending time over
+    to it (the core clears the register on the write, the surface
+    raises it again in the same undo step). iOS, macOS and the CLI
+    still show a suggestion only with no `when`.
+  - It shows only in the task surface, on an open item with no `when`
+    (or, as above, a day with no time):
+    in the dates band in a row of its own above the date input
+    (2026-11-25; it stood in the input's place before, which hid a
+    picked day), shaped like it, with
+    a tick and a ✕ at the right edge. While a title is being
     typed there the question shows live, before anything is written,
     and is answered straight away (Yes sets the date, No just marks the
     wording as asked). Lists and boards show nothing of it (an in-row

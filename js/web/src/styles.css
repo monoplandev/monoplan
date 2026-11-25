@@ -3806,11 +3806,11 @@ button.file-name:hover {
   cursor: pointer;
 }
 
-/* A date suggestion (`WhenSuggestion.tsx`), in the date's place in the
-   task surface. Built on the date field's own parts
+/* A date suggestion (`WhenSuggestion.tsx`), a row above the date field
+   in the task surface. Built on the date field's own parts
    (`.task-dialog-when-anchor`, `.task-dialog-when-icon`) and the input's
    box (`.task-dialog-when-input`: 32px, same padding and radius,
-   inherited font), so it sits exactly where the date would. Orange, no
+   inherited font), so it lines up with the date under it. Orange, no
    border: the today hue marks it as not yet a date. */
 .when-suggestion {
   height: 32px;

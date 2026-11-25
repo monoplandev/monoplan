@@ -46,7 +46,13 @@ import {
   spansDays,
   whenTime,
 } from "./format.tsx";
-import { applySuggestionChange, raisedDate, titleDate } from "./whenSuggest.ts";
+import {
+  applySuggestionChange,
+  raisedDate,
+  shownSuggestion,
+  suggestionFor,
+  titleDate,
+} from "./whenSuggest.ts";
 import { WhenSuggestion } from "./WhenSuggestion.tsx";
 import { useAppI18n, statusLabel } from "./i18n.tsx";
 import {
@@ -916,7 +922,8 @@ export function TaskDialog(props: {
     const t = text().trim();
     if (!t) return null;
     // The date the title suggests and nobody has answered: it goes on
-    // the item as its pending suggestion, unless a date was picked.
+    // the item as its pending suggestion; beside a picked day, only
+    // its time does (`suggestionFor`), and beside a picked time nothing.
     const suggested = typedDate();
     const at = nw.index ?? 0;
     // A Done capture can't hold a Focus ref (auto-remove-on-Done,
@@ -935,7 +942,9 @@ export function TaskDialog(props: {
       if (n) props.app.setItemNotes(id, n);
       const w = newWhen();
       if (w) props.app.setItemWhen(id, fixedWhen(w, newZone()));
-      else if (suggested && !nw.done) props.app.setItemWhenSuggested(id, suggested.when);
+      // After the date: setting one clears the register.
+      const pending = suggested && !nw.done ? suggestionFor(suggested.when, w) : null;
+      if (pending) props.app.setItemWhenSuggested(id, pending);
       if (w && newEvent()) props.app.setItemEvent(id, true);
       const dur = newDuration();
       if (w && dur) props.app.setItemDuration(id, dur);
@@ -1332,8 +1341,15 @@ export function TaskDialog(props: {
   const onWhenChange = (value: string | null) => {
     const it = item();
     if (it) {
-      // The fields edit the zone's clock, so the write names the zone.
-      props.app.setItemWhen(it.id, value && fixedWhen(value, it.whenZone));
+      // A stored suggestion's time outlives a day picked here: the
+      // write clears the register (the core's rule), so it is raised
+      // again on the new day, in the same undo step.
+      const carried = value && it.whenSuggested ? suggestionFor(it.whenSuggested, value) : null;
+      props.app.withActionBatch(() => {
+        // The fields edit the zone's clock, so the write names the zone.
+        props.app.setItemWhen(it.id, value && fixedWhen(value, it.whenZone));
+        if (carried) props.app.setItemWhenSuggested(it.id, carried);
+      });
       return;
     }
     setNewWhen(value);
@@ -1365,13 +1381,16 @@ export function TaskDialog(props: {
   // phrase in the title as it reads right now that has not been asked
   // about outranks the item's stored one: it is what the stored one is
   // about to become. A done item (or a log-a-completion capture) takes
-  // no plan from its title.
+  // no plan from its title. Beside a day with no time, only the time of
+  // either is offered, on that day.
   const typedDate = () => (vDone() ? null : raisedDate(text(), askedKey(), dateOpts()));
   const suggestedWhen = createMemo<string | null>(() => {
-    if (muted() || vWhen() !== null) return null;
+    if (muted()) return null;
+    const current = vWhen();
+    if (current !== null && whenTime(current)) return null;
     const typed = typedDate();
-    if (typed) return typed.when;
-    const stored = item()?.whenSuggested ?? null;
+    if (typed) return suggestionFor(typed.when, current);
+    const stored = shownSuggestion(item()?.whenSuggested, current);
     // Stored, but its phrase has just been typed out of the title: gone
     // as soon as the title is saved, so not shown.
     if (stored && askedKey() !== null && !titleDate(text(), dateOpts())) return null;
@@ -1636,31 +1655,26 @@ export function TaskDialog(props: {
           {/* Date section: the planned date between the badges and the
               place, always present. */}
           <section class="task-dialog-section task-dialog-dates">
-            {/* An unanswered date suggestion stands in the date's place
-                until it is answered; "Set date…" from a menu still
-                reaches the field under it. */}
-            <Show
-              when={!props.whenOpen() && suggestedWhen()}
-              fallback={
-                <WhenField
-                  when={fieldWhen}
-                  duration={vDuration}
-                  muted={muted}
-                  onChange={onWhenChange}
-                  zone={vZone}
-                  onZoneChange={onZoneChange}
-                  onDurationChange={onDurationChange}
-                  event={vEvent}
-                  onEventChange={onEventChange}
-                  open={props.whenOpen}
-                  setOpen={props.setWhenOpen}
-                />
-              }
-            >
+            {/* An unanswered date suggestion sits above the date field
+                until it is answered; the field under it stays in use. */}
+            <Show when={suggestedWhen()}>
               {(w) => (
                 <WhenSuggestion when={w()} onYes={onSuggestionYes} onNo={onSuggestionNo} />
               )}
             </Show>
+            <WhenField
+              when={fieldWhen}
+              duration={vDuration}
+              muted={muted}
+              onChange={onWhenChange}
+              zone={vZone}
+              onZoneChange={onZoneChange}
+              onDurationChange={onDurationChange}
+              event={vEvent}
+              onEventChange={onEventChange}
+              open={props.whenOpen}
+              setOpen={props.setWhenOpen}
+            />
           </section>
 
           {/* Place section under the dates, always present: a typed

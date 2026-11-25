@@ -5,7 +5,8 @@ import { useAppI18n } from "./i18n.tsx";
 import { suggestionLabel } from "./whenSuggest.ts";
 
 // A date suggestion (`whenSuggest.ts`): the date a phrase in the title
-// resolved to, standing in the date's place in the task surface. It has
+// resolved to, in a row of its own above the date field in the task
+// surface (2026-11-25; it stood in the field's place before). It has
 // the date input's anatomy (`WhenField`: the calendar glyph inset on
 // the left, a 32px line of text in the surface's own font, controls
 // inset on the right) and reads "Suggested: Fri 14 Nov 08:30" in

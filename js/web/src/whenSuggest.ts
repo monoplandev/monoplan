@@ -1,7 +1,7 @@
 // Date suggestions read out of a title. A date phrase typed into a title
 // ("dentist friday 8:30") never changes the title and never sets a date
 // by itself: it raises a question, "Suggested: Fri 14 Nov 08:30", shown in orange
-// where the date would be, which the user answers yes or no
+// above the date field, which the user answers yes or no
 // (`WhenSuggestion.tsx`). Decided 2026-11-13, replacing the inline token
 // that cut the words out of the title (`spec/calendar-plan.md`, "Typed
 // date phrases").
@@ -22,6 +22,11 @@
 //   - It shows only in the task surface, on an open item with no
 //     `when`; lists and boards carry no trace of it. Setting a date any
 //     other way clears it (the core does that).
+//   - An item with a day but no time still takes the *time* of a phrase
+//     (2026-11-25): "dentist 8:30" on an item dated Friday suggests
+//     Friday 08:30, whatever day the phrase itself names or implies
+//     (`suggestionFor`). The picked day stands; a phrase with no time
+//     has nothing to add, and a timed `when` takes no suggestion.
 //
 // This module is the rule, pure; the editors (`TaskDialog.tsx`, `Row.tsx`, `Workspace.tsx`) decide when a
 // title counts as changed.
@@ -74,6 +79,34 @@ export function suggestionChange(
   return d.key !== baselineKey ? { set: d.when } : null;
 }
 
+/** What a phrase's value `phraseWhen` suggests for an item whose date
+ *  is `current`: all of it when there is no date, its time on the day
+ *  already picked when the date is all-day and the phrase has a time,
+ *  nothing otherwise. */
+export function suggestionFor(
+  phraseWhen: string,
+  current: string | null | undefined,
+): string | null {
+  if (!current) return phraseWhen;
+  if (current.length !== 10 || phraseWhen.length <= 10) return null;
+  return current + phraseWhen.slice(10);
+}
+
+/** The stored suggestion as a surface shows it beside the date
+ *  `current`: as it is with no date; beside an all-day date only a time
+ *  on that same day (anything else is a leftover of a concurrent
+ *  write); never beside a timed one. */
+export function shownSuggestion(
+  stored: string | null | undefined,
+  current: string | null | undefined,
+): string | null {
+  if (!stored) return null;
+  if (!current) return stored;
+  return current.length === 10 && stored.length > 10 && stored.startsWith(current)
+    ? stored
+    : null;
+}
+
 /** The slice of an item the rule reads. */
 export interface SuggestableItem {
   when?: string;
@@ -82,9 +115,10 @@ export interface SuggestableItem {
 }
 
 /** Apply a title change to item `id`'s suggestion register. `item` is
- *  the item as it stands; a closed item or one with a date takes no
- *  suggestion (a date is a plan, and neither has one to make). Writes
- *  only on a real change, so it adds no empty undo step. */
+ *  the item as it stands; a closed item or one with a time takes no
+ *  suggestion (a date is a plan, and neither has one to make), and one
+ *  with a day only takes a time (`suggestionFor`). Writes only on a
+ *  real change, so it adds no empty undo step. */
 export function applySuggestionChange(
   app: { setItemWhenSuggested(id: string, when: string | null): void },
   id: string,
@@ -93,13 +127,16 @@ export function applySuggestionChange(
   baselineKey: string | null,
   opts: TitleDateOptions,
 ): void {
-  if (item.closed || item.when) return;
+  if (item.closed) return;
   const change = suggestionChange(text, baselineKey, opts);
   if (change === null) return;
-  if (change === "clear") {
+  // A new phrase with nothing to add to the date in place (no time, or
+  // the date has one) drops the suggestion the old phrase raised.
+  const set = change === "clear" ? null : suggestionFor(change.set, item.when);
+  if (set === null) {
     if (item.whenSuggested) app.setItemWhenSuggested(id, null);
-  } else if (change.set !== item.whenSuggested) {
-    app.setItemWhenSuggested(id, change.set);
+  } else if (set !== item.whenSuggested) {
+    app.setItemWhenSuggested(id, set);
   }
 }
 
