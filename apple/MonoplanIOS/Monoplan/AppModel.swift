@@ -54,11 +54,11 @@ final class AppModel: ObservableObject {
     /// owed or on today, as the web's Upcoming badge. Read with the
     /// agenda.
     @Published private(set) var calendarCount = 0
-    /// The workspaces hidden from the Calendar (`Engine.calendarHiddenDocs`,
-    /// Home's synced `calendar_hidden_docs`): the Calendar filter's
-    /// workspace checks, read with the agenda. The web's and the Mac's
-    /// filter write the same set.
-    @Published private(set) var calendarHidden: [String] = []
+    /// The Calendar filter's checked workspaces (`Engine.calendarCheckedDocs`,
+    /// read off Home's synced hidden set, which the web's and the Mac's
+    /// filter write too), read with the agenda; none checked is every
+    /// workspace.
+    @Published private(set) var calendarCheckedDocs: [String] = []
     /// The Starred lens (`Engine.starred`): Home's curated order with
     /// its cross-workspace entries resolved.
     @Published private(set) var starred: [StarredItem] = []
@@ -1111,15 +1111,6 @@ final class AppModel: ObservableObject {
 
     // MARK: Calendar filter (`AgendaView.filterMenu`)
 
-    /// The Calendar filter's checked workspaces, read off the hidden
-    /// set as the web and the Mac read it: nothing hidden is no filter
-    /// (nothing checked); otherwise the open workspaces not hidden.
-    var calendarCheckedDocs: [String] {
-        let open = (session?.docs ?? []).map(\.docId)
-        guard open.contains(where: calendarHidden.contains) else { return [] }
-        return open.filter { !calendarHidden.contains($0) }
-    }
-
     /// Check or uncheck a workspace in the Calendar filter.
     func toggleCalendarWorkspace(_ docId: String) {
         var checked = calendarCheckedDocs
@@ -1131,24 +1122,13 @@ final class AppModel: ObservableObject {
         setCalendarCheckedDocs([])
     }
 
-    /// Write a checked set back as hidden workspaces: none checked (or
-    /// all of them) hides nothing. Only the workspaces that change are
-    /// written, in one call, then the agenda is read again.
+    /// Make `checked` the filter's checked workspaces
+    /// (`Engine.setCalendarCheckedDocs`, which works out the hidden
+    /// set), shown at once, then the agenda read again.
     private func setCalendarCheckedDocs(_ checked: [String]) {
-        let hidden = calendarHidden
-        let changes: [(String, Bool)] = (session?.docs ?? []).compactMap { doc in
-            let hide = !checked.isEmpty && !checked.contains(doc.docId)
-            return hide != hidden.contains(doc.docId) ? (doc.docId, hide) : nil
-        }
-        guard !changes.isEmpty else { return }
-        // Shown at once; the reread after the write confirms it.
-        calendarHidden = hidden.filter { id in !changes.contains { $0.0 == id && !$0.1 } }
-            + changes.filter(\.1).map(\.0)
-        call({ engine in
-            for (docId, hide) in changes {
-                try engine.setCalendarDocHidden(docId: docId, hidden: hide)
-            }
-        }) { [weak self] result in
+        guard checked != calendarCheckedDocs else { return }
+        calendarCheckedDocs = checked
+        call({ try $0.setCalendarCheckedDocs(checked: checked) }) { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
                 lastError = String(localized: "could not update items: \(engineErrorMessage(error))")
@@ -1279,38 +1259,39 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// How far ahead the agenda reaches: far enough to be the whole
-    /// future. There is no recurrence, so dated items are a finite set,
-    /// the builder walks every item whatever the horizon, and the list
-    /// builds its rows lazily; a window would save nothing.
-    static let agendaDays: UInt32 = 36_500
+    /// How far ahead the widget's agenda reaches: far enough to be the
+    /// whole future, as the Calendar page's (`Engine.calendar`).
+    static let widgetAgendaDays: UInt32 = 36_500
 
-    /// How far back the agenda reaches: the days gone by that the
-    /// Calendar page shows above Today. Bounded, unlike the future,
-    /// because the past only grows and the whole read is diffed on
-    /// every change.
-    static let agendaPastDays: UInt32 = 365
+    /// The Calendar page's device preferences, for `Engine.calendar`:
+    /// its filter menu's "Hide Empty Days" and "Hide Past Days".
+    static var calendarOptions: CalendarOptions {
+        let defaults = UserDefaults.standard
+        return CalendarOptions(
+            hideEmptyDays: defaults.bool(forKey: agendaHideEmptyDaysKey),
+            hidePastDays: defaults.bool(forKey: agendaHidePastDaysKey))
+    }
 
-    /// `Engine.agenda`: every workspace merged, in date order: each
-    /// non-empty day gone by (the events that happened on it), Today
-    /// (the tasks done today at its end), then each non-empty day to
-    /// the end of what is dated. Workspaces hidden from the calendar
-    /// (the Home doc's setting) are already left out. The read from
-    /// today on goes to the widget as JSON, which decodes it in its
+    /// `Engine.calendar`: the Calendar page's days, every workspace
+    /// merged (those hidden from the calendar left out), shaped by the
+    /// engine: the days gone by that something was on, Overdue, Today,
+    /// the days ahead (the empty ones per `calendarOptions`), a span on
+    /// each of its days. The plain agenda from today on goes to the
+    /// widget as JSON (`Engine.agendaJson`), which decodes it in its
     /// own process.
     func refreshAgenda() {
-        let days = Self.agendaDays
-        let past = Self.agendaPastDays
+        let days = Self.widgetAgendaDays
+        let options = Self.calendarOptions
         read({
             (
-                groups: try $0.agenda(days: days, pastDays: past), json: try $0.agendaJson(days: days),
-                count: Int(try $0.calendarCount()), hidden: try $0.calendarHiddenDocs()
+                groups: try $0.calendar(options: options), json: try $0.agendaJson(days: days),
+                count: Int(try $0.calendarCount()), checked: try $0.calendarCheckedDocs()
             )
         }) { [weak self] read, error in
             if let read {
                 self?.agenda = read.groups
                 self?.calendarCount = read.count
-                self?.calendarHidden = read.hidden
+                self?.calendarCheckedDocs = read.checked
                 Self.leaveWidgetSnapshot(read.json)
             }
             self?.agendaError = error

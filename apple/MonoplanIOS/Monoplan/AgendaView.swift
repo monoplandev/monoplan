@@ -1,11 +1,9 @@
 // The Agenda page, pushed from Home (which owns the navigation stack
-// and the item sheet): the engine's agenda projection (`Engine.agenda`,
-// spec/cli.md, with a horizon far enough out to be the whole future,
-// `AppModel.agendaDays`) as sections: Overdue while something is
-// (tasks whose planned day has passed), Today,
-// then every day ahead, empty ones too, for two weeks and on to the
-// last day with rows, as the Mac's Calendar has them
-// (`AgendaGroup.filled`). The filter menu's "Hide Empty Days"
+// and the item sheet): the engine's Calendar read (`Engine.calendar`,
+// days shaped in Rust as the Mac's Calendar has them) as sections:
+// Overdue while something is (tasks whose planned day has passed),
+// Today, then every day ahead, empty ones too, for two weeks and on to
+// the last day with rows. The filter menu's "Hide Empty Days"
 // (`agendaHideEmptyDaysKey`, a device preference) leaves out every
 // empty day but Today, and its "Hide Past Days" (`agendaHidePastDaysKey`)
 // the days gone by. Under them, once there is more than one, the
@@ -13,8 +11,8 @@
 // (`AppModel.calendarCheckedDocs`). A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 //
-// The days gone by (`AppModel.agendaPastDays`: the events that
-// happened on them) are sections above
+// The days gone by (a year of them: the events that happened on them)
+// are sections above
 // Overdue and Today. The page opens with Today's header at the top
 // (Overdue's, when it is there), so they are reached by scrolling up,
 // and the "Today" button comes back to the same place; Today's section
@@ -35,13 +33,6 @@ struct AgendaView: View {
     @AppStorage(agendaHideEmptyDaysKey) private var hideEmptyDays = false
     @AppStorage(agendaHidePastDaysKey) private var hidePastDays = false
 
-    /// The days shown: every day from Today on, or under "Hide Empty
-    /// Days" only Today and the days something is on; under "Hide Past
-    /// Days" none before Today.
-    private var groups: [AgendaGroup] {
-        let read = hidePastDays ? AgendaGroup.upcoming(model.agenda) : model.agenda
-        return hideEmptyDays ? AgendaGroup.nonEmpty(read) : AgendaGroup.filled(read)
-    }
 
     /// Nothing to show: no rows anywhere, and either the empty days
     /// are hidden or there is no Today yet (no read). With the empty
@@ -56,7 +47,7 @@ struct AgendaView: View {
             if isEmpty {
                 emptyState
             } else {
-                AgendaCollection(groups: groups, model: model, todayJumps: todayJumps, openItem: openItem) {
+                AgendaCollection(groups: model.agenda, model: model, todayJumps: todayJumps, openItem: openItem) {
                     model.refreshAgenda()
                 }
                 // Under the bars, as a list is: the collection view
@@ -81,6 +72,9 @@ struct AgendaView: View {
         .toolbar(removing: .title)
         .refreshable { model.refreshAgenda() }
         .onAppear { model.refreshAgenda() }
+        // The engine shapes the days (`AppModel.calendarOptions`).
+        .onChange(of: hideEmptyDays) { model.refreshAgenda() }
+        .onChange(of: hidePastDays) { model.refreshAgenda() }
     }
 
     /// The filter button: a menu with the view's two ticks, then the
@@ -201,7 +195,7 @@ struct AgendaRowView: View {
                         }
                         // Where it lives, with who it is assigned to
                         // ahead of those lines.
-                        if assignee != nil || row.spanDayLabel != nil || row.listName != nil || row.place != nil
+                        if assignee != nil || row.spanLabel != nil || row.listName != nil || row.place != nil
                             || row.docName != nil
                         {
                             HStack(alignment: .top, spacing: 5) {
@@ -212,9 +206,9 @@ struct AgendaRowView: View {
                                             "Assigned to \(assignee.email ?? String(localized: "A former member"))")
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    if let day = row.spanDayLabel {
+                                    if let day = row.spanLabel {
                                         // Which day of a multi-day span the row is.
-                                        Text("Day \(day)")
+                                        Text("Day \(Int(day))")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -261,7 +255,8 @@ struct AgendaRowView: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         // What the day holds of the row (`AgendaEntry.lane`).
                         switch row.lane {
-                        case .none: EmptyView()
+                        // Overdue says so in the note below instead.
+                        case .empty, .planned: EmptyView()
                         case .allDay:
                             Text("All day").font(.subheadline).foregroundStyle(.secondary)
                         case .start(let clock):

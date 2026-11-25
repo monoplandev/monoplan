@@ -388,9 +388,10 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var closes: [ItemListClose] = []
     /// The other lenses' rows, each read only while it is the one shown.
     @Published private(set) var agenda: [AgendaGroup] = []
-    /// The workspaces hidden from the Calendar (`Engine.calendarHiddenDocs`,
-    /// Home's synced set, the web Upcoming filter's), read with it.
-    @Published private(set) var calendarHidden: [String] = []
+    /// The Calendar filter's checked workspaces (`Engine.calendarCheckedDocs`,
+    /// read off Home's synced hidden set, the web Upcoming filter's),
+    /// read with it; none checked is every workspace.
+    @Published private(set) var calendarCheckedDocs: [String] = []
     /// Counts the presses of the toolbar's "Today": each one scrolls
     /// the Calendar back to Today's header, or Overdue's above it
     /// (`AgendaTable`).
@@ -512,11 +513,6 @@ final class MainWindowModel: ObservableObject {
     static let inbox = "inbox"
     /// `MONOPLAN_TIMING=1` logs each reload's timings to stderr.
     static let timing = ProcessInfo.processInfo.environment["MONOPLAN_TIMING"] != nil
-    /// Far enough out to be the whole future, as on iOS.
-    static let agendaDays: UInt32 = 36_500
-    /// How far back the Calendar reaches: the days gone by above
-    /// Today, a year of them, as on iOS (`AppModel.agendaPastDays`).
-    static let agendaPastDays: UInt32 = 365
     /// How many Done rows the lens reads first, newest first; more as
     /// its end is scrolled to (`loadMoreDone`).
     static let donePage = 200
@@ -752,7 +748,7 @@ final class MainWindowModel: ObservableObject {
         var starred: [StarredItem] = []
         var assigned: [AssignedRow] = []
         var agenda: [AgendaGroup] = []
-        var calendarHidden: [String] = []
+        var calendarChecked: [String] = []
         var done: [DoneRow] = []
         var doneLimit = 0
         var doneCount = 0
@@ -769,6 +765,7 @@ final class MainWindowModel: ObservableObject {
         guard visible, let calls = engine.calls else { return }
         let workspace = workspace, list = list, generation = generation, lens = lens
         let picked = selected, doneChoice = doneFilterChoice, doneLimit = doneLimit
+        let calendarOptions = Self.calendarOptions
         let asked = Date()
         var began = asked, ended = asked
         calls.run({ engine -> Snapshot in
@@ -809,8 +806,8 @@ final class MainWindowModel: ObservableObject {
             case .starred, .assigned, .bin:
                 break
             case .agenda:
-                snapshot.agenda = try engine.agenda(days: Self.agendaDays, pastDays: Self.agendaPastDays)
-                snapshot.calendarHidden = try engine.calendarHiddenDocs()
+                snapshot.agenda = try engine.calendar(options: calendarOptions)
+                snapshot.calendarChecked = try engine.calendarCheckedDocs()
             case .done:
                 // One read over every workspace, merged and filtered
                 // in Rust; the filter narrowed to the sections just
@@ -870,7 +867,7 @@ final class MainWindowModel: ObservableObject {
                 self.starred = snapshot.starred
                 self.assigned = snapshot.assigned
                 self.agenda = snapshot.agenda
-                self.calendarHidden = snapshot.calendarHidden
+                self.calendarCheckedDocs = snapshot.calendarChecked
                 self.done = snapshot.done
                 self.doneLoadedLimit = snapshot.doneLimit
                 self.doneCount = snapshot.doneCount
@@ -1504,17 +1501,14 @@ final class MainWindowModel: ObservableObject {
 
     // MARK: Calendar filter (`CalendarFilter.swift`)
 
-    /// The Calendar filter's checked workspaces, read off the hidden
-    /// set as the web reads it: nothing hidden is no filter (nothing
-    /// checked); otherwise the open workspaces not hidden.
-    var calendarCheckedDocs: [String] {
-        let open = sections.map(\.id)
-        guard open.contains(where: calendarHidden.contains) else { return [] }
-        return open.filter { !calendarHidden.contains($0) }
+    /// The Calendar's device preferences, for `Engine.calendar`: the
+    /// filter's "Hide Empty Days" and "Hide Past Days".
+    static var calendarOptions: CalendarOptions {
+        let defaults = UserDefaults.standard
+        return CalendarOptions(
+            hideEmptyDays: defaults.bool(forKey: agendaHideEmptyDaysKey),
+            hidePastDays: defaults.bool(forKey: agendaHidePastDaysKey))
     }
-
-    /// Whether any open workspace is hidden from the Calendar.
-    var calendarFiltered: Bool { !calendarCheckedDocs.isEmpty }
 
     /// Check or uncheck a workspace in the Calendar filter.
     func toggleCalendarWorkspace(_ docId: String) {
@@ -1527,24 +1521,13 @@ final class MainWindowModel: ObservableObject {
         setCalendarCheckedDocs([])
     }
 
-    /// Write a checked set back as hidden workspaces: none checked (or
-    /// all of them) hides nothing. Only the workspaces that change are
-    /// written, in one turn of the call queue.
+    /// Make `checked` the filter's checked workspaces
+    /// (`Engine.setCalendarCheckedDocs`, which works out the hidden set),
+    /// shown at once; the reload after the write confirms it.
     private func setCalendarCheckedDocs(_ checked: [String]) {
-        let hidden = calendarHidden
-        let changes: [(String, Bool)] = sections.compactMap { section in
-            let hide = !checked.isEmpty && !checked.contains(section.id)
-            return hide != hidden.contains(section.id) ? (section.id, hide) : nil
-        }
-        guard !changes.isEmpty else { return }
-        // Shown at once; the reload after the write confirms it.
-        calendarHidden = hidden.filter { id in !changes.contains { $0.0 == id && !$0.1 } }
-            + changes.filter(\.1).map(\.0)
-        write { engine in
-            for (docId, hide) in changes {
-                try engine.setCalendarDocHidden(docId: docId, hidden: hide)
-            }
-        }
+        guard checked != calendarCheckedDocs else { return }
+        calendarCheckedDocs = checked
+        write { engine in try engine.setCalendarCheckedDocs(checked: checked) }
     }
 
     /// Check or uncheck a workspace in the Done filter.
@@ -1957,14 +1940,14 @@ let inboxNewestFirstKey = "inboxNewestFirst"
 /// `UserDefaults` key of the Calendar's "Hide Empty Days" (the toolbar's
 /// filter button on the Calendar): set, only Today and the days
 /// something is on have a header; absent, every day from Today on does
-/// (`AgendaGroup.filled` in MonoplanCore). Display only, the web's
+/// (`Engine.calendar`'s `hideEmptyDays`). Display only, the web's
 /// `monoplan.agenda.hideEmptyDays`.
 let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
 
 /// `UserDefaults` key of the Calendar's "Hide Past Days" (under "Hide
 /// Empty Days" in the filter): set, the days gone by are left out and
-/// the Calendar starts at Overdue / Today (`AgendaGroup.upcoming` in
-/// MonoplanCore). Display only, the web's `monoplan.agenda.hidePastDays`.
+/// the Calendar starts at Overdue / Today (`Engine.calendar`'s
+/// `hidePastDays`). Display only, the web's `monoplan.agenda.hidePastDays`.
 let agendaHidePastDaysKey = "agendaHidePastDays"
 
 struct MainWindowView: View {
@@ -1976,10 +1959,6 @@ struct MainWindowView: View {
     /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
     /// Inbox's rows on screen, never the doc.
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
-    /// The device's Calendar preference (`agendaHideEmptyDaysKey`).
-    @AppStorage(agendaHideEmptyDaysKey) private var agendaHideEmptyDays = false
-    /// The device's Calendar preference (`agendaHidePastDaysKey`).
-    @AppStorage(agendaHidePastDaysKey) private var agendaHidePastDays = false
     /// The workspace whose Sharing sheet is up.
     @State private var sharing: SharingTarget?
     /// The workspace row under the pointer: its "…" and chevron show.
@@ -2452,10 +2431,9 @@ struct MainWindowView: View {
     /// is taller.
     private var agenda: some View {
         AgendaTable(
-            groups: agendaHidePastDays ? AgendaGroup.upcoming(model.agenda) : model.agenda,
+            groups: model.agenda,
             selected: model.selected?.id,
             todayJumps: model.todayJumps,
-            fillEmptyDays: !agendaHideEmptyDays,
             heading: Self.heading(for:),
             rowHeight: { agendaRowDetailed($0) ? 42 : 24 },
             row: { row in AnyView(agendaRow(row)) },
@@ -2481,7 +2459,7 @@ struct MainWindowView: View {
     /// Whether a Calendar row has its second line (who it is assigned
     /// to, where it lives, its place): such a row is taller.
     private func agendaRowDetailed(_ row: AgendaEntry) -> Bool {
-        agendaAssignee(row) != nil || row.spanDayLabel != nil || model.agendaListName(row) != nil
+        agendaAssignee(row) != nil || row.spanLabel != nil || model.agendaListName(row) != nil
             || !(row.place?.label ?? "").isEmpty
     }
 
@@ -2497,30 +2475,13 @@ struct MainWindowView: View {
         return (id, people.first { $0.accountId == id }?.email)
     }
 
-    /// Whether a Calendar row leads with a checkbox. An event's own
-    /// row does not while it is open (spec/events-plan.md: nothing asks
-    /// for the tick) or once its day has gone by (it is a record of
-    /// what was on): the event pill holds the box's place. One marked
-    /// done from today on shows the box, ticked.
-    static func agendaRowShowsCheck(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
-        guard row.event else { return true }
-        return row.state.isClosed && !agendaRowIsPast(row, today: today)
-    }
-
-    /// An event's own row on a day gone by: the only rows the past
-    /// days hold. (A task whose day has passed is in Overdue, not
-    /// there.) Judged by the row's day, so a span under way is past on
-    /// the days behind it and not on Today's.
-    static func agendaRowIsPast(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
-        guard row.event, let day = row.rowDay else { return false }
-        return day < today
-    }
-
     private func agendaRow(_ row: AgendaEntry) -> some View {
         // Muted: a done row, and every row of a day gone by, done or
         // not.
-        let done = row.state == .done || Self.agendaRowIsPast(row)
-        let check = Self.agendaRowShowsCheck(row)
+        let done = row.state == .done || row.past
+        // An event's row has the event pill instead while it is open
+        // or its day has gone by (`AgendaEntry.showsCheck`).
+        let check = row.showsCheck
         let listName = model.agendaListName(row)
         let place = row.place?.label ?? ""
         let detailed = agendaRowDetailed(row)
@@ -2533,8 +2494,7 @@ struct MainWindowView: View {
         return HStack(alignment: .rowTitle, spacing: 8) {
             // The tick sits on the text's line, not the row's middle.
             HStack(alignment: .rowTitle, spacing: 8) {
-                // An event's row has the event pill for a checkbox
-                // (`agendaRowShowsCheck`), drawn over the row below.
+                // The event pill is drawn over the row below.
                 if check {
                     ItemCheckButton(state: row.state) { model.setDone(workspace: row.docId, id: row.id, done: $0) }
                 } else {
@@ -2562,9 +2522,9 @@ struct MainWindowView: View {
                                     // the line's own gap.
                                     .padding(.trailing, -3)
                             }
-                            if let day = row.spanDayLabel {
+                            if let day = row.spanLabel {
                                 // Which day of a multi-day span the row is.
-                                Text("Day \(day)").lineLimit(1).fixedSize()
+                                Text("Day \(Int(day))").lineLimit(1).fixedSize()
                             }
                             if let listName {
                                 // The list's own icon, when it has one.
@@ -2583,24 +2543,19 @@ struct MainWindowView: View {
                 }
             }
             Spacer(minLength: 8)
-            switch row.tone {
-            case .overdue:
+            // What the day holds of the row (`AgendaEntry.lane`).
+            switch row.lane {
+            case .empty: EmptyView()
+            case .allDay: Text("All day").foregroundStyle(.secondary).fixedSize()
+            case .start(let clock):
+                Text(verbatim: clock).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+            case .until(let clock):
+                Text("until \(clock)").foregroundStyle(.secondary).monospacedDigit().fixedSize()
+            case .planned:
                 // The day it was scheduled for, as the other stamps are
                 // set; the Overdue header already says it is late.
                 if let day = Self.overdueDay(row) {
                     Text(verbatim: day).foregroundStyle(.secondary).monospacedDigit().fixedSize()
-                }
-            case .neutral: EmptyView()
-            }
-            if row.tone != .overdue {
-                // What the day holds of the row (`AgendaEntry.lane`).
-                switch row.lane {
-                case .none: EmptyView()
-                case .allDay: Text("All day").foregroundStyle(.secondary).fixedSize()
-                case .start(let clock):
-                    Text(verbatim: clock).foregroundStyle(.secondary).monospacedDigit().fixedSize()
-                case .until(let clock):
-                    Text("until \(clock)").foregroundStyle(.secondary).monospacedDigit().fixedSize()
                 }
             }
         }

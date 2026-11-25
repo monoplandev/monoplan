@@ -297,12 +297,13 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   section above Today (built 2026-11-13, `isSlippedTask` in
   `dayGroups.ts`). Oldest first by the raw `when`, then `created_at`.
  Rendered only when non-empty. The CLI `agenda` still folds
-  these into Today, leading it in the overdue tone, and so does the
-  engine's agenda the native apps read: their Calendar lifts those rows
-  out of Today's group into the section (`AgendaTable.swift`,
-  `AgendaCollection.swift`), and opens on the section's header and brings
-  the "Today" button back to it when it is there, since the days gone by
-  sit above it. The macOS tray and the iOS widget keep the fold.
+  these into Today, leading it in the overdue tone, and so do the
+  macOS tray and the iOS widget (`Engine.agenda`). The native Calendars
+  read `Engine.calendar` (`api::agenda::calendar`, since 2026-11-25),
+  which has Overdue as its own group (`AgendaGroup.overdue`) right
+  above Today; they open on the section's header and bring the "Today"
+  button back to it when it is there, since the days gone by sit above
+  it.
 - **Placement** of every other row: the `when` places the item on its
   day, ignoring one whose span is over.
 - **Spans** (web, built 2026-10-29): a `when` with a `duration` covers
@@ -330,12 +331,14 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   a stop. The CLI `agenda`, the macOS tray's days ahead and the iOS
   widget still place on the start day only. The Mac and iOS Calendars
   spread spans as the web does (2026-11-25, compiled, not yet run in
-  either app): `Engine.agenda` places through `build_agenda_spread`
+  either app): `Engine.calendar` places through `build_agenda_spread`
   (`AgendaQuery.spread`), each row with its `AgendaEntry.span`
-  (day, total); the row's day, the "Day 2" and the time lane are read
-  off it in MonoplanCore (`AgendaSpan.swift`: `rowDay`,
-  `spanDayLabel`, `lane`), so a selected item lands on its first row,
-  and the Mac's later rows of a span pick up no drag.
+  (day, total), and works out in Rust what each row means on its day
+  (`AgendaEntry.day`, `past`, `shows_check`, `span_label` for "Day 2",
+  `lane` for the time lane: `Empty`, `AllDay`, `Start`, `Until`,
+  `Planned` for an overdue row's planned day), the apps only putting
+  words to it; a selected item lands on its first row, and the Mac's
+  later rows of a span pick up no drag.
 - **Tone** is per row: overdue (a task's `when` over), otherwise
   neutral. (A today-warning tone came from a deadline due today and went
   with it, 2026-11-24.)
@@ -425,8 +428,10 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   slot (`data-drop-day`) saying "Nothing scheduled" (Today's "Nothing
   due today"). The filter menu is always on this view now; its
   workspace rows only with more than one doc. The Mac and iOS
-  Calendars do the same (`AgendaGroup.filled` in `MonoplanCore`, the
-  `agendaHideEmptyDays` device preference; iOS 2026-11-23, a filter
+  Calendars do the same (in Rust since 2026-11-25: `Engine.calendar`
+  takes `CalendarOptions` from the `agendaHideEmptyDays` device
+  preference and fills the days, `CALENDAR_FILL_AHEAD`, a toggle
+  reading again; iOS 2026-11-23, a filter
   menu in the page's toolbar, holding only that tick until 2026-11-25), the empty line
   reading "Nothing scheduled" (Today's "Nothing today").
 - **Past days** (web, 2026-11-25, not browser-checked): "Hide past
@@ -436,10 +441,13 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   Overdue / Today. Overdue stays. A past day picked on the mini
   calendar still shows, alone, until the agenda is left. The Mac and
   iOS Calendars have the same tick (2026-11-25, `agendaHidePastDays`
-  device preference, `AgendaGroup.upcoming` in MonoplanCore; no mini
+  device preference, `CalendarOptions.hide_past_days`; no mini
   calendar there). iOS's filter menu also has the workspace checks
   and Clear since then, as the web's and the Mac's, the count beside
-  its glyph the workspaces checked (the view options not counted).
+  its glyph the workspaces checked (the view options not counted). The
+  checks are the engine's on both apps (`Engine.calendarCheckedDocs` /
+  `setCalendarCheckedDocs`, `api::agenda`), which read and write Home's
+  `calendar_hidden_docs` as the web's filter does.
 - **Week breaks** (web, 2026-11-22): the day that opens a week (the
   locale's first day from `Intl.Locale` week info, else Monday; with
   days missing, the first day group of a new week) has "Week N" at the

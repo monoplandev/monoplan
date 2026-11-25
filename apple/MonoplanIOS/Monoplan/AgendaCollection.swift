@@ -11,12 +11,11 @@
 // secondary text at the body's size over a hairline, its rows sit on the page's own
 // ground, and a hairline runs between two rows of a day.
 //
-// What is overdue (the rows the engine leads Today with, in the overdue
-// tone) has a section of its own right above Today, there only while
+// What is overdue (the engine's Overdue group) has a section of its own right above Today, there only while
 // something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
 // there it is what the page opens on and what "Today" comes back to.
 //
-// The days come in as the page shows them (`AgendaView.groups`): every
+// The days come in as the engine shaped them (`Engine.calendar`): every
 // day from Today on, or only Today and the days something is on under
 // "Hide Empty Days". A day with nothing on it has a line saying so, as
 // on the Mac.
@@ -215,26 +214,24 @@ final class AgendaCollectionController: UICollectionViewController {
             }
         }
         for day in groups {
+            if day.overdue {
+                // The engine's Overdue group, right above Today's.
+                guard !day.rows.isEmpty, titles[Self.overdue] == nil else { continue }
+                titles[Self.overdue] = String(localized: "Overdue")
+                anchor = Self.overdue
+                snapshot.appendSections([Self.overdue])
+                append(day.rows, to: Self.overdue)
+                continue
+            }
             // A diffable snapshot traps on a repeated identifier.
             guard titles[day.day] == nil else { continue }
-            var rows = day.rows
-            if day.today {
-                anchor = day.day
-                let overdue = rows.filter { $0.tone == .overdue }
-                rows.removeAll { $0.tone == .overdue }
-                if !overdue.isEmpty {
-                    titles[Self.overdue] = String(localized: "Overdue")
-                    anchor = Self.overdue
-                    snapshot.appendSections([Self.overdue])
-                    append(overdue, to: Self.overdue)
-                }
-            }
+            if day.today, anchor == nil { anchor = day.day }
             titles[day.day] = AgendaView.title(for: day)
             snapshot.appendSections([day.day])
-            if rows.isEmpty {
+            if day.rows.isEmpty {
                 snapshot.appendItems([.nothing(day: day.day, today: day.today)], toSection: day.day)
             }
-            append(rows, to: day.day)
+            append(day.rows, to: day.day)
         }
         var divided: Set<Item> = []
         for section in snapshot.sectionIdentifiers {

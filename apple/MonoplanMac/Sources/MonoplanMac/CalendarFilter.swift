@@ -9,8 +9,10 @@
 // workspaces, once there is more than one: none checked is every
 // workspace. Behind the checks is Home's synced hidden set
 // (`calendar_hidden_docs`, spec/sharing-plan.md), the web's too, so a
-// workspace left out here is left out on every device. The state is
-// in `MainWindowModel` (`calendarCheckedDocs`); this is the surface.
+// workspace left out here is left out on every device; the engine
+// reads and writes it as checks (`Engine.calendarCheckedDocs`,
+// `setCalendarCheckedDocs`). The state is in `MainWindowModel`
+// (`calendarCheckedDocs`); this is the surface.
 
 import SwiftUI
 
@@ -24,10 +26,14 @@ struct CalendarFilterForm: View {
         let checked = model.calendarCheckedDocs
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
+                // The engine shapes the days (`Engine.calendar`): a
+                // change reads them again.
                 Toggle("Hide Empty Days", isOn: $hideEmptyDays)
                     .toggleStyle(.checkbox)
+                    .onChange(of: hideEmptyDays) { model.reload() }
                 Toggle("Hide Past Days", isOn: $hidePastDays)
                     .toggleStyle(.checkbox)
+                    .onChange(of: hidePastDays) { model.reload() }
                 if workspaces.count > 1 {
                     Text("Workspaces")
                         .font(.footnote).fontWeight(.semibold).foregroundStyle(.secondary)

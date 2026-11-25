@@ -14,16 +14,8 @@ final class TrayMenuTests: XCTestCase {
             duration: duration,
             place: nil, assignee: nil,
             tone: tone,
-            docId: docId, docName: nil)
-    }
-
-    func testAnEventHasNoCheckboxWhileOpenOrOnceItsDayHasGoneBy() {
-        let today = "2026-10-26"
-        let shows = { MainWindowView.agendaRowShowsCheck($0, today: today) }
-        XCTAssertFalse(shows(entry("a", "Gig", event: true, when: "2026-10-26T20:00")))
-        XCTAssertTrue(shows(entry("b", "Gig", state: .done, event: true, when: "2026-10-26T20:00")))
-        XCTAssertFalse(shows(entry("c", "Gig", state: .done, event: true, when: "2026-10-20T20:00")))
-        XCTAssertTrue(shows(entry("d", "Task", when: "2026-10-26")))
+            docId: docId, docName: nil,
+            day: String(when?.prefix(10) ?? ""), past: false, showsCheck: !event, spanLabel: nil, lane: .empty)
     }
 
     /// What `Engine.agenda(days: 0)` returns on a day with an
@@ -138,40 +130,6 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(
             sync(online: false, lastSyncedAt: threeMinutesAgo, reason: "connect failed").line(now: now),
             "Offline · last synced 3m ago · connect failed")
-    }
-}
-
-final class AgendaFillTests: XCTestCase {
-    private func entry(_ id: String) -> AgendaEntry {
-        AgendaEntry(
-            id: id, text: id, listId: "inbox", listName: nil, listIcon: nil, state: .backlog, event: false,
-            when: nil, duration: nil, place: nil, assignee: nil,
-            tone: .neutral, docId: nil, docName: nil)
-    }
-
-    func testFillsTwoWeeksFromTodayKeepingPastNonEmpty() {
-        let groups = [
-            AgendaGroup(day: "2026-11-20", today: false, rows: [entry("a")]),
-            AgendaGroup(day: "2026-11-23", today: true, rows: []),
-            AgendaGroup(day: "2026-11-25", today: false, rows: [entry("b")]),
-        ]
-        let out = AgendaGroup.filled(groups)
-        XCTAssertEqual(out.first?.day, "2026-11-20")
-        XCTAssertEqual(out.dropFirst().map(\.day).first, "2026-11-23")
-        XCTAssertEqual(out.count, 1 + 14)
-        XCTAssertEqual(out.last?.day, "2026-12-06")
-        XCTAssertEqual(out.first { $0.day == "2026-11-25" }?.rows.count, 1)
-        XCTAssertEqual(out.filter(\.today).count, 1)
-    }
-
-    func testReachesTheLastDayWithRows() {
-        let groups = [
-            AgendaGroup(day: "2026-11-23", today: true, rows: []),
-            AgendaGroup(day: "2027-01-02", today: false, rows: [entry("c")]),
-        ]
-        let out = AgendaGroup.filled(groups)
-        XCTAssertEqual(out.last?.day, "2027-01-02")
-        XCTAssertEqual(out.count, 41)
     }
 }
 

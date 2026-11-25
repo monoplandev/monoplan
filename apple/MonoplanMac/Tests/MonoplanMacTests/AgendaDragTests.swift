@@ -15,7 +15,8 @@ final class AgendaDragTests: XCTestCase {
         AgendaEntry(
             id: id, text: id, listId: "inbox", listName: nil, listIcon: nil, state: .todo, event: false,
             when: when, duration: nil, place: nil, assignee: nil,
-            tone: .neutral, docId: nil, docName: nil)
+            tone: .neutral, docId: nil, docName: nil,
+            day: String(when.prefix(10)), past: false, showsCheck: true, spanLabel: nil, lane: .empty)
     }
 
     /// Today with rows a and b, tomorrow with c, then empty days:
@@ -36,7 +37,7 @@ final class AgendaDragTests: XCTestCase {
             window.isReleasedWhenClosed = false
             var rig: Rig?
             let view = AgendaTable(
-                groups: groups, selected: nil, todayJumps: 0, fillEmptyDays: true,
+                groups: groups, selected: nil, todayJumps: 0,
                 heading: { $0.day }, rowHeight: { _ in 24 },
                 row: { row in
                     AnyView(HStack {
@@ -94,13 +95,18 @@ final class AgendaDragTests: XCTestCase {
         }
     }
 
+    /// As `Engine.calendar` shapes them: the empty days ahead are in.
     private var groups: [AgendaGroup] {
         [
             AgendaGroup(day: "2026-11-23", today: true, rows: [
                 entry("a", when: "2026-11-23"), entry("b", when: "2026-11-23T09:00"),
             ]),
             AgendaGroup(day: "2026-11-24", today: false, rows: [entry("c", when: "2026-11-24")]),
-        ]
+        ] + Self.empty(["2026-11-25", "2026-11-26", "2026-11-27"])
+    }
+
+    private static func empty(_ days: [String]) -> [AgendaGroup] {
+        days.map { AgendaGroup(day: $0, today: false, rows: []) }
     }
 
     func testARowLetGoOnAnotherDayIsRescheduledThere() {
@@ -127,15 +133,16 @@ final class AgendaDragTests: XCTestCase {
         _ = NSApplication.shared
         func table(_ groups: [AgendaGroup]) -> AgendaTable {
             AgendaTable(
-                groups: groups, selected: "a", todayJumps: 0, fillEmptyDays: true,
+                groups: groups, selected: "a", todayJumps: 0,
                 heading: { $0.day }, rowHeight: { _ in 24 },
                 row: { AnyView(Text(verbatim: $0.text)) }, select: { _ in }, menu: { _ in [] })
         }
         let moved = [
             AgendaGroup(day: "2026-11-23", today: true, rows: [entry("b", when: "2026-11-23T09:00")]),
             AgendaGroup(day: "2026-11-24", today: false, rows: [entry("c", when: "2026-11-24")]),
+        ] + Self.empty(["2026-11-25"]) + [
             AgendaGroup(day: "2026-11-26", today: false, rows: [entry("a", when: "2026-11-26")]),
-        ]
+        ] + Self.empty(["2026-11-27"])
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: 600), styleMask: [.titled],
             backing: .buffered, defer: false)

@@ -61,13 +61,13 @@ let inboxNewestFirstKey = "inboxNewestFirst"
 /// `UserDefaults` key of the Calendar's "Hide Empty Days" (the Calendar
 /// page's filter menu): set, only Today and the days something is on
 /// have a header; absent, every day from Today on does
-/// (`AgendaGroup.filled`). Display only; the same key as the Mac's.
+/// (`Engine.calendar`'s `hideEmptyDays`). Display only; the same key as the Mac's.
 let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
 
 /// `UserDefaults` key of the Calendar's "Hide Past Days" (under "Hide
 /// Empty Days" in the page's filter menu): set, the days gone by are
 /// left out and the page starts at Overdue / Today
-/// (`AgendaGroup.upcoming`). Display only; the same key as the Mac's.
+/// (`Engine.calendar`'s `hidePastDays`). Display only; the same key as the Mac's.
 let agendaHidePastDaysKey = "agendaHidePastDays"
 
 struct ListRef: Hashable {

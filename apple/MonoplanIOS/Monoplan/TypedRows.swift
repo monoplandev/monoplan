@@ -125,29 +125,11 @@ extension AgendaEntry {
     /// The row shows a clock time: its `when` carries one.
     var isTimed: Bool { (when?.count ?? 0) >= 16 }
 
-    /// Whether the row leads with a checkbox. An event's own row does
-    /// not while it is open (spec/events-plan.md: nothing asks for the
-    /// tick) or once its day has gone by (it is a record of what was
-    /// on): the event pill holds the box's place. One marked done from
-    /// today on shows the box, ticked.
-    var showsCheck: Bool {
-        guard event else { return true }
-        return state.isClosed && !whenIsPast
-    }
-
     /// The row's text is muted: a done row, and an event's own row on
-    /// a day gone by, done or not (the only rows the past days hold; a
-    /// task whose day has passed is in Overdue). The Mac's rule
-    /// (`MainWindow.agendaRowIsPast`).
+    /// a day gone by, done or not (`past`, worked out by the engine, as
+    /// whether the row leads with a checkbox is: `showsCheck`).
     var isMuted: Bool {
-        isDone || (event && whenIsPast)
-    }
-
-    /// The row's day is before today (`rowDay`: a span's later rows
-    /// are on later days, so one under way is not past on Today).
-    private var whenIsPast: Bool {
-        guard let day = rowDay else { return false }
-        return day < WhenText.today()
+        isDone || past
     }
 
     /// The quick moves the row's menu offers (`ItemRowMenu`): an

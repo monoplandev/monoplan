@@ -6,19 +6,17 @@
 // put there, on each layout until the pane has settled, and again by
 // the toolbar's "Today".
 //
-// What is overdue (the rows the engine leads Today with, in the overdue
-// tone) has a section of its own right above Today, there only while
+// What is overdue (the engine's Overdue group) has a section of its own right above Today, there only while
 // something is overdue (`spec/calendar-plan.md` "Overdue"). When it is
 // there it is what the table opens on and what "Today" comes back to,
 // so what is owed is never left above the top of the pane.
 //
-// Every day from Today on has a header, empty or not, for two weeks
-// ahead and through to the last day something is on: the days ahead
-// read as a calendar, as the web's Upcoming does by default
-// (`fillEmptyDays` in `js/web/src/dayGroups.ts`). Days gone by show
-// only when something is on them. "Hide Empty Days" under the
-// toolbar's filter button (`agendaHideEmptyDaysKey`, a device
-// preference) leaves out every empty day but Today.
+// The days come shaped by the engine (`Engine.calendar`): every day
+// from Today on has a header, empty or not, for two weeks ahead and
+// through to the last day something is on, as the web's Upcoming does
+// by default, unless "Hide Empty Days" under the toolbar's filter
+// button is on; the days gone by unless "Hide Past Days" is; Overdue as
+// its own group.
 //
 // The rows are the window's SwiftUI rows, hosted in the cells and
 // rewritten in place; a day's header is a group row. No multiple
@@ -61,9 +59,6 @@ struct AgendaTable: NSViewRepresentable {
     /// The model's count of "Today" presses: a new value scrolls back
     /// to Today, or to Overdue above it when something is.
     let todayJumps: Int
-    /// Every day from Today on gets a header (`AgendaGroup.filled`); false is only
-    /// Today and the days something is on.
-    let fillEmptyDays: Bool
     let heading: (AgendaGroup) -> String
     /// A row's content height; the table adds 4 pt above and below,
     /// as a SwiftUI list does.
@@ -242,9 +237,8 @@ struct AgendaTable: NSViewRepresentable {
 
         // MARK: Rows
 
-        /// Today always, the days ahead always when `fillEmptyDays`
-        /// (`AgendaGroup.filled`), any other day when it has rows, and Overdue
-        /// above Today when Today's group has overdue rows.
+        /// The groups as the engine shaped them (`Engine.calendar`:
+        /// Overdue its own group, the empty days already in or out).
         private func build() -> [Line] {
             var lines: [Line] = []
             var days: Set<String> = []
@@ -255,26 +249,20 @@ struct AgendaTable: NSViewRepresentable {
                         divided: index < rows.count - 1))
                 }
             }
-            let groups = parent.fillEmptyDays
-                ? AgendaGroup.filled(parent.groups)
-                : AgendaGroup.nonEmpty(parent.groups)
-            for group in groups {
-                guard days.insert(group.day).inserted else { continue }
-                var rows = group.rows
-                if group.today {
-                    let overdue = rows.filter { $0.tone == .overdue }
-                    rows.removeAll { $0.tone == .overdue }
-                    if !overdue.isEmpty {
-                        lines.append(.header(
-                            day: Self.overdueDay, title: String(localized: "Overdue"), today: false))
-                        items(overdue, day: Self.overdueDay)
-                    }
+            for group in parent.groups {
+                if group.overdue {
+                    guard !group.rows.isEmpty, days.insert(Self.overdueDay).inserted else { continue }
+                    lines.append(.header(
+                        day: Self.overdueDay, title: String(localized: "Overdue"), today: false))
+                    items(group.rows, day: Self.overdueDay)
+                    continue
                 }
+                guard days.insert(group.day).inserted else { continue }
                 lines.append(.header(day: group.day, title: parent.heading(group), today: group.today))
-                if rows.isEmpty {
+                if group.rows.isEmpty {
                     lines.append(.nothing(day: group.day, today: group.today))
                 }
-                items(rows, day: group.day)
+                items(group.rows, day: group.day)
             }
             return lines
         }

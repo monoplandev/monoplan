@@ -32,7 +32,7 @@ uniffi::setup_scaffolding!();
 
 use monoplan_cli::api::{
     self,
-    agenda::{AgendaGroup, AgendaQuery},
+    agenda::{AgendaGroup, AgendaQuery, CalendarOptions},
     assigned::AssignedEntry,
     bin::BinEntry,
     done::{DoneEntry, DoneFilter},
@@ -1307,9 +1307,8 @@ impl Engine {
     /// `past_days` before today (0 for none, and then Today is
     /// first); Today, always there; then each non-empty day up to
     /// `days` past today. A done task is not on it; a done event is.
-    /// A `when` covering several days has a row on each of them, from
-    /// today on (and on the days gone by back to `past_days`), each
-    /// with its `span`, as the web's Upcoming places it.
+    /// A span is on its start day alone (the tray's reading); the
+    /// Calendar page reads [`calendar`](Self::calendar).
     pub fn agenda(&self, days: u32, past_days: u32) -> Result<Vec<AgendaGroup>, EngineError> {
         Ok(self.client.call_blocking(None, move |cx| {
             api::agenda::agenda(
@@ -1319,10 +1318,22 @@ impl Engine {
                     past_days,
                     today: None,
                     everywhere: true,
-                    spread: true,
+                    spread: false,
                 },
             )
         })?)
+    }
+
+    /// The Calendar page (`api::agenda::calendar`): the days gone by
+    /// that something was on, Overdue as its own group, Today, then
+    /// the days ahead, empty ones filled in for two weeks unless
+    /// `options.hide_empty_days`; a span on each of its days. Each row
+    /// carries what it means on its day (`day`, `past`, `shows_check`,
+    /// `span_label`, `lane`), for the app to draw.
+    pub fn calendar(&self, options: CalendarOptions) -> Result<Vec<AgendaGroup>, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, move |cx| api::agenda::calendar(cx, None, options))?)
     }
 
     /// The Calendar nav entry's count: Open items owed or on today
@@ -1334,19 +1345,21 @@ impl Engine {
             .call_blocking(None, |cx| api::agenda::attention_count(cx, None))?)
     }
 
-    /// The workspaces left out of `agenda`: Home's synced
-    /// `calendar_hidden_docs` (the Calendar's workspace filter).
-    pub fn calendar_hidden_docs(&self) -> Result<Vec<String>, EngineError> {
+    /// The Calendar filter's checked workspaces (none checked is every
+    /// workspace), read off Home's synced `calendar_hidden_docs`, the
+    /// set the web's Upcoming filter writes too.
+    pub fn calendar_checked_docs(&self) -> Result<Vec<String>, EngineError> {
         Ok(self
             .client
-            .call_blocking(None, api::agenda::calendar_hidden_docs)?)
+            .call_blocking(None, api::agenda::calendar_checked_docs)?)
     }
 
-    /// Hide a workspace from `agenda`, or show it again. Synced: the
-    /// web's Upcoming filter reads the same set.
-    pub fn set_calendar_doc_hidden(&self, doc_id: String, hidden: bool) -> Result<(), EngineError> {
+    /// Make `checked` the Calendar filter's checked workspaces: the
+    /// rest are hidden from `agenda` and `calendar`, or none when none
+    /// (or all) are checked.
+    pub fn set_calendar_checked_docs(&self, checked: Vec<String>) -> Result<(), EngineError> {
         Ok(self.client.call_blocking(None, move |cx| {
-            api::agenda::set_calendar_doc_hidden(cx, &doc_id, hidden)
+            api::agenda::set_calendar_checked_docs(cx, &checked)
         })?)
     }
 
