@@ -2779,6 +2779,9 @@ export function Workspace(props: {
     // task) just isn't selected.
     if (target.kind === "upcoming") {
       setTimeout(() => {
+        // Cleared first, so the agenda forgets the selection's day and
+        // a span lands on its first day, not on the selected day's row.
+        selection.clear();
         selection.selectOnly(id);
         upcomingHandle?.scrollToKey(id);
       }, 0);

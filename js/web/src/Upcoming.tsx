@@ -305,6 +305,10 @@ export function Upcoming(props: {
   const [selTick, setSelTick] = createSignal(0, { equals: false });
   onCleanup(
     props.selection.onChange((sel) => {
+      // Nothing selected, no day: the next item selected by id (a
+      // reveal from search, a new item) lands on its first row, not on
+      // its row in whichever day was last clicked.
+      if (!settling && !sel.hasSelection() && selDay() !== null) useDay(null);
       if (!settling && sel.hasSelection() && !consistent()) {
         const ends = sel
           .getSelection()
