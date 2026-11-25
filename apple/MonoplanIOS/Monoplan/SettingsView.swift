@@ -20,7 +20,7 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showDeleteAccount = false
     @AppStorage(listCountsKey) private var showListCounts = false
-    @AppStorage(DoneSound.key) private var doneSound = false
+    @AppStorage(DoneSound.key) private var doneSound = DoneSound.defaultOn
     @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
     @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
     /// Notifications are turned off for the app in the system's

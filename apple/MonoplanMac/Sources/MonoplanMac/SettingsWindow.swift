@@ -400,7 +400,7 @@ struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     /// Read by the window's sidebar (`MainWindowView`).
     @AppStorage(listCountsKey) private var showListCounts = false
-    @AppStorage(DoneSound.key) private var doneSound = false
+    @AppStorage(DoneSound.key) private var doneSound = DoneSound.defaultOn
     @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
     @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
     /// Notifications are turned off for the app in System Settings: no

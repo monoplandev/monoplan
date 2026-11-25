@@ -1,6 +1,6 @@
 // The sound played when an item is ticked done. A device preference,
-// off by default, so localStorage like `agendaHideEmptyDays.ts`: only
-// "on" is stored. Played by the routed actions (`sync/docs.ts`) on the
+// on by default, so localStorage like `agendaHideEmptyDays.ts`: only
+// "off" is stored. Played by the routed actions (`sync/docs.ts`) on the
 // user's own tick, so a close arriving by sync or redone by undo stays
 // silent.
 //
@@ -13,9 +13,9 @@ const SRC = "/sounds/done.wav";
 
 function readDoneSoundPref(): boolean {
   try {
-    return localStorage.getItem(KEY) === "1";
+    return localStorage.getItem(KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -36,8 +36,8 @@ function load(): HTMLAudioElement | null {
 export function setDoneSoundPref(on: boolean): void {
   setDoneSoundSignal(on);
   try {
-    if (on) localStorage.setItem(KEY, "1");
-    else localStorage.removeItem(KEY);
+    if (on) localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, "0");
   } catch {
     // Private-mode / quota failures: the choice just won't stick.
   }

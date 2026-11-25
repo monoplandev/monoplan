@@ -1,7 +1,7 @@
 import AudioToolbox
 import Foundation
 
-/// The sound played when an item is ticked done: a device setting, off
+/// The sound played when an item is ticked done: a device setting, on
 /// by default, held in `UserDefaults` under `key` (each app's Settings
 /// has the switch). Each app plays it from its model's own tick, so a
 /// close arriving by sync or by Undo is silent.
@@ -13,6 +13,8 @@ import Foundation
 /// under "Play user interface sound effects".
 public enum DoneSound {
     public static let key = "doneSound"
+    /// What an unset key means, for the apps' `@AppStorage` too.
+    public static let defaultOn = true
 
     /// Registered on first play; nil when the bundle has no clip (the
     /// SwiftPM test executable).
@@ -25,7 +27,8 @@ public enum DoneSound {
 
     /// Play the tick, if the device has it on.
     public static func play(defaults: UserDefaults = .standard) {
-        guard defaults.bool(forKey: key), let sound else { return }
+        let on = defaults.object(forKey: key) as? Bool ?? defaultOn
+        guard on, let sound else { return }
         AudioServicesPlaySystemSound(sound)
     }
 }
