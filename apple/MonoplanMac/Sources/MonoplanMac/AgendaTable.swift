@@ -41,6 +41,11 @@
 // (`spec/mac-dnd-plan.md` "Phase 2 attempt"): no `NSDraggingSession`,
 // no pasteboard, no drop feedback of AppKit's. One row at a time, the
 // table's selection being one row.
+//
+// A `when` covering several days has a row on each (`Engine.agenda`
+// spreads it, each row with its `span`): "Day 2" under the title, the
+// time lane what the day holds of it (`AgendaEntry.lane`), and only the
+// first row shown picks up a drag, as the web's span tails.
 
 import AppKit
 import MonoplanCore
@@ -509,6 +514,14 @@ struct AgendaTable: NSViewRepresentable {
                   let window = table.window else { return false }
             let row = table.row(at: table.convert(event.locationInWindow, from: nil))
             guard row >= 0, row < lines.count, let entry = lines[row].entry else { return false }
+            // A multi-day span drags by its first row shown only (the
+            // web's `data-span-tail`): a later day's row is clicked as
+            // the table clicks it, and picks up nothing.
+            if entry.span != nil, lines.firstIndex(where: {
+                $0.entry.map { $0.id == entry.id && $0.docId == entry.docId } ?? false
+            }) != row {
+                return false
+            }
             let key = lines[row].key
             window.makeFirstResponder(table)
             if table.selectedRow != row {

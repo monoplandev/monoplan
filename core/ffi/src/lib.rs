@@ -1307,6 +1307,9 @@ impl Engine {
     /// `past_days` before today (0 for none, and then Today is
     /// first); Today, always there; then each non-empty day up to
     /// `days` past today. A done task is not on it; a done event is.
+    /// A `when` covering several days has a row on each of them, from
+    /// today on (and on the days gone by back to `past_days`), each
+    /// with its `span`, as the web's Upcoming places it.
     pub fn agenda(&self, days: u32, past_days: u32) -> Result<Vec<AgendaGroup>, EngineError> {
         Ok(self.client.call_blocking(None, move |cx| {
             api::agenda::agenda(
@@ -1316,6 +1319,7 @@ impl Engine {
                     past_days,
                     today: None,
                     everywhere: true,
+                    spread: true,
                 },
             )
         })?)
@@ -1359,6 +1363,7 @@ impl Engine {
                     past_days: 0,
                     today: None,
                     everywhere: true,
+                    spread: false,
                 },
             )
         })?)

@@ -1961,6 +1961,12 @@ let inboxNewestFirstKey = "inboxNewestFirst"
 /// `monoplan.agenda.hideEmptyDays`.
 let agendaHideEmptyDaysKey = "agendaHideEmptyDays"
 
+/// `UserDefaults` key of the Calendar's "Hide Past Days" (under "Hide
+/// Empty Days" in the filter): set, the days gone by are left out and
+/// the Calendar starts at Overdue / Today (`AgendaGroup.upcoming` in
+/// MonoplanCore). Display only, the web's `monoplan.agenda.hidePastDays`.
+let agendaHidePastDaysKey = "agendaHidePastDays"
+
 struct MainWindowView: View {
     @ObservedObject var model: MainWindowModel
     /// The device's list-counts preference (Settings), off by default:
@@ -1972,6 +1978,8 @@ struct MainWindowView: View {
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
     /// The device's Calendar preference (`agendaHideEmptyDaysKey`).
     @AppStorage(agendaHideEmptyDaysKey) private var agendaHideEmptyDays = false
+    /// The device's Calendar preference (`agendaHidePastDaysKey`).
+    @AppStorage(agendaHidePastDaysKey) private var agendaHidePastDays = false
     /// The workspace whose Sharing sheet is up.
     @State private var sharing: SharingTarget?
     /// The workspace row under the pointer: its "…" and chevron show.
@@ -2444,7 +2452,7 @@ struct MainWindowView: View {
     /// is taller.
     private var agenda: some View {
         AgendaTable(
-            groups: model.agenda,
+            groups: agendaHidePastDays ? AgendaGroup.upcoming(model.agenda) : model.agenda,
             selected: model.selected?.id,
             todayJumps: model.todayJumps,
             fillEmptyDays: !agendaHideEmptyDays,
@@ -2473,7 +2481,8 @@ struct MainWindowView: View {
     /// Whether a Calendar row has its second line (who it is assigned
     /// to, where it lives, its place): such a row is taller.
     private func agendaRowDetailed(_ row: AgendaEntry) -> Bool {
-        agendaAssignee(row) != nil || model.agendaListName(row) != nil || !(row.place?.label ?? "").isEmpty
+        agendaAssignee(row) != nil || row.spanDayLabel != nil || model.agendaListName(row) != nil
+            || !(row.place?.label ?? "").isEmpty
     }
 
     /// Who a Calendar row's item is assigned to, drawn as a small disc
@@ -2500,10 +2509,11 @@ struct MainWindowView: View {
 
     /// An event's own row on a day gone by: the only rows the past
     /// days hold. (A task whose day has passed is in Overdue, not
-    /// there.)
+    /// there.) Judged by the row's day, so a span under way is past on
+    /// the days behind it and not on Today's.
     static func agendaRowIsPast(_ row: AgendaEntry, today: String = DateOffers.today()) -> Bool {
-        guard row.event, let when = row.when, when.count >= 10 else { return false }
-        return String(when.prefix(10)) < today
+        guard row.event, let day = row.rowDay else { return false }
+        return day < today
     }
 
     private func agendaRow(_ row: AgendaEntry) -> some View {
@@ -2514,6 +2524,10 @@ struct MainWindowView: View {
         let listName = model.agendaListName(row)
         let place = row.place?.label ?? ""
         let detailed = agendaRowDetailed(row)
+        // A selected event's pill is blue on every row it has, so a
+        // span's rows on its other days show which are the same event
+        // (the web's `data-picked`).
+        let picked = model.selected.map { $0.id == row.id && $0.workspace == row.docId } ?? false
         // The date and time sit on the text's line too, not the middle
         // of a two-line row.
         return HStack(alignment: .rowTitle, spacing: 8) {
@@ -2548,6 +2562,10 @@ struct MainWindowView: View {
                                     // the line's own gap.
                                     .padding(.trailing, -3)
                             }
+                            if let day = row.spanDayLabel {
+                                // Which day of a multi-day span the row is.
+                                Text("Day \(day)").lineLimit(1).fixedSize()
+                            }
                             if let listName {
                                 // The list's own icon, when it has one.
                                 Text(verbatim: [row.listIcon, listName].compactMap { $0 }.joined(separator: " "))
@@ -2574,20 +2592,22 @@ struct MainWindowView: View {
                 }
             case .neutral: EmptyView()
             }
-            if TodayMenu.isTimed(row), let when = row.when {
-                Text(verbatim: String(when.dropFirst(11).prefix(5)))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .fixedSize()
-            } else if row.event, row.when != nil {
-                // An event with a day and no clock time.
-                Text("All day").foregroundStyle(.secondary).fixedSize()
+            if row.tone != .overdue {
+                // What the day holds of the row (`AgendaEntry.lane`).
+                switch row.lane {
+                case .none: EmptyView()
+                case .allDay: Text("All day").foregroundStyle(.secondary).fixedSize()
+                case .start(let clock):
+                    Text(verbatim: clock).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                case .until(let clock):
+                    Text("until \(clock)").foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                }
             }
         }
         // The pill runs the height of the row, so it spans the second
         // line too.
         .overlay(alignment: .leading) {
-            if !check { EventPill() }
+            if !check { EventPill(picked: picked) }
         }
         .itemRow(height: detailed ? 42 : 24)
     }

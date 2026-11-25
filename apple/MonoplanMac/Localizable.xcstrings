@@ -711,6 +711,16 @@
         }
       }
     },
+    "Day %lld" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Día %lld"
+          }
+        }
+      }
+    },
     "Delete" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1126,6 +1136,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ocultar otros"
+          }
+        }
+      }
+    },
+    "Hide Past Days" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocultar días pasados"
           }
         }
       }
@@ -3001,6 +3021,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Deshacer"
+          }
+        }
+      }
+    },
+    "until %@" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hasta %@"
           }
         }
       }

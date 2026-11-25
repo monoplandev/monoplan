@@ -62,6 +62,23 @@ pub struct AgendaEntry {
     pub doc_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_name: Option<String>,
+    /// On a spread agenda (`AgendaQuery::spread`), a row of a `when`
+    /// covering more than one day: which day of the span this row is.
+    /// Absent otherwise, and off the JSON then.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = None))]
+    pub span: Option<AgendaSpan>,
+}
+
+/// A row's place in a span of days (`spec/calendar-plan.md` "Spans"):
+/// the web's `DayRow.span`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct AgendaSpan {
+    /// 1-based: the span's first day is 1.
+    pub day: u32,
+    /// How many days the span covers.
+    pub total: u32,
 }
 
 /// One day's rows; the `agenda --json` element.
@@ -88,6 +105,10 @@ pub struct AgendaQuery<'a> {
     /// ones hidden from the calendar (Home's `calendar_hidden_docs`).
     /// Otherwise the context's own workspace, untagged.
     pub everywhere: bool,
+    /// A row on every day a `when` covers, each with its place in the
+    /// span (`commands::agenda::build_agenda_spread`), as the web's
+    /// Upcoming. Otherwise a span is on its start day alone.
+    pub spread: bool,
 }
 
 /// The workspaces hidden from the merged calendar: Home's
@@ -179,7 +200,11 @@ pub fn place(cx: &Ctx, query: &AgendaQuery) -> anyhow::Result<Placed> {
         .map(|(c, items)| (*c, items.as_slice()))
         .collect();
     Ok(Placed {
-        days: rules::build_agenda_from(&sources, &floor, &today, &horizon),
+        days: if query.spread {
+            rules::build_agenda_spread(&sources, &floor, &today, &horizon)
+        } else {
+            rules::build_agenda_from(&sources, &floor, &today, &horizon)
+        },
         today,
         lists,
     })
@@ -230,6 +255,7 @@ pub fn groups(placed: &Placed) -> Vec<AgendaGroup> {
                         tone: r.tone,
                         doc_id,
                         doc_name,
+                        span: r.span.map(|(day, total)| AgendaSpan { day, total }),
                     }
                 })
                 .collect(),

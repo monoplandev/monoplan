@@ -143,18 +143,22 @@ extension AgendaEntry {
         isDone || (event && whenIsPast)
     }
 
-    /// The `when`'s day is before today.
+    /// The row's day is before today (`rowDay`: a span's later rows
+    /// are on later days, so one under way is not past on Today).
     private var whenIsPast: Bool {
-        guard let when, when.count >= 10 else { return false }
-        return String(when.prefix(10)) < WhenText.today()
+        guard let day = rowDay else { return false }
+        return day < WhenText.today()
     }
 
     /// The quick moves the row's menu offers (`ItemRowMenu`): an
     /// overdue row goes to today or tomorrow, a row on today to
     /// tomorrow, and any other row nowhere. Only an open row. The clock
     /// time is kept, as a pick in the date editor keeps it.
+    /// A later day's row of a span offers none: a move is of the
+    /// start, which that row is not on.
     var quickMoves: [WhenMove] {
-        WhenMove.offers(for: self, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
+        if let span, span.day > 1 { return [] }
+        return WhenMove.offers(for: self, today: WhenText.today(), tomorrow: WhenText.today(plus: 1))
     }
 }
 

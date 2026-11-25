@@ -74,6 +74,10 @@ pub struct AgendaRow {
     /// The row's workspace on a merged agenda; `None` on a single-doc
     /// one, where every row is the selected workspace's.
     pub doc: Option<Candidate>,
+    /// On a spread agenda ([`build_agenda_spread`]), a row of a `when`
+    /// covering more than one day: which day of the span it is
+    /// (1-based) and how many days the span has. `None` otherwise.
+    pub span: Option<(u32, u32)>,
 }
 
 /// One workspace's items for [`build_agenda_from`]: the tag every row
@@ -128,6 +132,32 @@ pub fn build_agenda_from(
     today: &str,
     horizon: &str,
 ) -> Vec<AgendaDay> {
+    place_agenda(sources, floor, today, horizon, false)
+}
+
+/// [`build_agenda_from`] with a row on every day a `when` covers, as
+/// the web's `groupByDay` places them (`spec/calendar-plan.md`
+/// "Spans"): a span from its first day on or after today (or `floor`
+/// for a day gone by, an event's) to its last, each row carrying its
+/// place in the span ([`AgendaRow::span`]). A task sent to Today's
+/// overdue fold is still one row. The Apple apps' Calendar reads this;
+/// the CLI, the tray and the widget place on the start day.
+pub fn build_agenda_spread(
+    sources: &[Source<'_>],
+    floor: &str,
+    today: &str,
+    horizon: &str,
+) -> Vec<AgendaDay> {
+    place_agenda(sources, floor, today, horizon, true)
+}
+
+fn place_agenda(
+    sources: &[Source<'_>],
+    floor: &str,
+    today: &str,
+    horizon: &str,
+    spread: bool,
+) -> Vec<AgendaDay> {
     // (day, fold group, day band, placing raw, created_at, row)
     let mut placed: Vec<(String, u8, u8, String, i64, AgendaRow)> = Vec::new();
     for (doc, items) in sources {
@@ -139,62 +169,76 @@ pub fn build_agenda_from(
             if item.is_done() && !(item.is_event() && item.when.is_some()) {
                 continue;
             }
-            // A day gone by: what happened on it, an event. The rest of
-            // the placement is from today on.
-            if let Some(w) = item.when.as_deref() {
-                let day = &w[..w.len().min(10)];
-                if day < today && day >= floor && item.is_event() {
+            let Some(when) = item.when.as_deref() else {
+                continue;
+            };
+            let when_day = &when[..when.len().min(10)];
+            let end_day = when_end_day(when, item.duration);
+            // Spread, a span's days; otherwise its start day alone.
+            let last_day = if spread { end_day.as_str() } else { when_day };
+            let total = if spread {
+                day_count(when_day, &end_day)
+            } else {
+                1
+            };
+            // A row on every day from `from` to `to`, each with its
+            // place in the span when the span has more than one day.
+            let mut place_days = |from: &str, to: &str| {
+                let mut day = from.to_string();
+                while day.as_str() <= to {
                     placed.push((
-                        day.to_string(),
+                        day.clone(),
                         1,
                         day_band(item),
-                        w.to_string(),
+                        when.to_string(),
                         item.created_at,
                         AgendaRow {
                             item: item.clone(),
                             tone: Tone::Neutral,
                             doc: doc.cloned(),
+                            span: (total > 1).then(|| (day_count(when_day, &day), total)),
                         },
                     ));
+                    let Some(next) = next_day(&day) else { break };
+                    day = next;
+                }
+            };
+            // A day gone by: what happened on it, an event. The rest of
+            // the placement is from today on.
+            if when_day < today && item.is_event() {
+                let yesterday = prev_day(today).unwrap_or_default();
+                let from = when_day.max(floor);
+                let to = last_day.min(yesterday.as_str());
+                if from <= to {
+                    place_days(from, to);
                 }
             }
-            // From today on a past `when` places nothing on its own
-            // day; a task's lands in Today's overdue fold.
-            let Some(when) = item.when.as_deref() else {
-                continue;
-            };
-            let when_day = &when[..when.len().min(10)];
             // Planned for a day that has passed and still Open: overdue.
-            let slipped = !item.is_done()
-                && !item.is_event()
-                && when_end_day(when, item.duration).as_str() < today;
-            let day = if slipped {
-                today
-            } else if when_day >= today {
-                when_day
-            } else {
-                continue;
-            };
-            if day > horizon {
+            let slipped = !item.is_done() && !item.is_event() && end_day.as_str() < today;
+            if !slipped {
+                // From today on a `when` that is over places nothing; a
+                // span under way is placed from today.
+                if last_day >= today {
+                    place_days(when_day.max(today), last_day.min(horizon));
+                }
                 continue;
             }
             // Today's fold: overdue rows lead (by their own date, no
             // bands), then today's own rows, done or not.
-            let (group, band, tone) = if slipped {
-                (0, 0, Tone::Overdue)
-            } else {
-                (1, day_band(item), Tone::Neutral)
-            };
+            if today > horizon {
+                continue;
+            }
             placed.push((
-                day.to_string(),
-                group,
-                band,
+                today.to_string(),
+                0,
+                0,
                 when.to_string(),
                 item.created_at,
                 AgendaRow {
                     item: item.clone(),
-                    tone,
+                    tone: Tone::Overdue,
                     doc: doc.cloned(),
+                    span: None,
                 },
             ));
         }
@@ -267,6 +311,34 @@ fn when_end_day(when: &str, duration: Option<u32>) -> String {
         .unwrap_or_else(|| day.to_string())
 }
 
+/// The day after `day` (`YYYY-MM-DD`); `None` when it does not parse.
+fn next_day(day: &str) -> Option<String> {
+    NaiveDate::parse_from_str(day, "%Y-%m-%d")
+        .ok()?
+        .checked_add_days(Days::new(1))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+}
+
+/// The day before `day` (`YYYY-MM-DD`); `None` when it does not parse.
+fn prev_day(day: &str) -> Option<String> {
+    NaiveDate::parse_from_str(day, "%Y-%m-%d")
+        .ok()?
+        .checked_sub_days(Days::new(1))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+}
+
+/// How many days `from` to `to` covers, both counted (1 for the same
+/// day); 1 when either does not parse or `to` is before `from`.
+fn day_count(from: &str, to: &str) -> u32 {
+    match (
+        NaiveDate::parse_from_str(from, "%Y-%m-%d"),
+        NaiveDate::parse_from_str(to, "%Y-%m-%d"),
+    ) {
+        (Ok(a), Ok(b)) if b >= a => u32::try_from((b - a).num_days() + 1).unwrap_or(1),
+        _ => 1,
+    }
+}
+
 /// The Calendar nav entry's count: what is owed or on today. Open
 /// items with a task `when` that is over, or a `when` on today (a span
 /// covering it included), each counted once. An event's past `when` has gone by and counts
@@ -305,6 +377,7 @@ pub fn run(cx: &Ctx, args: AgendaArgs, out: &mut dyn Write) -> anyhow::Result<()
             past_days: args.past,
             today: args.today.as_deref(),
             everywhere: args.all,
+            spread: false,
         },
     )?;
     if args.json {
@@ -657,5 +730,72 @@ mod tests {
         let days = build_agenda(&[binned], TODAY, HORIZON);
         assert_eq!(days.len(), 1);
         assert!(days[0].rows.is_empty());
+    }
+    #[test]
+    fn a_spread_agenda_puts_a_span_on_every_day_it_covers() {
+        fn spans(day: &AgendaDay) -> Vec<(&str, Option<(u32, u32)>)> {
+            day.rows
+                .iter()
+                .map(|r| (r.item.id.as_str(), r.span))
+                .collect()
+        }
+        // Started yesterday, runs three days: today and tomorrow.
+        let mut running = item("running", Some("2026-09-08"), 1);
+        running.duration = Some(3 * 1440);
+        running.event = true;
+        // Overnight from yesterday 23:00: today only, its last day.
+        let mut overnight = item("overnight", Some("2026-09-08T23:00"), 2);
+        overnight.duration = Some(120);
+        // Ahead, Friday 09:00 for 26 hours: Friday and Saturday.
+        let mut ahead = item("ahead", Some("2026-09-11T09:00"), 3);
+        ahead.duration = Some(26 * 60);
+        // A task whose span ended yesterday: one overdue row.
+        let mut over = item("over", Some("2026-09-06"), 4);
+        over.duration = Some(3 * 1440);
+        let items = [running, overnight, ahead, over];
+        let days = build_agenda_spread(&[(None, &items)], "2026-09-07", TODAY, HORIZON);
+        let order: Vec<&str> = days.iter().map(|d| d.day.as_str()).collect();
+        // The event's first day is a day gone by, past the floor.
+        assert_eq!(
+            order,
+            vec![
+                "2026-09-08",
+                TODAY,
+                "2026-09-10",
+                "2026-09-11",
+                "2026-09-12"
+            ]
+        );
+        assert_eq!(spans(&days[0]), vec![("running", Some((1, 3)))]);
+        assert_eq!(
+            spans(&days[1]),
+            vec![
+                ("over", None),
+                ("running", Some((2, 3))),
+                ("overnight", Some((2, 2)))
+            ]
+        );
+        assert_eq!(days[1].rows[0].tone, Tone::Overdue);
+        assert_eq!(spans(&days[2]), vec![("running", Some((3, 3)))]);
+        assert_eq!(spans(&days[3]), vec![("ahead", Some((1, 2)))]);
+        assert_eq!(spans(&days[4]), vec![("ahead", Some((2, 2)))]);
+        // Unspread, the same items place on their start days alone.
+        let days = build_agenda_from(&[(None, &items)], "2026-09-07", TODAY, HORIZON);
+        let order: Vec<&str> = days.iter().map(|d| d.day.as_str()).collect();
+        assert_eq!(order, vec!["2026-09-08", TODAY, "2026-09-11"]);
+        assert!(days.iter().flat_map(|d| &d.rows).all(|r| r.span.is_none()));
+    }
+
+    #[test]
+    fn a_spread_span_stops_at_the_horizon() {
+        let mut long = item("long", Some("2026-09-20"), 1);
+        long.duration = Some(10 * 1440);
+        let days = build_agenda_spread(&[(None, &[long])], TODAY, TODAY, HORIZON);
+        let order: Vec<&str> = days.iter().map(|d| d.day.as_str()).collect();
+        assert_eq!(
+            order,
+            vec![TODAY, "2026-09-20", "2026-09-21", "2026-09-22", HORIZON]
+        );
+        assert_eq!(days[4].rows[0].span, Some((4, 10)));
     }
 }

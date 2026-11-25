@@ -114,7 +114,8 @@ one with no list is here and not in Inbox (`inbox-plan.md`).
 Its calendar row has no checkbox while it is open (2026-11-17, web, iOS,
 macOS): a dot holds the box's place (an upright pill, a calendar's event bar, since
 2026-11-18 on the web, iOS and macOS, as tall as the row; blue on the web
-while the event is selected, on every day's row of a span, 2026-11-25), and the box shows, ticked or
+and macOS while the event is selected, on every day's row of a span, 2026-11-25;
+iOS has no selection on the Calendar), and the box shows, ticked or
 crossed, once the event is done or cancelled from the item surface or
 the row's menu (`events-plan.md`). The close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a
@@ -326,7 +327,15 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   at its first row. The selection is in one day (since 2026-11-23, see
   below), so a selected item lights only its row on that day. Plain
   ↑ / ↓ step row by row (since 2026-11-17), so each of an item's rows is
-  a stop. The CLI `agenda` still places on the start day only.
+  a stop. The CLI `agenda`, the macOS tray's days ahead and the iOS
+  widget still place on the start day only. The Mac and iOS Calendars
+  spread spans as the web does (2026-11-25, compiled, not yet run in
+  either app): `Engine.agenda` places through `build_agenda_spread`
+  (`AgendaQuery.spread`), each row with its `AgendaEntry.span`
+  (day, total); the row's day, the "Day 2" and the time lane are read
+  off it in MonoplanCore (`AgendaSpan.swift`: `rowDay`,
+  `spanDayLabel`, `lane`), so a selected item lands on its first row,
+  and the Mac's later rows of a span pick up no drag.
 - **Tone** is per row: overdue (a task's `when` over), otherwise
   neutral. (A today-warning tone came from a deadline due today and went
   with it, 2026-11-24.)
@@ -398,8 +407,9 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   edge scroll its `DndAutoscroll`, and the day under the pointer (header,
   rows or empty line; not Overdue) has the tint. No `NSDraggingSession`.
   The drop rule is `AgendaDrop` in `MonoplanMacKit`, a port of
-  `dropOnDay`, written through `Engine.setWhen` (duration kept): one call, one undo step. The Mac agenda places a
-  span on its start day only, so there are no span tails to exclude.
+  `dropOnDay`, written through `Engine.setWhen` (duration kept): one call, one undo step. A span
+  drags by its first row shown only; its later rows select but pick up
+  nothing (2026-11-25).
 - **Empty days** (web, 2026-11-22): by default every day from today on
   has a section, to the later of the last placed day and two weeks ahead
   (`fillEmptyDays`); a past day never shows empty, only when something
@@ -417,14 +427,19 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   workspace rows only with more than one doc. The Mac and iOS
   Calendars do the same (`AgendaGroup.filled` in `MonoplanCore`, the
   `agendaHideEmptyDays` device preference; iOS 2026-11-23, a filter
-  menu in the page's toolbar holding only that tick), the empty line
+  menu in the page's toolbar, holding only that tick until 2026-11-25), the empty line
   reading "Nothing scheduled" (Today's "Nothing today").
 - **Past days** (web, 2026-11-25, not browser-checked): "Hide past
   days" under "Hide empty days" in the filter menu (a device
   preference, unchecked by default, not counted and not cleared, as
   that one) leaves out the days gone by, so the agenda starts at
   Overdue / Today. Overdue stays. A past day picked on the mini
-  calendar still shows, alone, until the agenda is left. Web only.
+  calendar still shows, alone, until the agenda is left. The Mac and
+  iOS Calendars have the same tick (2026-11-25, `agendaHidePastDays`
+  device preference, `AgendaGroup.upcoming` in MonoplanCore; no mini
+  calendar there). iOS's filter menu also has the workspace checks
+  and Clear since then, as the web's and the Mac's, the count beside
+  its glyph the workspaces checked (the view options not counted).
 - **Week breaks** (web, 2026-11-22): the day that opens a week (the
   locale's first day from `Intl.Locale` week info, else Monday; with
   days missing, the first day group of a new week) has "Week N" at the

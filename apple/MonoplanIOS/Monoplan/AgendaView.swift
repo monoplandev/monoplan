@@ -7,7 +7,10 @@
 // last day with rows, as the Mac's Calendar has them
 // (`AgendaGroup.filled`). The filter menu's "Hide Empty Days"
 // (`agendaHideEmptyDaysKey`, a device preference) leaves out every
-// empty day but Today. A row opens the item's sheet
+// empty day but Today, and its "Hide Past Days" (`agendaHidePastDaysKey`)
+// the days gone by. Under them, once there is more than one, the
+// workspaces: Home's synced hidden set, the web's and the Mac's filter
+// (`AppModel.calendarCheckedDocs`). A row opens the item's sheet
 // (`ItemView`) and its checkbox ticks it, as in the other lenses.
 //
 // The days gone by (`AppModel.agendaPastDays`: the events that
@@ -30,11 +33,14 @@ struct AgendaView: View {
     /// Today's header, or Overdue's above it.
     @State private var todayJumps = 0
     @AppStorage(agendaHideEmptyDaysKey) private var hideEmptyDays = false
+    @AppStorage(agendaHidePastDaysKey) private var hidePastDays = false
 
     /// The days shown: every day from Today on, or under "Hide Empty
-    /// Days" only Today and the days something is on.
+    /// Days" only Today and the days something is on; under "Hide Past
+    /// Days" none before Today.
     private var groups: [AgendaGroup] {
-        hideEmptyDays ? AgendaGroup.nonEmpty(model.agenda) : AgendaGroup.filled(model.agenda)
+        let read = hidePastDays ? AgendaGroup.upcoming(model.agenda) : model.agenda
+        return hideEmptyDays ? AgendaGroup.nonEmpty(read) : AgendaGroup.filled(read)
     }
 
     /// Nothing to show: no rows anywhere, and either the empty days
@@ -77,13 +83,34 @@ struct AgendaView: View {
         .onAppear { model.refreshAgenda() }
     }
 
-    /// The filter button: a menu with the one tick, open while it is
-    /// changed. The count of checks in effect rides beside the glyph,
-    /// as Done's trigger has it.
+    /// The filter button: a menu with the view's two ticks, then the
+    /// workspaces once there is more than one, open while it is
+    /// changed. The count of workspaces checked rides beside the glyph,
+    /// as Done's trigger has it; the two view options are not counted
+    /// and not cleared (the web's and the Mac's rule).
     private var filterMenu: some View {
-        let count = hideEmptyDays ? 1 : 0
+        let workspaces = model.doneWorkspaceOptions
+        let checked = model.calendarCheckedDocs
+        let count = checked.count
         return Menu {
             Toggle("Hide Empty Days", isOn: $hideEmptyDays)
+            Toggle("Hide Past Days", isOn: $hidePastDays)
+            if workspaces.count > 1 {
+                Section("Workspaces") {
+                    ForEach(workspaces) { workspace in
+                        Toggle(isOn: Binding(
+                            get: { checked.contains(workspace.docId) },
+                            set: { _ in model.toggleCalendarWorkspace(workspace.docId) }
+                        )) {
+                            Text(verbatim: workspace.name)
+                        }
+                    }
+                }
+                Section {
+                    Button("Clear") { model.clearCalendarFilter() }
+                        .disabled(checked.isEmpty)
+                }
+            }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "line.3.horizontal.decrease")
@@ -136,9 +163,11 @@ struct AgendaView: View {
 /// under it the list it is in (icon and name; none for an item on the
 /// calendar alone), its place when it has one and then
 /// the workspace when the row is not Personal's (ahead of those lines
-/// the assignee's small avatar, when an open item has one), and on the right the time when timed with a note under
-/// it for the tone (overdue in red) or the
-/// duration. The checkbox ticks; the rest of the row opens the sheet.
+/// the assignee's small avatar, when an open item has one), and on the right the time when timed ("All day" for
+/// an event with none) with a note under it for the tone (overdue in
+/// red) or the duration. A row of a multi-day span (one on each of its
+/// days) says which day it is ("Day 2") over where it lives, and its
+/// time is what the day holds of it (`AgendaEntry.lane`). The checkbox ticks; the rest of the row opens the sheet.
 /// An event has the event pill for a checkbox while it is open or its
 /// day has gone by (`AgendaEntry.showsCheck`). A task done today is
 /// muted at the end of Today, with no time or length.
@@ -172,7 +201,9 @@ struct AgendaRowView: View {
                         }
                         // Where it lives, with who it is assigned to
                         // ahead of those lines.
-                        if assignee != nil || row.listName != nil || row.place != nil || row.docName != nil {
+                        if assignee != nil || row.spanDayLabel != nil || row.listName != nil || row.place != nil
+                            || row.docName != nil
+                        {
                             HStack(alignment: .top, spacing: 5) {
                                 if let assignee {
                                     MemberAvatar(accountId: assignee.id, email: assignee.email, side: 15)
@@ -181,6 +212,12 @@ struct AgendaRowView: View {
                                             "Assigned to \(assignee.email ?? String(localized: "A former member"))")
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
+                                    if let day = row.spanDayLabel {
+                                        // Which day of a multi-day span the row is.
+                                        Text("Day \(day)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                     if let list = row.listName {
                                         // The list's icon, then its name.
                                         HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -222,8 +259,17 @@ struct AgendaRowView: View {
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 2) {
-                        if row.isTimed, let when = row.when {
-                            Text(String(when.dropFirst(11).prefix(5)))
+                        // What the day holds of the row (`AgendaEntry.lane`).
+                        switch row.lane {
+                        case .none: EmptyView()
+                        case .allDay:
+                            Text("All day").font(.subheadline).foregroundStyle(.secondary)
+                        case .start(let clock):
+                            Text(verbatim: clock)
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        case .until(let clock):
+                            Text("until \(clock)")
                                 .font(.subheadline.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
@@ -243,7 +289,8 @@ struct AgendaRowView: View {
         case .overdue: return (String(localized: "Overdue"), .red)
         case .neutral: break
         }
-        if let minutes = row.duration, minutes > 0 {
+        // A span's rows say which day they are instead ("Day 2").
+        if row.span == nil, let minutes = row.duration, minutes > 0 {
             return (Self.span(Int(minutes)), .secondary)
         }
         return nil

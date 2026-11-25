@@ -65,14 +65,17 @@ struct EventSlot: View {
 
 /// What an event's Calendar row leads with instead of a checkbox: the
 /// short upright bar a calendar leads an event with, grey, as tall as
-/// the row and centred in the box's column. Display only; the item's
-/// panel still marks it done.
+/// the row and centred in the box's column. Blue while the event is
+/// selected, on each of its rows (a span's other days too), as the
+/// web's `.upcoming-row[data-picked]`. Display only; the item's panel
+/// still marks it done.
 struct EventPill: View {
+    var picked = false
     @ScaledMetric(relativeTo: .body) private var side: CGFloat = CheckMetrics.side
 
     var body: some View {
         Capsule()
-            .fill(.tertiary)
+            .fill(picked ? AnyShapeStyle(Color(nsColor: .linkColor)) : AnyShapeStyle(.tertiary))
             .frame(width: 3)
             .padding(.vertical, 3)
             .frame(width: side)
