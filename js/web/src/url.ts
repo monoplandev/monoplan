@@ -5,11 +5,9 @@
 // server route is needed. The grammar is a single self-describing
 // token, safe to paste into a shell or a chat:
 //
-//   "#item_" id | "#upcoming_" id | "#list_" id | "#inbox" | "#inbox_" doc
-//   | "#inbox_home"
+//   "#item_" id | "#upcoming_" id | "#list_" id | "#inbox"
 //   | "#focus" | "#upcoming" | "#assigned" | "#done" | "#bin" | "#menu"
 //   id  = [0-9a-f]{32}
-//   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
 //
 // `#upcoming_<id>` is the calendar anchored on an item: the same item
 // as `#item_<id>`, opened over the agenda instead of its home list, for
@@ -25,13 +23,11 @@
 // An item URL names only the item: the list and doc are looked up
 // client-side across every open doc, so a link keeps working after the
 // item moves. A user list's id is unique across docs too, so `#list_`
-// carries no doc either; only another doc's reserved Inbox needs one
-// (`#inbox_<doc>`), since every doc has an `inbox` (`spec/sharing-plan.md`).
+// carries no doc either.
 //
 // `#inbox` is the combined Inbox, every workspace's queue as one
-// (`spec/inbox-plan.md` "One Inbox"); `#inbox_<doc>` is it filtered to
-// one workspace, and `#inbox_home` filtered to Personal (Home's doc id
-// is normalised out of a view, so it has a name of its own).
+// (`spec/inbox-plan.md` "One Inbox"). Its workspace filter is a device
+// preference, not part of the address, and no URL names one doc's Inbox.
 
 import type { ViewKey } from "./prefs.ts";
 
@@ -42,7 +38,6 @@ export type Route =
   | { kind: "item"; id: string; on?: "upcoming" };
 
 const ID_RE = /^[0-9a-f]{32}$/;
-const DOC_RE = /^[0-9a-f-]{32,36}$/;
 
 /** Parse a `location.hash` (with or without the leading `#`). Returns
  *  null for an empty or unrecognised hash; callers leave their state
@@ -54,8 +49,6 @@ export function parseHash(hash: string): Route | null {
     case "inbox":
     case "list_inbox":
       return { kind: "view", view: { kind: "list", id: "inbox", all: true } };
-    case "inbox_home":
-      return { kind: "view", view: { kind: "list", id: "inbox" } };
     // The reserved `events` list has no view of its own: the calendar
     // is its home (`spec/events-plan.md`).
     case "list_events":
@@ -80,12 +73,6 @@ export function parseHash(hash: string): Route | null {
   if (token.startsWith("list_")) {
     const id = token.slice("list_".length);
     return ID_RE.test(id) ? { kind: "view", view: { kind: "list", id } } : null;
-  }
-  if (token.startsWith("inbox_")) {
-    const docId = token.slice("inbox_".length);
-    return DOC_RE.test(docId)
-      ? { kind: "view", view: { kind: "list", id: "inbox", docId } }
-      : null;
   }
   return null;
 }
@@ -112,13 +99,12 @@ export function inviteUrl(secretHex: string, base: string = appBase()): string {
 }
 
 /** Canonical hash (leading `#` included) for a view. A list view with
- *  no `docId` is a Home list; another doc's Inbox names its doc, and the
- *  combined Inbox is plain `#inbox`. */
+ *  no `docId` is a Home list; the Inbox is plain `#inbox`, the combined
+ *  Inbox, whatever its filter. */
 export function viewHash(view: ViewKey): string {
   if (view.kind !== "list") return `#${view.kind}`;
   if (view.id !== "inbox") return `#list_${view.id}`;
-  if (view.all) return "#inbox";
-  return view.docId === undefined ? "#inbox_home" : `#inbox_${view.docId}`;
+  return "#inbox";
 }
 
 /** Canonical hash for an item. */

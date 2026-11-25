@@ -269,10 +269,14 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   const viewDocId = (v: ViewKey): string =>
     v.kind === "list" && v.docId !== undefined && byId.has(v.docId) ? v.docId : homeDocId;
   const appForView = (v: ViewKey): DocApp => byId.get(viewDocId(v)) ?? home;
+  // Every doc's Inbox is seen through the one combined Inbox
+  // (`spec/inbox-plan.md` "One Inbox"): no view names one doc's Inbox.
   const listView = (docId: string, listId: string): ViewKey =>
-    docId === homeDocId
-      ? { kind: "list", id: listId }
-      : { kind: "list", id: listId, docId };
+    listId === "inbox"
+      ? { kind: "list", id: "inbox", all: true }
+      : docId === homeDocId
+        ? { kind: "list", id: listId }
+        : { kind: "list", id: listId, docId };
 
   const version = (): number => {
     let n = 0;

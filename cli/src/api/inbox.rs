@@ -5,7 +5,7 @@
 use serde::Serialize;
 
 use super::{Ctx, doc_tag, items::Item};
-use monoplan_core::LIST_INBOX;
+use monoplan_core::{Doc, ItemView, inbox};
 
 /// One row of the combined Inbox: the item and its workspace.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -17,46 +17,46 @@ pub struct InboxEntry {
     pub doc_id: Option<String>,
 }
 
-/// Every open workspace's Inbox rows as one arrival-ordered queue,
-/// oldest first: what each doc's Inbox shows (Open, not binned, no
-/// date), merged on the queue key `(inbox_at ?? created_at,
-/// created_at)`, then the workspace and the id. Newest first is the
-/// device's preference; the caller reverses.
-pub fn inbox(cx: &Ctx) -> anyhow::Result<Vec<InboxEntry>> {
-    let mut rows: Vec<((i64, i64), InboxEntry)> = cx
+/// The combined Inbox's rows as one arrival-ordered queue, oldest
+/// first: what each doc's Inbox shows (Open, not binned, no date) in
+/// the workspaces `filter` names (doc ids), or every open workspace
+/// when it is empty or names none that is open
+/// (`monoplan_core::inbox::scope`), merged on the queue key
+/// (`monoplan_core::inbox::merge`). Newest first is the device's
+/// preference; the caller reverses.
+pub fn inbox(cx: &Ctx, filter: &[String]) -> anyhow::Result<Vec<InboxEntry>> {
+    let sources: Vec<(Option<String>, &Doc)> = cx
         .sources()
         .into_iter()
-        .flat_map(|(tag, doc)| {
-            let doc_id = doc_tag(tag).0;
-            let mut items = doc.items_in_list(LIST_INBOX, false);
-            items.retain(|i| i.is_listed());
-            items
+        .map(|(tag, doc)| (doc_tag(tag).0, doc))
+        .collect();
+    let open: Vec<Option<String>> = sources.iter().map(|(k, _)| k.clone()).collect();
+    let filter: Vec<Option<String>> = filter.iter().cloned().map(Some).collect();
+    let shown = inbox::scope(&open, &filter);
+    let mut rows: Vec<(Option<String>, ItemView)> = sources
+        .iter()
+        .filter(|(k, _)| shown.contains(&k))
+        .flat_map(|(k, doc)| {
+            inbox::doc_rows(doc, |_| false)
                 .into_iter()
-                .map(|i| {
-                    let key = (i.inbox_at.unwrap_or(i.created_at), i.created_at);
-                    (
-                        key,
-                        InboxEntry {
-                            item: Item::from(&i),
-                            doc_id: doc_id.clone(),
-                        },
-                    )
-                })
-                .collect::<Vec<_>>()
+                .map(move |i| (k.clone(), i))
         })
         .collect();
-    rows.sort_by(|(ka, a), (kb, b)| {
-        ka.cmp(kb)
-            .then_with(|| (&a.doc_id, &a.item.id).cmp(&(&b.doc_id, &b.item.id)))
-    });
-    Ok(rows.into_iter().map(|(_, r)| r).collect())
+    inbox::merge(&mut rows);
+    Ok(rows
+        .into_iter()
+        .map(|(doc_id, i)| InboxEntry {
+            item: Item::from(&i),
+            doc_id,
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::focus::Lens;
-    use monoplan_core::Doc;
+    use monoplan_core::LIST_INBOX;
 
     #[test]
     fn merges_every_docs_inbox_in_arrival_order() {
@@ -85,7 +85,65 @@ mod tests {
         let lens = Lens::home(&home);
         let docs = [&home, &work];
         let cx = Ctx::bare(&home, &docs, &lens);
-        let ids: Vec<String> = inbox(&cx).unwrap().into_iter().map(|r| r.item.id).collect();
+        let ids: Vec<String> = inbox(&cx, &[])
+            .unwrap()
+            .into_iter()
+            .map(|r| r.item.id)
+            .collect();
         assert_eq!(ids, [a, b, c, moved]);
+    }
+
+    #[test]
+    fn filter_narrows_to_the_named_workspaces() {
+        use crate::workspace::Candidate;
+        use monoplan_core::DocId;
+        let docs = [
+            Doc::new().unwrap(),
+            Doc::new().unwrap(),
+            Doc::new().unwrap(),
+        ];
+        let ids: Vec<DocId> = (0..3).map(|_| DocId(uuid::Uuid::now_v7())).collect();
+        let items: Vec<String> = docs
+            .iter()
+            .map(|d| d.add_item(LIST_INBOX, "x").unwrap())
+            .collect();
+        let workspaces: Vec<(Candidate, &Doc)> = ids
+            .iter()
+            .zip(&docs)
+            .map(|(id, d)| {
+                (
+                    Candidate {
+                        doc_id: *id,
+                        name: None,
+                    },
+                    d,
+                )
+            })
+            .collect();
+        let lens = Lens::home(&docs[0]);
+        let open: Vec<&Doc> = docs.iter().collect();
+        let mut cx = Ctx::bare(&docs[0], &open, &lens);
+        cx.workspaces = &workspaces;
+        let shown = |filter: &[DocId]| -> Vec<String> {
+            let filter: Vec<String> = filter.iter().map(|d| d.0.to_string()).collect();
+            let mut got: Vec<String> = inbox(&cx, &filter)
+                .unwrap()
+                .into_iter()
+                .map(|r| r.item.id)
+                .collect();
+            got.sort();
+            got
+        };
+        let sorted = |mut v: Vec<String>| {
+            v.sort();
+            v
+        };
+        assert_eq!(shown(&[]), sorted(items.clone()));
+        assert_eq!(
+            shown(&[ids[2], ids[0]]),
+            sorted(vec![items[0].clone(), items[2].clone()])
+        );
+        // A filter naming no open workspace reads as every workspace.
+        assert_eq!(shown(&[DocId(uuid::Uuid::now_v7())]), sorted(items));
     }
 }

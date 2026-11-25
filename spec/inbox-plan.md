@@ -238,9 +238,10 @@ states who will see the result.
 Every workspace keeps its own Inbox bucket (each doc is its own E2EE
 container, so no single container can span them), but the user sees
 **one Inbox**: a read over every open doc's Inbox, merged into one
-queue, with a filter that narrows it to one workspace. An inbox is a
+queue, with a filter that narrows it to some workspaces. An inbox is a
 place to empty; two places to check is one too many. The per-workspace
-Inbox rows leave the sidebars.
+Inbox rows leave the sidebars, and no view, URL or title names one
+workspace's Inbox.
 
 - **Rows.** What each doc's Inbox shows (Open, not binned, no date),
   merged oldest first on the queue key `(inbox_at ?? created_at,
@@ -251,11 +252,20 @@ Inbox rows leave the sidebars.
   members' captures and a deleted shared list's items included: triage
   is everyone's job in a small team. Narrowing to one's own captures or
   assignments was considered and left until it proves noisy.
-- **Filter.** One workspace at a time, or all. A device preference: the
-  Inbox opens the way it was left; a filter naming a doc no longer open
-  falls back to all.
-- **Capture** lands in Home's Inbox unfiltered, the filtered workspace's
-  Inbox when filtered.
+- **Filter** (multi-select, 2026-11-26). "All workspaces" first,
+  checked by default; then a check per workspace, any number at once.
+  Checking "All", or Clear, drops the picks; checking every workspace
+  is "All". A device preference (the picked doc ids): the Inbox opens
+  the way it was left. A pick naming a doc no longer open is ignored and
+  kept; when no pick is open the Inbox shows all. The filter is applied
+  in Rust with the merge (`monoplan_core::inbox`: `scope`, `doc_rows`,
+  `merge`), never by opening one doc's Inbox. The Inbox's count (nav,
+  header, Home row) is of the rows the filter shows. The title is
+  "Inbox" whatever the filter; rows name their workspace while more
+  than one is shown. Revealing an Inbox item of a workspace the filter
+  hides resets the filter to all.
+- **Capture** lands in Home's Inbox while Personal is shown (all, or
+  picked), else in the first shown workspace's Inbox.
 - **Drop onto the Inbox entry** sends each row to its own workspace's
   Inbox: nothing crosses a workspace, so nothing needs confirming.
 - **Moves out** are the usual list moves; into another workspace's list
@@ -267,11 +277,12 @@ As built:
 
 | Layer | |
 |---|---|
-| core / api | `api::inbox::inbox` (`cli/src/api/inbox.rs`), `InboxEntry { item, doc_id }`; FFI `Engine.inbox()`; no CLI command |
-| wasm | `Replica.inboxQueueAt(id)`: the queue time, so the web merges the per-doc Open arrays it already projects |
-| web | view `{ kind: "list", id: "inbox", all: true }` (`prefs.ts`), URLs above; `combinedInbox` in `Workspace.tsx`, one top-group "Inbox" nav row (first, lit for filtered views too, `data-drop-inbox-own`), section Inbox rows gone; the header filter is the Done menu's workspace facet used single-choice; filtered views title "Workspace › Inbox", Personal included; the filter in `inboxScope.ts` (localStorage), read by the nav row, the 4 key and the find palette, and by reveals of an Inbox item; `[` / `]` treat a filtered Inbox as the Inbox slot |
-| iOS | `InboxView.swift` over `AppModel.inbox` (`Engine.inbox`), one Home row first in the top group (Personal's section shows only with user lists), a toolbar filter menu (`@AppStorage("inboxWorkspace")`, empty ≡ all), rows name their workspace only unfiltered; Move in selection mode only within one workspace; a capture or "Show in List" into a hidden workspace resets the filter; type-checked, not run |
-| macOS | `Lens.inbox` first in the sidebar's top group (newest-first menu on it), `InboxFilter.swift` (radio popover, `UserDefaults` `MonoplanInboxFilter`, kept while its doc is closed), `select(workspace:list: "inbox")` maps to the lens, saved pages converted; sidebar drop groups by doc into `moveItems(…, "inbox")`, one undo step per workspace; workspace name at the row's edge only unfiltered; built and tests pass, not run |
+| core | `monoplan_core::inbox` (`core/src/inbox.rs`): `scope(open, filter)`, `doc_rows(doc, keep)`, `queue_key`, `merge` |
+| api / FFI | `api::inbox::inbox(cx, filter)` (`cli/src/api/inbox.rs`), `InboxEntry { item, doc_id }`; FFI `Engine.inbox(filter:)` (doc ids, empty ≡ all); no CLI command |
+| wasm | `InboxMux` (`new(filter)`, `add(docId, replica, keep)` per open doc, `ids()` the merged queue; `keep` is the linger beat's just-closed rows) and `inboxScope(open, filter)` |
+| web | view `{ kind: "list", id: "inbox", all: true }` (`prefs.ts`), the only Inbox view: `docs.listView(_, "inbox")` returns it, `#inbox` its only URL (`#inbox_<doc>` / `#inbox_home` gone, as is the workspace heading's "Copy link"); `combinedInbox` in `Workspace.tsx` over `InboxMux`; one top-group "Inbox" nav row (`data-drop-inbox-own`); the header filter is the Done menu with an "All workspaces" option over its workspace facet; the filter in `inboxScope.ts` (localStorage JSON array, a signal) |
+| iOS | `InboxView.swift` over `AppModel.inbox` (`Engine.inbox(filter:)`), one Home row first in the top group (Personal's section shows only with user lists), a toolbar filter menu of toggles that stays open (`@AppStorage("inboxWorkspace")`, doc ids comma-separated, empty ≡ all); Move in selection mode only within one workspace; a capture or "Show in List" into a hidden workspace resets the filter; type-checked, not run |
+| macOS | `Lens.inbox` first in the sidebar's top group (newest-first menu on it), `InboxFilter.swift` (checkbox popover, "All Workspaces" first, Clear; `UserDefaults` `MonoplanInboxFilter` string array), `select(workspace:list: "inbox")` maps to the lens and resets a filter hiding that workspace; sidebar drop groups by doc into `moveItems(…, "inbox")`, one undo step per workspace |
 
 ## Open questions
 

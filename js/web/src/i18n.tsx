@@ -335,6 +335,8 @@ export type Messages = {
      *  and the item dropping every check. */
     filter: string;
     filterWorkspaces: string;
+    /** The Inbox filter's first check: every workspace, the default. */
+    filterAllWorkspaces: string;
     filterLists: string;
     filterListsPlaceholder: string;
     filterNoLists: string;
@@ -868,6 +870,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       showState: "Mostrar estado",
       filter: "Filtrar",
       filterWorkspaces: "Espacios",
+      filterAllWorkspaces: "Todos los espacios",
       filterLists: "Listas",
       filterListsPlaceholder: "Filtrar listas",
       filterNoLists: "Sin listas",
@@ -1293,6 +1296,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       showState: "Show state",
       filter: "Filter",
       filterWorkspaces: "Workspaces",
+      filterAllWorkspaces: "All workspaces",
       filterLists: "Lists",
       filterListsPlaceholder: "Filter lists",
       filterNoLists: "No lists",

@@ -6,11 +6,14 @@
 // same key the single Inbox had). The Inbox is a queue in arrival
 // order, so its rows are never dragged to a new place.
 // With more than one workspace open, the filter at the top right
-// narrows the rows to one workspace (a device preference,
-// `inboxWorkspaceKey`; one no longer open reads as every workspace),
-// and while it is not narrowed each row names its workspace. The
-// bottom bar's add button captures into the filtered workspace's
-// Inbox, else Personal's (`HomeView`). A row's checkbox ticks the item
+// narrows the rows: "All Workspaces" (the default), or any number of
+// workspaces checked at once (a device preference, `inboxWorkspaceKey`;
+// one no longer open is ignored). The engine applies it
+// (`Engine.inbox(filter:)`), so a change reads the rows again. The
+// title never names a workspace: it is one Inbox. While rows of more
+// than one workspace show, each names its workspace. The bottom bar's
+// add button captures into Personal's Inbox while Personal is shown,
+// else the first shown workspace's (`HomeView`). A row's checkbox ticks the item
 // (which drops it from the page); the row opens its sheet.
 // A row swiped left is selected and the page is then selecting, as a
 // list's page is (`ListItemsView`): the picked rows are starred or
@@ -20,8 +23,9 @@
 import MonoplanCore
 import SwiftUI
 
-/// `UserDefaults` key of the Inbox page's workspace filter: a doc id,
-/// or absent / empty for every workspace. Display only.
+/// `UserDefaults` key of the Inbox page's workspace filter: the picked
+/// doc ids comma-separated, or absent / empty for every workspace
+/// (`AppModel.inboxFilterIds`).
 let inboxWorkspaceKey = "inboxWorkspace"
 
 struct InboxView: View {
@@ -33,7 +37,7 @@ struct InboxView: View {
     /// The device's Inbox order (`inboxNewestFirstKey`): reverses the
     /// rows on screen, never a doc.
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
-    /// The workspace filter as stored; `filter` is what applies.
+    /// The workspace filter as stored; the engine applies it.
     @AppStorage(inboxWorkspaceKey) private var storedFilter = ""
 
     /// The keys of the rows picked while selecting.
@@ -43,26 +47,19 @@ struct InboxView: View {
     /// "Move to Bin" for the picked rows is waiting on its confirmation.
     @State private var confirmingBin = false
 
-    /// The workspace the rows are narrowed to; nil is every one.
-    private var filter: String? { model.inboxFilter(storedFilter) }
+    /// The open workspaces picked; none is All Workspaces.
+    private var picked: [String] { model.inboxPicked(storedFilter) }
 
-    /// The filtered workspace's name, for the title.
-    private var filterName: String? {
-        guard let filter else { return nil }
-        return model.doneWorkspaceOptions.first(where: { $0.docId == filter })?.name
-    }
-
-    /// The rows in the order shown: the filter's workspace only, and
-    /// newest first when the device says so.
+    /// The rows in the order shown: as the engine narrowed and merged
+    /// them, newest first when the device says so.
     private var rows: [InboxEntry] {
-        let kept = filter.map { docId in model.inbox.filter { model.docId(of: $0) == docId } } ?? model.inbox
-        return inboxNewestFirst ? Array(kept.reversed()) : kept
+        inboxNewestFirst ? Array(model.inbox.reversed()) : model.inbox
     }
 
     /// Each row names its workspace only while rows of several can
     /// be on the page.
     private var namesWorkspaces: Bool {
-        filter == nil && (model.session?.docs.count ?? 0) > 1
+        model.inboxShown(storedFilter).count > 1
     }
 
     private func workspaceName(_ entry: InboxEntry) -> String? {
@@ -72,7 +69,7 @@ struct InboxView: View {
     }
 
     /// The picked rows, in the order shown.
-    private var picked: [ItemRef] {
+    private var pickedRows: [ItemRef] {
         rows.filter { selection.contains($0.key) }.map(\.ref)
     }
 
@@ -88,7 +85,7 @@ struct InboxView: View {
     /// its row can be scrolled to (`showCaptured`).
     private func unhideCaptured() {
         guard let captured = model.captured, captured.list.listId == "inbox",
-              let filter, filter != captured.list.docId
+              !model.inboxShown(storedFilter).contains(captured.list.docId)
         else { return }
         storedFilter = ""
     }
@@ -153,11 +150,8 @@ struct InboxView: View {
             }
         }
         .navigationTitle("Inbox")
-        // Narrowed to one workspace, its name leads the title, as a
-        // shared workspace's list page has it.
         .countedTitle(
-            String(localized: "Inbox"), count: model.inboxError == nil ? rows.count : nil,
-            workspace: filterName
+            String(localized: "Inbox"), count: model.inboxError == nil ? rows.count : nil
         ) {
             CatalogIcon(name: "Inbox")
         }
@@ -192,7 +186,7 @@ struct InboxView: View {
             "Move the selected items to the Bin?", isPresented: $confirmingBin, titleVisibility: .visible
         ) {
             Button("Move to Bin", role: .destructive) {
-                model.binItems(picked)
+                model.binItems(pickedRows)
                 endSelecting()
             }
         } message: {
@@ -208,7 +202,7 @@ struct InboxView: View {
                         workspace: model.sharedWorkspaceName(docId),
                         pick: { target in
                             guard target.listId != "inbox" else { return }
-                            model.moveItems(picked.map(\.itemId), inDoc: docId, toList: target.listId)
+                            model.moveItems(pickedRows.map(\.itemId), inDoc: docId, toList: target.listId)
                             endSelecting()
                         },
                         done: { pickingList = false })
@@ -217,6 +211,7 @@ struct InboxView: View {
             }
         }
         .onChange(of: model.captured, initial: true) { unhideCaptured() }
+        .onChange(of: storedFilter) { model.refreshInbox() }
         .refreshable { model.refreshInbox() }
         .onAppear { model.refreshInbox() }
         // Nothing stays picked once selecting is over, and a page that
@@ -225,24 +220,39 @@ struct InboxView: View {
         .onDisappear { selecting = false }
     }
 
-    /// The filter button: every workspace, then each open one
-    /// (Personal first). Tinted while narrowed, as the Calendar's is.
+    /// The filter button: "All Workspaces", then a check per open
+    /// workspace (Personal first), any number at once; the menu stays
+    /// open while checks change. Tinted while narrowed, as the
+    /// Calendar's is.
     private var filterMenu: some View {
-        Menu {
-            Picker("Workspace", selection: Binding(get: { filter ?? "" }, set: { storedFilter = $0 })) {
-                Text("All Workspaces").tag("")
+        let picked = picked
+        let narrowed = !picked.isEmpty
+        return Menu {
+            Toggle(isOn: Binding(get: { !narrowed }, set: { _ in storedFilter = "" })) {
+                Text("All Workspaces")
+            }
+            Section {
                 ForEach(model.doneWorkspaceOptions) { workspace in
-                    Text(verbatim: workspace.name).tag(workspace.docId)
+                    Toggle(isOn: Binding(
+                        get: { picked.contains(workspace.docId) },
+                        set: { _ in storedFilter = model.inboxFilterToggling(workspace.docId, in: storedFilter) }
+                    )) {
+                        Text(verbatim: workspace.name)
+                    }
                 }
             }
-            .pickerStyle(.inline)
         } label: {
             Image(systemName: "line.3.horizontal.decrease")
-                .fontWeight(filter != nil ? .semibold : .regular)
-                .foregroundStyle(filter != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                .fontWeight(narrowed ? .semibold : .regular)
+                .foregroundStyle(narrowed ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
         }
+        .menuActionDismissBehavior(.disabled)
         .accessibilityLabel("Filter")
-        .accessibilityValue(filterName ?? String(localized: "All Workspaces"))
+        .accessibilityValue(
+            narrowed
+                ? model.doneWorkspaceOptions.filter { picked.contains($0.docId) }.map(\.name)
+                    .formatted(.list(type: .and))
+                : String(localized: "All Workspaces"))
     }
 
     /// The bars while selecting: pick every row (or none) and Done at
@@ -268,7 +278,7 @@ struct InboxView: View {
             }
             .disabled(pickedDoc == nil)
             Button {
-                model.starItems(picked)
+                model.starItems(pickedRows)
                 endSelecting()
             } label: {
                 Label("Star", systemImage: "star")
@@ -298,7 +308,7 @@ struct InboxView: View {
                 ContentUnavailableView(
                     "Nothing open",
                     systemImage: "tray",
-                    description: Text("Open items in \(filterName ?? String(localized: "Inbox")) show here.")
+                    description: Text("Open items in \(String(localized: "Inbox")) show here.")
                 )
             }
         }

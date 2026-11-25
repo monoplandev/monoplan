@@ -1439,11 +1439,15 @@ impl Engine {
         Ok(self.client.call_blocking(None, api::assigned::assigned)?)
     }
 
-    /// Every open workspace's Inbox as one queue, oldest first, each
-    /// row tagged with its workspace (spec/inbox-plan.md "One Inbox").
-    /// Newest first is the device's preference: reverse it.
-    pub fn inbox(&self) -> Result<Vec<InboxEntry>, EngineError> {
-        Ok(self.client.call_blocking(None, api::inbox::inbox)?)
+    /// The combined Inbox as one queue, oldest first, each row tagged
+    /// with its workspace (spec/inbox-plan.md "One Inbox"): the
+    /// workspaces `filter` names (doc ids), or every open one when it
+    /// is empty or names none that is open. Newest first is the
+    /// device's preference: reverse it.
+    pub fn inbox(&self, filter: Vec<String>) -> Result<Vec<InboxEntry>, EngineError> {
+        Ok(self
+            .client
+            .call_blocking(None, move |cx| api::inbox::inbox(cx, &filter))?)
     }
 
     /// What this device may remind about: every open workspace's Open

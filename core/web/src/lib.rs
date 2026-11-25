@@ -1588,6 +1588,68 @@ pub fn is_memberships_changed(bytes: &[u8]) -> bool {
     core_is_memberships_changed(bytes)
 }
 
+// ---------- InboxMux ----------
+
+/// The workspaces the combined Inbox shows (`spec/inbox-plan.md` "One
+/// Inbox"): `filter`'s open ones in `open`'s order, or every open one
+/// when it is empty or names none that is open.
+#[wasm_bindgen(js_name = inboxScope)]
+pub fn inbox_scope(open: Vec<String>, filter: Vec<String>) -> Vec<String> {
+    monoplan_core::inbox::scope(&open, &filter)
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
+/// The combined Inbox's mux: every open doc's Inbox rows, narrowed by
+/// the workspace filter and merged into one queue in Rust
+/// (`monoplan_core::inbox`). Add each open doc's replica, then read the
+/// queue's item ids, oldest first.
+#[wasm_bindgen]
+pub struct InboxMux {
+    filter: Vec<String>,
+    open: Vec<String>,
+    rows: Vec<(String, monoplan_core::ItemView)>,
+}
+
+#[wasm_bindgen]
+impl InboxMux {
+    /// `filter`: the doc ids picked; empty is every workspace.
+    #[wasm_bindgen(constructor)]
+    pub fn new(filter: Vec<String>) -> InboxMux {
+        InboxMux {
+            filter,
+            open: Vec::new(),
+            rows: Vec::new(),
+        }
+    }
+
+    /// One open doc and its Inbox rows. `keep`: ids of this doc's
+    /// just-closed Inbox rows to keep in place (the linger beat).
+    pub fn add(&mut self, doc_id: String, replica: &Replica, keep: Vec<String>) {
+        let rows = monoplan_core::inbox::doc_rows(replica.doc(), |id| keep.iter().any(|k| k == id));
+        self.rows
+            .extend(rows.into_iter().map(|i| (doc_id.clone(), i)));
+        self.open.push(doc_id);
+    }
+
+    /// The queue's item ids, oldest first, over the filter's scope.
+    /// Consumes the mux (its JS handle is freed).
+    pub fn ids(self) -> Vec<String> {
+        let InboxMux { filter, open, rows } = self;
+        let shown: Vec<String> = monoplan_core::inbox::scope(&open, &filter)
+            .into_iter()
+            .cloned()
+            .collect();
+        let mut rows: Vec<_> = rows
+            .into_iter()
+            .filter(|(k, _)| shown.contains(k))
+            .collect();
+        monoplan_core::inbox::merge(&mut rows);
+        rows.into_iter().map(|(_, i)| i.id).collect()
+    }
+}
+
 // ---------- Replica ----------
 
 #[wasm_bindgen]
@@ -2603,16 +2665,6 @@ impl Replica {
     #[wasm_bindgen(js_name = getItemJson)]
     pub fn get_item_json(&self, item_id: &str) -> Option<String> {
         self.doc().get_item(item_id).map(|i| item_to_json(&i))
-    }
-
-    /// An item's Inbox queue time (`spec/inbox-plan.md` "Order"):
-    /// `inbox_at`, else `created_at`; `undefined` for no such item. The
-    /// combined Inbox merges every doc's Inbox on it ("One Inbox").
-    #[wasm_bindgen(js_name = inboxQueueAt)]
-    pub fn inbox_queue_at(&self, item_id: &str) -> Option<f64> {
-        self.doc()
-            .get_item(item_id)
-            .map(|i| i.inbox_at.unwrap_or(i.created_at) as f64)
     }
 
     #[wasm_bindgen(js_name = getListMetaJson)]

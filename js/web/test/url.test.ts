@@ -16,7 +16,6 @@ describe("hash routes", () => {
   test("parses every token", () => {
     expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
     expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
-    expect(parseHash("#inbox_home")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
     // The reserved `events` list's home is the calendar.
     expect(parseHash("#list_events")).toEqual({ kind: "view", view: { kind: "upcoming" } });
     expect(parseHash("#focus")).toEqual({ kind: "view", view: { kind: "focus" } });
@@ -48,23 +47,21 @@ describe("hash routes", () => {
     // The day anchor is reserved, not parsed (spec/calendar-plan.md).
     expect(parseHash("#upcoming_2026-07-13")).toBeNull();
     expect(parseHash(`#upcoming_${ID}x`)).toBeNull();
+    // No URL names one workspace's Inbox (`spec/inbox-plan.md` "One Inbox").
     expect(parseHash("#inbox_")).toBeNull();
-    expect(parseHash("#inbox_not-a-doc")).toBeNull();
+    expect(parseHash("#inbox_home")).toBeNull();
+    expect(parseHash("#inbox_01a15717-7622-7323-8997-af3e145454d2")).toBeNull();
   });
 
-  test("another doc's inbox names its doc; a Home list never does", () => {
+  test("no list hash names a doc", () => {
     const doc = "01a15717-7622-7323-8997-af3e145454d2";
-    expect(parseHash(`#inbox_${doc}`)).toEqual({
-      kind: "view",
-      view: { kind: "list", id: "inbox", docId: doc },
-    });
-    expect(viewHash({ kind: "list", id: "inbox", docId: doc })).toBe(`#inbox_${doc}`);
+    expect(viewHash({ kind: "list", id: "inbox", docId: doc })).toBe("#inbox");
     // A user list's id is unique across docs, so its hash carries none.
     expect(viewHash({ kind: "list", id: ID, docId: doc })).toBe(`#list_${ID}`);
   });
 
   test("round-trips canonical forms", () => {
-    for (const h of ["#inbox", "#inbox_home", "#focus", "#upcoming", "#done", "#bin", `#list_${ID}`]) {
+    for (const h of ["#inbox", "#focus", "#upcoming", "#done", "#bin", `#list_${ID}`]) {
       const r = parseHash(h);
       expect(r?.kind).toBe("view");
       if (r?.kind === "view") expect(viewHash(r.view)).toBe(h);
@@ -73,9 +70,9 @@ describe("hash routes", () => {
     expect(r).toEqual({ kind: "item", id: ID });
   });
 
-  test("the combined Inbox is the short form; Home's own Inbox is named", () => {
+  test("every Inbox view is the combined Inbox's hash", () => {
     expect(viewHash({ kind: "list", id: "inbox", all: true })).toBe("#inbox");
-    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox_home");
+    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox");
   });
 
   test("open item wins over the view", () => {

@@ -1180,15 +1180,6 @@ function DocSection(props: {
               >
                 {m().nav.sharing}
               </ContextMenu.Item>
-              <ContextMenu.Item
-                class="context-menu-item"
-                disabled={!canCopyLink()}
-                onSelect={() => {
-                  void navigator.clipboard.writeText(listUrl("inbox", docId));
-                }}
-              >
-                {m().common.copyLink}
-              </ContextMenu.Item>
             </ContextMenu.Content>
           </ContextMenu.Portal>
         </ContextMenu>

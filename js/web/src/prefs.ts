@@ -25,10 +25,10 @@ export type ViewKey =
        *  list, keep their shape; the runtime's `setView` normalises a
        *  Home doc id away (`spec/sharing-plan.md` Phase 5). */
       docId?: string;
-      /** Inbox only: every workspace's Inbox as one queue, the combined
-       *  Inbox (`spec/inbox-plan.md` "One Inbox"). `docId` is then
-       *  absent; without it the view is the one doc's Inbox, the
-       *  combined Inbox filtered to that workspace. */
+      /** Inbox only, always set there: every workspace's Inbox as one
+       *  queue, the combined Inbox (`spec/inbox-plan.md` "One Inbox").
+       *  `docId` is then absent; no view names one doc's Inbox. Its
+       *  workspace filter is a device preference (`inboxScope.ts`). */
       all?: true;
     }
   | { kind: "focus" }

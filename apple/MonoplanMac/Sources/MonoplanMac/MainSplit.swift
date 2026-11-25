@@ -249,8 +249,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             return
         }
         if toolbarItem.itemIdentifier == .inboxFilter {
-            // One choice: the count is 1 while a workspace is picked.
-            let count = model.inboxFilter == nil ? 0 : 1
+            // How many workspaces are picked; 0 is All Workspaces.
+            let count = model.inboxPicked.count
             let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
             toolbarItem.image = FilterArt.image(count: count, label: label)
             toolbarItem.label = label

@@ -3,6 +3,7 @@
 pub mod crypto;
 pub mod doc;
 pub mod events;
+pub mod inbox;
 pub mod places;
 pub mod search;
 pub mod storage;

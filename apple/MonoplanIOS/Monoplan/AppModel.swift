@@ -1181,9 +1181,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// `Engine.inbox`.
+    /// `Engine.inbox`, narrowed to the Inbox page's filter as stored
+    /// (`inboxWorkspaceKey`): the engine picks the workspaces and
+    /// merges their rows.
     func refreshInbox() {
-        read({ try $0.inbox() }) { [weak self] rows, error in
+        let filter = Self.inboxFilterIds(UserDefaults.standard.string(forKey: inboxWorkspaceKey) ?? "")
+        read({ try $0.inbox(filter: filter) }) { [weak self] rows, error in
             if let rows { self?.inbox = rows }
             self?.inboxError = error
         }
@@ -1195,18 +1198,50 @@ final class AppModel: ObservableObject {
         entry.docId ?? session?.primaryDocId ?? ""
     }
 
-    /// The Inbox page's workspace filter as stored (`inboxWorkspaceKey`:
-    /// a doc id, empty for every workspace), applied: nil for every
-    /// workspace, as it is for a doc that is no longer open.
-    func inboxFilter(_ stored: String) -> String? {
-        guard !stored.isEmpty, session?.docs.contains(where: { $0.docId == stored }) == true else { return nil }
-        return stored
+    /// The Inbox page's workspace filter as stored (`inboxWorkspaceKey`):
+    /// the picked doc ids, comma-separated; empty is every workspace.
+    static func inboxFilterIds(_ stored: String) -> [String] {
+        stored.split(separator: ",").map(String.init).filter { !$0.isEmpty }
     }
 
-    /// Where a capture on the Inbox page goes: the filtered
-    /// workspace's Inbox, else Personal's.
+    static func inboxFilterStored(_ ids: [String]) -> String {
+        ids.joined(separator: ",")
+    }
+
+    /// The open workspaces the stored filter picks; none is All
+    /// Workspaces. A pick of a closed workspace is ignored, as the
+    /// engine ignores it.
+    func inboxPicked(_ stored: String) -> [String] {
+        let open = Set((session?.docs ?? []).map(\.docId))
+        return Self.inboxFilterIds(stored).filter(open.contains)
+    }
+
+    /// The workspaces the Inbox shows, Personal first: the picked ones,
+    /// or every one (the engine's rule, `monoplan_core::inbox::scope`).
+    func inboxShown(_ stored: String) -> [String] {
+        let picked = inboxPicked(stored)
+        let open = (session?.docs ?? []).map(\.docId)
+        return picked.isEmpty ? open : open.filter(picked.contains)
+    }
+
+    /// The stored filter with one workspace checked or unchecked. A
+    /// pick of a closed workspace is kept; picking every open one is
+    /// All Workspaces.
+    func inboxFilterToggling(_ docId: String, in stored: String) -> String {
+        var ids = Self.inboxFilterIds(stored)
+        if let at = ids.firstIndex(of: docId) { ids.remove(at: at) } else { ids.append(docId) }
+        let open = (session?.docs ?? []).map(\.docId)
+        return !open.isEmpty && open.allSatisfy(ids.contains) ? "" : Self.inboxFilterStored(ids)
+    }
+
+    /// Where a capture on the Inbox page goes: Personal's Inbox while
+    /// Personal is shown, else the first shown workspace's, so the new
+    /// row is seen.
     func inboxCaptureList(_ stored: String) -> ListRef? {
-        guard let docId = inboxFilter(stored) ?? session?.primaryDocId, !docId.isEmpty else { return nil }
+        let shown = inboxShown(stored)
+        let home = session?.primaryDocId
+        let homeShown = home.map { shown.isEmpty || shown.contains($0) } ?? false
+        guard let docId = homeShown ? home : shown.first, !docId.isEmpty else { return nil }
         return ListRef(docId: docId, listId: "inbox", name: String(localized: "Inbox"))
     }
 

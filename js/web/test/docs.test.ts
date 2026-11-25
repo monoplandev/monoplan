@@ -102,8 +102,10 @@ describe("docs layer", () => {
     const list = other.addList("Work");
     expect(layer.docIdOfList(list)).toBe(OTHER);
     expect(layer.docIdOfList("inbox")).toBe(HOME);
-    // Canonical list views: Home carries no doc id.
-    expect(layer.listView(HOME, "inbox")).toEqual({ kind: "list", id: "inbox" });
+    // Canonical list views: Home carries no doc id, and every doc's
+    // Inbox is the combined Inbox, which names none.
+    expect(layer.listView(HOME, "inbox")).toEqual({ kind: "list", id: "inbox", all: true });
+    expect(layer.listView(OTHER, "inbox")).toEqual({ kind: "list", id: "inbox", all: true });
     expect(layer.listView(OTHER, list)).toEqual({ kind: "list", id: list, docId: OTHER });
     expect(layer.viewDocId({ kind: "list", id: list, docId: OTHER })).toBe(OTHER);
     expect(layer.viewDocId({ kind: "focus" })).toBe(HOME);

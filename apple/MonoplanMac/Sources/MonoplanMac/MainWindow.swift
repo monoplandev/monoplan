@@ -400,13 +400,13 @@ final class MainWindowModel: ObservableObject {
     /// assigned to this account in every workspace. Always read: the
     /// sidebar counts them, and shows the lens only while there are any.
     @Published private(set) var assigned: [AssignedRow] = []
-    /// The Inbox lens's rows (`Engine.inbox`): every open workspace's
-    /// Inbox as one queue, oldest first, the filter not applied
-    /// (`inboxRows` is). Always read: the sidebar counts them.
+    /// The Inbox lens's rows (`Engine.inbox`): the open workspaces'
+    /// Inboxes as one queue, oldest first, narrowed by the filter and
+    /// merged by the engine. Always read: the sidebar counts them.
     @Published private(set) var inbox: [InboxRow] = []
     /// The Inbox filter as chosen (`InboxFilter.swift`), kept verbatim:
-    /// a doc id, or nil for every workspace. What applies is
-    /// `inboxFilter`.
+    /// the doc ids picked, none for every workspace. The engine applies
+    /// it; what the popover checks is `inboxPicked`.
     @Published private(set) var inboxFilterChoice = InboxFilterStore.load()
     /// The items closed or reopened from this window lately, for the
     /// rows' linger (`ItemList.closes`).
@@ -728,8 +728,13 @@ final class MainWindowModel: ObservableObject {
     func select(workspace: String?, list: String) {
         // A workspace's Inbox is the one Inbox: whatever asks for one
         // (search, the tray, a reminder, a list gone) gets the lens,
-        // filtered only as it was left.
-        if list == Self.inbox { return select(lens: .inbox) }
+        // filtered as it was left unless the filter hides that
+        // workspace, when it shows every workspace again.
+        if list == Self.inbox {
+            let section = sections.first { $0.target == workspace || $0.id == workspace }
+            if let section, !inboxShown.contains(where: { $0.id == section.id }) { clearInboxFilter() }
+            return select(lens: .inbox)
+        }
         reveal = true
         if lens == nil, workspace == self.workspace, list == self.list {
             reload()
@@ -799,6 +804,7 @@ final class MainWindowModel: ObservableObject {
         let workspace = workspace, list = list, generation = generation, lens = lens
         let picked = selected, doneChoice = doneFilterChoice, doneLimit = doneLimit
         let calendarOptions = Self.calendarOptions
+        let inboxFilter = inboxFilterChoice
         let asked = Date()
         var began = asked, ended = asked
         calls.run({ engine -> Snapshot in
@@ -834,7 +840,9 @@ final class MainWindowModel: ObservableObject {
                 return AssignedRow(
                     item: entry.item, workspace: entry.docId, workspaceName: section?.workspace.name)
             }
-            snapshot.inbox = try engine.inbox().map { InboxRow(item: $0.item, workspace: $0.docId) }
+            snapshot.inbox = try engine.inbox(filter: inboxFilter).map {
+                InboxRow(item: $0.item, workspace: $0.docId)
+            }
             switch shownLens {
             case .inbox, .starred, .assigned, .bin:
                 break
@@ -1567,41 +1575,61 @@ final class MainWindowModel: ObservableObject {
 
     // MARK: The Inbox filter (`InboxFilter.swift`)
 
-    /// The Inbox filter in effect: the workspace chosen while it is
-    /// open, else none (every workspace). Before any workspace is read
-    /// the choice stands.
-    var inboxFilter: String? {
-        guard let choice = inboxFilterChoice, !sections.isEmpty else { return inboxFilterChoice }
-        return sections.contains { $0.id == choice } ? choice : nil
+    /// The open workspaces the filter picks; none is All Workspaces.
+    /// Before any workspace is read the choice stands.
+    var inboxPicked: [String] {
+        guard !sections.isEmpty else { return inboxFilterChoice }
+        return inboxFilterChoice.filter { id in sections.contains { $0.id == id } }
     }
 
-    /// The Inbox lens's rows: `inbox` narrowed by the filter. A row
-    /// names Home by its doc id, as the filter does.
-    var inboxRows: [InboxRow] {
-        guard let filter = inboxFilter else { return inbox }
-        return inbox.filter { section($0.workspace)?.id == filter }
+    /// The workspaces the Inbox shows, in the sidebar's order: the
+    /// picked ones, or every one (the engine's rule,
+    /// `monoplan_core::inbox::scope`).
+    var inboxShown: [NavSection] {
+        let picked = inboxPicked
+        return picked.isEmpty ? sections : sections.filter { picked.contains($0.id) }
     }
+
+    /// The Inbox lens's rows, as the engine narrowed and merged them.
+    var inboxRows: [InboxRow] { inbox }
 
     /// Where an item made in the Inbox goes, as a typed call takes it:
-    /// the filtered workspace's Inbox, Home's (nil) unfiltered.
+    /// Home's Inbox (nil) while Personal is shown, else the first shown
+    /// workspace's, so the new row is seen.
     var inboxCaptureTarget: String? {
-        inboxFilter.flatMap { section($0)?.target }
+        let shown = inboxShown
+        if shown.isEmpty || shown.contains(where: { $0.target == nil }) { return nil }
+        return shown[0].target
     }
 
     /// The name at an Inbox row's far edge: its workspace's, while the
-    /// rows are of more than one (several open, no filter).
+    /// rows are of more than one.
     func inboxNote(_ row: InboxRow) -> String? {
-        guard sections.count > 1, inboxFilter == nil else { return nil }
+        guard inboxShown.count > 1 else { return nil }
         return workspaceLabel(row.workspace)
     }
 
-    /// Narrow the Inbox to one workspace (its doc id), or to none
-    /// (nil). Device-local; the rows are already read, so nothing is
-    /// read again.
-    func setInboxFilter(_ docId: String?) {
-        guard docId != inboxFilter || docId != inboxFilterChoice else { return }
-        inboxFilterChoice = docId
-        InboxFilterStore.save(docId)
+    /// Every workspace (no picks): All Workspaces.
+    func clearInboxFilter() {
+        setInboxFilter([])
+    }
+
+    /// Check or uncheck one workspace. A pick of a closed workspace is
+    /// kept, so it is filtered again when it comes back; picking every
+    /// open one is All Workspaces.
+    func toggleInboxWorkspace(_ docId: String) {
+        var next = inboxFilterChoice
+        next.toggle(docId)
+        let open = sections.map(\.id)
+        setInboxFilter(!open.isEmpty && open.allSatisfy(next.contains) ? [] : next)
+    }
+
+    /// Device-local; the engine narrows the rows, so they are read again.
+    private func setInboxFilter(_ docIds: [String]) {
+        guard docIds != inboxFilterChoice else { return }
+        inboxFilterChoice = docIds
+        InboxFilterStore.save(docIds)
+        reload()
     }
 
     // MARK: Calendar filter (`CalendarFilter.swift`)
@@ -2489,9 +2517,9 @@ struct MainWindowView: View {
         // no such row.
         let adds = !inboxNewestFirst
         return ItemList(
-            // The filter is part of what is shown: another workspace's
-            // rows are another list, not an edit of these.
-            surface: Surface(lens: .inbox, workspace: model.inboxFilter, list: listId),
+            // One Inbox whatever the filter: a workspace checked or
+            // unchecked adds or drops rows of this list.
+            surface: Surface(lens: .inbox, workspace: nil, list: listId),
             rows: shown.map {
                 ItemListRow(
                     id: $0.item.id, workspace: $0.workspace, text: $0.item.text, state: $0.item.state,
