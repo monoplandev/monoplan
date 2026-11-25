@@ -20,7 +20,7 @@ export function digitNavTarget(
     case "3":
       return { kind: "done" };
     case "4":
-      return { kind: "list", id: "inbox" };
+      return { kind: "list", id: "inbox", all: true };
     default:
       return null;
   }

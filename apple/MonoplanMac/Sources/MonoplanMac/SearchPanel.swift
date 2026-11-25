@@ -23,15 +23,13 @@ import SwiftUI
 
 /// What one result row opens.
 enum SearchRow: Identifiable {
+    /// A built-in page with a label, the Inbox among them.
     case lens(Lens)
-    /// Home's Inbox: like the lenses, a built-in page with a label.
-    case inbox
     case hit(FindHit)
 
     var id: String {
         switch self {
         case .lens(let lens): return "lens/\(lens)"
-        case .inbox: return "inbox"
         case .hit(let hit): return "\(hit.docId ?? "")/\(hit.kind)/\(hit.id)"
         }
     }
@@ -65,14 +63,14 @@ final class SearchModel: ObservableObject {
     /// The Bin only while it has something, as in the sidebar.
     private func builtIns(_ query: String) -> [SearchRow] {
         var pages: [(String, SearchRow)] = [
+            (String(localized: "Inbox"), .lens(.inbox)),
             (String(localized: "Calendar"), .lens(.agenda)),
             (String(localized: "Starred"), .lens(.starred)),
             (String(localized: "Done"), .lens(.done)),
         ]
         // Assigned only while something is, as in the sidebar.
-        if !window.assigned.isEmpty { pages.insert((String(localized: "Assigned"), .lens(.assigned)), at: 1) }
+        if !window.assigned.isEmpty { pages.insert((String(localized: "Assigned"), .lens(.assigned)), at: 2) }
         if !window.binned.isEmpty { pages.append((String(localized: "Bin"), .lens(.bin))) }
-        pages.append((String(localized: "Inbox"), .inbox))
         return pages.filter { matchesName(name: $0.0, query: query) }.map(\.1)
     }
 
@@ -187,7 +185,6 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         close()
         switch row {
         case .lens(let lens): model.select(lens: lens)
-        case .inbox: model.select(workspace: nil, list: MainWindowModel.inbox)
         case .hit(let hit): model.open(hit)
         }
     }
@@ -386,12 +383,12 @@ private struct SearchRowView: View {
 
     @ViewBuilder private var icon: some View {
         switch row {
+        case .lens(.inbox): NavIcon(image: NavArt.inbox)
         case .lens(.starred): NavIcon(image: StarArt.outline)
         case .lens(.agenda): NavIcon(image: NavArt.calendar)
         case .lens(.assigned): NavIcon(image: NavArt.person)
         case .lens(.done): NavIcon(image: NavArt.done)
         case .lens(.bin): NavIcon(image: NavArt.bin)
-        case .inbox: NavIcon(image: NavArt.inbox)
         case .hit(let hit):
             switch hit.kind {
             case .list:
@@ -408,12 +405,12 @@ private struct SearchRowView: View {
 
     @ViewBuilder private var title: some View {
         switch row {
+        case .lens(.inbox): Text("Inbox")
         case .lens(.starred): Text("Starred")
         case .lens(.agenda): Text("Calendar")
         case .lens(.assigned): Text("Assigned")
         case .lens(.done): Text("Done")
         case .lens(.bin): Text("Bin")
-        case .inbox: Text("Inbox")
         case .hit(let hit):
             Text(verbatim: hit.title)
                 .strikethrough(hit.state == .binned)

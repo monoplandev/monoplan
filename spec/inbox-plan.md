@@ -233,6 +233,46 @@ states who will see the result.
   ignores the entries.
 - `reconcile()` leaves `order/inbox` alone.
 
+## One Inbox (decided and built 2026-11-25)
+
+Every workspace keeps its own Inbox bucket (each doc is its own E2EE
+container, so no single container can span them), but the user sees
+**one Inbox**: a read over every open doc's Inbox, merged into one
+queue, with a filter that narrows it to one workspace. An inbox is a
+place to empty; two places to check is one too many. The per-workspace
+Inbox rows leave the sidebars.
+
+- **Rows.** What each doc's Inbox shows (Open, not binned, no date),
+  merged oldest first on the queue key `(inbox_at ?? created_at,
+  created_at)`, then doc id and item id. Newest first stays the device's
+  preference where a client has one (the caller reverses). Each row
+  names its workspace when more than one is open.
+- **Shared workspaces contribute everything** in their Inbox, other
+  members' captures and a deleted shared list's items included: triage
+  is everyone's job in a small team. Narrowing to one's own captures or
+  assignments was considered and left until it proves noisy.
+- **Filter.** One workspace at a time, or all. A device preference: the
+  Inbox opens the way it was left; a filter naming a doc no longer open
+  falls back to all.
+- **Capture** lands in Home's Inbox unfiltered, the filtered workspace's
+  Inbox when filtered.
+- **Drop onto the Inbox entry** sends each row to its own workspace's
+  Inbox: nothing crosses a workspace, so nothing needs confirming.
+- **Moves out** are the usual list moves; into another workspace's list
+  they are the cross-doc move (`sharing-plan.md`).
+- Membership, the catch-all, delete-list-to-Inbox and the "Calendar"
+  label are per doc and unchanged.
+
+As built:
+
+| Layer | |
+|---|---|
+| core / api | `api::inbox::inbox` (`cli/src/api/inbox.rs`), `InboxEntry { item, doc_id }`; FFI `Engine.inbox()`; no CLI command |
+| wasm | `Replica.inboxQueueAt(id)`: the queue time, so the web merges the per-doc Open arrays it already projects |
+| web | view `{ kind: "list", id: "inbox", all: true }` (`prefs.ts`), URLs above; `combinedInbox` in `Workspace.tsx`, one top-group "Inbox" nav row (first, lit for filtered views too, `data-drop-inbox-own`), section Inbox rows gone; the header filter is the Done menu's workspace facet used single-choice; filtered views title "Workspace › Inbox", Personal included; the filter in `inboxScope.ts` (localStorage), read by the nav row, the 4 key and the find palette, and by reveals of an Inbox item; `[` / `]` treat a filtered Inbox as the Inbox slot |
+| iOS | `InboxView.swift` over `AppModel.inbox` (`Engine.inbox`), one Home row first in the top group (Personal's section shows only with user lists), a toolbar filter menu (`@AppStorage("inboxWorkspace")`, empty ≡ all), rows name their workspace only unfiltered; Move in selection mode only within one workspace; a capture or "Show in List" into a hidden workspace resets the filter; type-checked, not run |
+| macOS | `Lens.inbox` first in the sidebar's top group (newest-first menu on it), `InboxFilter.swift` (radio popover, `UserDefaults` `MonoplanInboxFilter`, kept while its doc is closed), `select(workspace:list: "inbox")` maps to the lens, saved pages converted; sidebar drop groups by doc into `moveItems(…, "inbox")`, one undo step per workspace; workspace name at the row's edge only unfiltered; built and tests pass, not run |
+
 ## Open questions
 
 - **Tiebreak after a list delete:** `created_at` loses the deleted list's

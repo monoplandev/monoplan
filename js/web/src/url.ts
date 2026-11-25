@@ -6,6 +6,7 @@
 // token, safe to paste into a shell or a chat:
 //
 //   "#item_" id | "#upcoming_" id | "#list_" id | "#inbox" | "#inbox_" doc
+//   | "#inbox_home"
 //   | "#focus" | "#upcoming" | "#assigned" | "#done" | "#bin" | "#menu"
 //   id  = [0-9a-f]{32}
 //   doc = [0-9a-f-]{32,36}      -- a server doc id (uuid, hyphenated)
@@ -26,6 +27,11 @@
 // item moves. A user list's id is unique across docs too, so `#list_`
 // carries no doc either; only another doc's reserved Inbox needs one
 // (`#inbox_<doc>`), since every doc has an `inbox` (`spec/sharing-plan.md`).
+//
+// `#inbox` is the combined Inbox, every workspace's queue as one
+// (`spec/inbox-plan.md` "One Inbox"); `#inbox_<doc>` is it filtered to
+// one workspace, and `#inbox_home` filtered to Personal (Home's doc id
+// is normalised out of a view, so it has a name of its own).
 
 import type { ViewKey } from "./prefs.ts";
 
@@ -47,6 +53,8 @@ export function parseHash(hash: string): Route | null {
   switch (token) {
     case "inbox":
     case "list_inbox":
+      return { kind: "view", view: { kind: "list", id: "inbox", all: true } };
+    case "inbox_home":
       return { kind: "view", view: { kind: "list", id: "inbox" } };
     // The reserved `events` list has no view of its own: the calendar
     // is its home (`spec/events-plan.md`).
@@ -104,11 +112,13 @@ export function inviteUrl(secretHex: string, base: string = appBase()): string {
 }
 
 /** Canonical hash (leading `#` included) for a view. A list view with
- *  no `docId` is a Home list; another doc's Inbox names its doc. */
+ *  no `docId` is a Home list; another doc's Inbox names its doc, and the
+ *  combined Inbox is plain `#inbox`. */
 export function viewHash(view: ViewKey): string {
   if (view.kind !== "list") return `#${view.kind}`;
   if (view.id !== "inbox") return `#list_${view.id}`;
-  return view.docId === undefined ? "#inbox" : `#inbox_${view.docId}`;
+  if (view.all) return "#inbox";
+  return view.docId === undefined ? "#inbox_home" : `#inbox_${view.docId}`;
 }
 
 /** Canonical hash for an item. */

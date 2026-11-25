@@ -14,8 +14,9 @@ const OTHER = "0192f5c1a3b74e6c9d2f8a1b3c4d5e70";
 
 describe("hash routes", () => {
   test("parses every token", () => {
-    expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
-    expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
+    expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
+    expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
+    expect(parseHash("#inbox_home")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
     // The reserved `events` list's home is the calendar.
     expect(parseHash("#list_events")).toEqual({ kind: "view", view: { kind: "upcoming" } });
     expect(parseHash("#focus")).toEqual({ kind: "view", view: { kind: "focus" } });
@@ -63,7 +64,7 @@ describe("hash routes", () => {
   });
 
   test("round-trips canonical forms", () => {
-    for (const h of ["#inbox", "#focus", "#upcoming", "#done", "#bin", `#list_${ID}`]) {
+    for (const h of ["#inbox", "#inbox_home", "#focus", "#upcoming", "#done", "#bin", `#list_${ID}`]) {
       const r = parseHash(h);
       expect(r?.kind).toBe("view");
       if (r?.kind === "view") expect(viewHash(r.view)).toBe(h);
@@ -72,8 +73,9 @@ describe("hash routes", () => {
     expect(r).toEqual({ kind: "item", id: ID });
   });
 
-  test("inbox canonicalises to the short form", () => {
-    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox");
+  test("the combined Inbox is the short form; Home's own Inbox is named", () => {
+    expect(viewHash({ kind: "list", id: "inbox", all: true })).toBe("#inbox");
+    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox_home");
   });
 
   test("open item wins over the view", () => {

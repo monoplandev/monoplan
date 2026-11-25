@@ -18,15 +18,20 @@ export function createViewState(
   // A list view names its doc (`ViewKey.docId`, absent ≡ Home); the
   // canonical form drops a Home doc id so equality, prefs and URLs
   // agree. Every write goes through `setView`, which normalises.
+  // The combined Inbox (`all`) names no doc.
   const normalizeView = (v: ViewKey): ViewKey =>
-    v.kind === "list" ? docs.listView(docs.viewDocId(v), v.id) : v;
+    v.kind === "list"
+      ? v.id === "inbox" && v.all
+        ? { kind: "list", id: "inbox", all: true }
+        : docs.listView(docs.viewDocId(v), v.id)
+      : v;
   const initialView: ViewKey = (() => {
     const v = prefs?.currentView;
-    if (!v) return { kind: "list", id: "inbox" };
+    if (!v) return { kind: "list", id: "inbox", all: true };
     if (v.kind === "list") {
       const target = docs.appForView(v);
       if (v.id !== "inbox" && !target.state.listsById[v.id]) {
-        return { kind: "list", id: "inbox" };
+        return { kind: "list", id: "inbox", all: true };
       }
       return normalizeView(v);
     }

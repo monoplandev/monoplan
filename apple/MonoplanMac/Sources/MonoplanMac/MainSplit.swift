@@ -42,6 +42,9 @@ private extension NSToolbarItem.Identifier {
     /// Before "Today" on the Calendar: its filter's popover
     /// (`CalendarFilter.swift`).
     static let agendaFilter = NSToolbarItem.Identifier("MonoplanAgendaFilter")
+    /// Before new on the Inbox, while more than one workspace is open:
+    /// its filter's popover (`InboxFilter.swift`).
+    static let inboxFilter = NSToolbarItem.Identifier("MonoplanInboxFilter")
     /// The Calendar's "Today": scrolls back to Today's header.
     static let today = NSToolbarItem.Identifier("MonoplanToday")
     /// At the far end of the list's section, after new, while there
@@ -72,6 +75,8 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     private var doneFilterPopover: NSPopover?
     /// The Calendar filter's popover, while it is up.
     private var calendarFilterPopover: NSPopover?
+    /// The Inbox filter's popover, while it is up.
+    private var inboxFilterPopover: NSPopover?
     /// Search's overlay (`SearchPanel.swift`).
     private lazy var searchPanel = SearchPanelController(model: model)
 
@@ -86,13 +91,17 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     /// The list's section of the bar. On Done its filter leads the
     /// button at the end, on a glass of its own (the space between
     /// them: adjacent buttons would share one); on the Calendar
-    /// "Today" does. Without an account Sign In ends the section,
+    /// "Today" does; on the Inbox its filter, while there are
+    /// workspaces to pick from (`workspaces`). Without an account Sign In ends the section,
     /// likewise on its own glass.
-    private static func listItems(lens: Lens?, signedIn: Bool = true) -> [NSToolbarItem.Identifier] {
+    private static func listItems(
+        lens: Lens?, workspaces: Int = 1, signedIn: Bool = true
+    ) -> [NSToolbarItem.Identifier] {
         let own: [NSToolbarItem.Identifier]
         switch lens {
         case .done: own = [.doneFilter, .space]
         case .agenda: own = [.agendaFilter, .space, .today, .space]
+        case .inbox where workspaces > 1: own = [.inboxFilter, .space]
         default: own = []
         }
         return [.sidebarSeparator, .title, .flexibleSpace] + own + [.newItem] + (signedIn ? [] : [.space, .signIn])
@@ -190,7 +199,9 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         }
         // The rest: the list's section, then the panel's. Whatever
         // already matches from the front stays; the tail is rebuilt.
-        let wanted = lead + Self.listItems(lens: model.shown.lens, signedIn: model.signedIn) + Self.panelItems
+        let wanted = lead
+            + Self.listItems(lens: model.shown.lens, workspaces: model.sections.count, signedIn: model.signedIn)
+            + Self.panelItems
         let have = toolbar.items.map(\.itemIdentifier)
         if have != wanted {
             let kept = zip(have, wanted).prefix { $0 == $1 }.count
@@ -231,6 +242,15 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             // The count beside the glyph while any check is in effect, as
             // the web's trigger; the hint says it too.
             let count = model.doneFilter.count
+            let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
+            toolbarItem.image = FilterArt.image(count: count, label: label)
+            toolbarItem.label = label
+            toolbarItem.toolTip = label
+            return
+        }
+        if toolbarItem.itemIdentifier == .inboxFilter {
+            // One choice: the count is 1 while a workspace is picked.
+            let count = model.inboxFilter == nil ? 0 : 1
             let label = count > 0 ? String(localized: "Filter (\(count) active)") : String(localized: "Filter")
             toolbarItem.image = FilterArt.image(count: count, label: label)
             toolbarItem.label = label
@@ -315,7 +335,7 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.fixedItems + [.doneFilter, .agendaFilter, .today, .panelSeparator, .signIn, .search, .newList, .itemStatus, .itemStar, .itemMore]
+        Self.fixedItems + [.doneFilter, .agendaFilter, .inboxFilter, .today, .panelSeparator, .signIn, .search, .newList, .itemStatus, .itemStar, .itemMore]
     }
 
     func toolbar(
@@ -388,6 +408,10 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
             item.isBordered = true
             item.target = self
             item.action = #selector(filterCalendar(_:))
+        case .inboxFilter:
+            item.isBordered = true
+            item.target = self
+            item.action = #selector(filterInbox(_:))
         case .today:
             let label = String(localized: "Today")
             item.title = label
@@ -511,6 +535,23 @@ final class MainSplitViewController: NSSplitViewController, NSToolbarDelegate {
         host.sizingOptions = .preferredContentSize
         popover.contentViewController = host
         calendarFilterPopover = popover
+        popover.show(relativeTo: item)
+    }
+
+    /// The Inbox's filter: a popover under the button, as the
+    /// Calendar's. A pick applies at once.
+    @objc private func filterInbox(_ sender: Any?) {
+        if let inboxFilterPopover, inboxFilterPopover.isShown {
+            inboxFilterPopover.performClose(nil)
+            return
+        }
+        guard let item = toolbar.items.first(where: { $0.itemIdentifier == .inboxFilter }) else { return }
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let host = NSHostingController(rootView: InboxFilterForm(model: model))
+        host.sizingOptions = .preferredContentSize
+        popover.contentViewController = host
+        inboxFilterPopover = popover
         popover.show(relativeTo: item)
     }
 

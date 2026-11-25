@@ -2,15 +2,16 @@
 // (spec/swift-bindings-plan.md "The macOS window"), replacing the
 // webview. Deliberately a debug screen for now: a sidebar laid out as
 // the web nav is (the lenses
-// Calendar, Starred and Done on top, then one group per open workspace,
-// Personal first, each a heading row over its Inbox and lists: the row
+// Inbox, Calendar, Starred and Done on top, the Inbox's row with the
+// device's Inbox order, oldest or newest first; then one group per open
+// workspace, Personal first, each a heading row over its lists: the row
 // folds the group, and each has a "…" menu: Export and Import JSON
 // (`WorkspaceJSON.swift`), and on a shared workspace Share…
 // (`SharingSheet.swift`) and Delete or Leave; a list's row has
-// Delete, its items to the Inbox or the Bin, and the Inbox's row the
-// device's Inbox order, oldest or newest first),
+// Delete, its items to the Inbox or the Bin),
 // and either the open items of the selected list with a tick and a
-// field to add one, or a lens over every workspace: Starred in its
+// field to add one, or a lens over every workspace: the Inbox (every
+// workspace's as one queue, `InboxFilter.swift`), Starred in its
 // curated order, the Calendar (the engine's agenda, by day), Done,
 // newest first, or the Bin, newest binned first (its sidebar row only
 // while something is binned, as on the web and iOS). A row of any of them can be selected, which opens the
@@ -170,13 +171,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 }
 
 /// One workspace's group in the sidebar: its heading and its lists.
+/// Its Inbox has no row here: every workspace's is in the one Inbox
+/// lens (`Lens.inbox`).
 struct NavSection: Identifiable {
     let workspace: WorkspaceInfo
     /// Every list of the workspace, archived ones included.
     let lists: [ListInfo]
-    /// How many Open items its Inbox holds. The Inbox has no
-    /// `ListMeta` row, so `lists` does not count it.
-    let inboxOpen: Int
 
     var id: String { workspace.docId }
 
@@ -184,7 +184,7 @@ struct NavSection: Identifiable {
     /// engine's default.
     var target: String? { workspace.home ? nil : workspace.docId }
 
-    /// The lists shown under Inbox: active ones, in the
+    /// The lists shown under the heading: active ones, in the
     /// doc's order, without the reserved id (which has no `ListMeta`
     /// row of its own).
     var userLists: [ListInfo] {
@@ -192,11 +192,14 @@ struct NavSection: Identifiable {
     }
 }
 
-/// The views over every workspace, on top of the sidebar.
+/// The views over every workspace, on top of the sidebar. The Inbox
+/// is one of them: each workspace keeps its own `inbox` bucket, and
+/// this is a read over them all (`Engine.inbox`); the reserved list id
+/// never shows as a list.
 /// Raw values are what `SurfaceStore` keeps; renaming a case drops a
 /// saved page back to the Inbox, nothing worse.
 enum Lens: String, Hashable {
-    case starred, agenda, assigned, done, bin
+    case inbox, starred, agenda, assigned, done, bin
 }
 
 /// What the list pane shows: a lens, or a list in a workspace.
@@ -218,7 +221,9 @@ enum SurfaceStore {
         guard let stored = defaults.dictionary(forKey: key), let list = stored["list"] as? String else {
             return nil
         }
-        let lens = (stored["lens"] as? String).flatMap(Lens.init(rawValue:))
+        var lens = (stored["lens"] as? String).flatMap(Lens.init(rawValue:))
+        // A workspace's Inbox, as pages were kept before the one Inbox.
+        if lens == nil, list == MainWindowModel.inbox { lens = .inbox }
         return Surface(lens: lens, workspace: stored["workspace"] as? String, list: list)
     }
 
@@ -251,6 +256,17 @@ struct AssignedRow: Identifiable {
     let workspace: String?
     /// The workspace's name; nil for Home and an unnamed doc.
     let workspaceName: String?
+
+    var id: String { "\(workspace ?? "")/\(item.id)" }
+}
+
+/// One row of the Inbox lens: an item of a workspace's Inbox, and
+/// which workspace.
+struct InboxRow: Identifiable {
+    let item: Item
+    /// The workspace's doc id, Home's too: a typed call's `workspace`
+    /// takes it.
+    let workspace: String?
 
     var id: String { "\(workspace ?? "")/\(item.id)" }
 }
@@ -368,11 +384,12 @@ final class MainWindowModel: ObservableObject {
     /// (`lens`, `workspace`, `list`) moves at the click, for the
     /// sidebar; this follows once the new rows are read, so the pane
     /// keeps the old surface until then rather than blanking.
-    @Published private(set) var shown = Surface(lens: nil, workspace: nil, list: MainWindowModel.inbox)
+    @Published private(set) var shown = Surface(lens: .inbox, workspace: nil, list: MainWindowModel.inbox)
     @Published private(set) var items: [Item] = []
     /// The lens shown in place of a list, if any. The list selection
-    /// under it is kept, though nothing shows it.
-    @Published private(set) var lens: Lens?
+    /// under it is kept, though nothing shows it. The Inbox to begin
+    /// with, and whenever the list under it is the reserved `inbox`.
+    @Published private(set) var lens: Lens? = .inbox
     /// Starred's rows, always read: the sidebar counts them.
     @Published private(set) var starred: [StarredItem] = [] {
         didSet { starredIds = Set(starred.map(\.id)) }
@@ -383,6 +400,14 @@ final class MainWindowModel: ObservableObject {
     /// assigned to this account in every workspace. Always read: the
     /// sidebar counts them, and shows the lens only while there are any.
     @Published private(set) var assigned: [AssignedRow] = []
+    /// The Inbox lens's rows (`Engine.inbox`): every open workspace's
+    /// Inbox as one queue, oldest first, the filter not applied
+    /// (`inboxRows` is). Always read: the sidebar counts them.
+    @Published private(set) var inbox: [InboxRow] = []
+    /// The Inbox filter as chosen (`InboxFilter.swift`), kept verbatim:
+    /// a doc id, or nil for every workspace. What applies is
+    /// `inboxFilter`.
+    @Published private(set) var inboxFilterChoice = InboxFilterStore.load()
     /// The items closed or reopened from this window lately, for the
     /// rows' linger (`ItemList.closes`).
     @Published private(set) var closes: [ItemListClose] = []
@@ -545,6 +570,7 @@ final class MainWindowModel: ObservableObject {
     var listTitle: String {
         let lens = shown.lens, workspace = shown.workspace, list = shown.list
         switch lens {
+        case .inbox: return String(localized: "Inbox")
         case .starred: return String(localized: "Starred")
         case .agenda: return String(localized: "Calendar")
         case .assigned: return String(localized: "Assigned")
@@ -577,13 +603,13 @@ final class MainWindowModel: ObservableObject {
     /// leads `listTitle`).
     var titleIcon: NSImage? {
         switch shown.lens {
+        case .inbox: return NavArt.inbox
         case .starred: return StarArt.outline
         case .agenda: return NavArt.calendar
         case .assigned: return NavArt.person
         case .done: return NavArt.done
         case .bin: return NavArt.bin
         case nil:
-            if shown.list == Self.inbox { return NavArt.inbox }
             let lists = sections.first { $0.target == shown.workspace }?.lists ?? []
             guard let found = lists.first(where: { $0.id == shown.list }) else { return nil }
             return (found.icon ?? "").isEmpty ? NavArt.list : nil
@@ -593,6 +619,7 @@ final class MainWindowModel: ObservableObject {
     /// The count beside the bar's title, muted after the name.
     var titleCount: Int {
         switch shown.lens {
+        case .inbox: return inboxRows.count
         case .starred: return starred.count
         case .assigned: return assigned.count
         case .bin: return binned.count
@@ -699,6 +726,10 @@ final class MainWindowModel: ObservableObject {
     }
 
     func select(workspace: String?, list: String) {
+        // A workspace's Inbox is the one Inbox: whatever asks for one
+        // (search, the tray, a reminder, a list gone) gets the lens,
+        // filtered only as it was left.
+        if list == Self.inbox { return select(lens: .inbox) }
         reveal = true
         if lens == nil, workspace == self.workspace, list == self.list {
             reload()
@@ -721,6 +752,7 @@ final class MainWindowModel: ObservableObject {
     private func clearLenses() {
         starred = []
         assigned = []
+        inbox = []
         agenda = []
         done = []
         binned = []
@@ -747,6 +779,7 @@ final class MainWindowModel: ObservableObject {
         var items: [Item]
         var starred: [StarredItem] = []
         var assigned: [AssignedRow] = []
+        var inbox: [InboxRow] = []
         var agenda: [AgendaGroup] = []
         var calendarChecked: [String] = []
         var done: [DoneRow] = []
@@ -782,16 +815,15 @@ final class MainWindowModel: ObservableObject {
             let gone = workspace != nil && found == nil
             let sections = try workspaces.map { workspace in
                 let target = workspace.home ? nil : workspace.docId
-                return NavSection(
-                    workspace: workspace,
-                    lists: try engine.lists(workspace: target, filter: .all),
-                    inboxOpen: try engine.items(workspace: target, list: Self.inbox, includeDone: false).count)
+                return NavSection(workspace: workspace, lists: try engine.lists(workspace: target, filter: .all))
             }
             let lists = sections.first { $0.target == selected }?.lists ?? []
             let known = list == Self.inbox || lists.contains { $0.id == list }
             let shown = !gone && known ? list : Self.inbox
+            // No list is the Inbox's: the lens over every workspace's.
+            let shownLens: Lens? = lens == nil && shown == Self.inbox ? .inbox : lens
             var snapshot = Snapshot(
-                sections: sections, lens: lens, workspace: selected,
+                sections: sections, lens: shownLens, workspace: selected,
                 list: shown, items: [])
             snapshot.accountId = try engine.account()?.accountId
             snapshot.starred = try engine.starred()
@@ -802,8 +834,9 @@ final class MainWindowModel: ObservableObject {
                 return AssignedRow(
                     item: entry.item, workspace: entry.docId, workspaceName: section?.workspace.name)
             }
-            switch lens {
-            case .starred, .assigned, .bin:
+            snapshot.inbox = try engine.inbox().map { InboxRow(item: $0.item, workspace: $0.docId) }
+            switch shownLens {
+            case .inbox, .starred, .assigned, .bin:
                 break
             case .agenda:
                 snapshot.agenda = try engine.calendar(options: calendarOptions)
@@ -839,6 +872,7 @@ final class MainWindowModel: ObservableObject {
                 for group in snapshot.agenda { rows += group.rows.count }
                 if snapshot.lens == .starred { rows += snapshot.starred.count }
                 if snapshot.lens == .bin { rows += snapshot.binned.count }
+                if snapshot.lens == .inbox { rows += snapshot.inbox.count }
                 let workspaces: Int = snapshot.sections.count
                 // Two turns of the main queue, so SwiftUI's update for
                 // the rows set below has run in between.
@@ -861,11 +895,14 @@ final class MainWindowModel: ObservableObject {
                 self.refreshRoles()
                 self.workspace = snapshot.workspace
                 self.list = snapshot.list
+                // A list gone, or the Inbox asked for as a list: the lens.
+                if self.lens != snapshot.lens { self.lens = snapshot.lens }
                 self.shown = Surface(lens: snapshot.lens, workspace: snapshot.workspace, list: snapshot.list)
                 SurfaceStore.save(self.shown)
                 self.items = snapshot.items
                 self.starred = snapshot.starred
                 self.assigned = snapshot.assigned
+                self.inbox = snapshot.inbox
                 self.agenda = snapshot.agenda
                 self.calendarCheckedDocs = snapshot.calendarChecked
                 self.done = snapshot.done
@@ -1284,7 +1321,7 @@ final class MainWindowModel: ObservableObject {
             let section = sections[index]
             let active = Self.moved(section.userLists, ids: ids, before: before, id: \.id)
             let rest = section.lists.filter { $0.archivedAt != nil || $0.id == Self.inbox }
-            sections[index] = NavSection(workspace: section.workspace, lists: active + rest, inboxOpen: section.inboxOpen)
+            sections[index] = NavSection(workspace: section.workspace, lists: active + rest)
         }
         write { try $0.moveLists(workspace: workspace, ids: ids, before: before) }
     }
@@ -1307,15 +1344,17 @@ final class MainWindowModel: ObservableObject {
     /// (`SidebarDrop.swift`).
     let drops = SidebarDrops()
 
-    /// Rows dragged from the list, Starred, Assigned or Done, in the order shown, let
+    /// Rows dragged from the list, the Inbox, Starred, Assigned or Done, in the order shown, let
     /// go on a sidebar row (spec/mac-dnd-plan.md phase 3; the web's
     /// `onDndDragEnd`). One typed call each, so one Undo step:
     ///
-    /// - A list or an Inbox: they become its first items
-    ///   (`Engine.moveItemsAcross`; an Inbox queues them at its end),
-    ///   binned ones restored and Done ones still Done. Rows of another
-    ///   workspace cross over, asked about first when that changes who
-    ///   sees them.
+    /// - A list: they become its first items
+    ///   (`Engine.moveItemsAcross`), binned ones restored and Done ones
+    ///   still Done. Rows of another workspace cross over, asked about
+    ///   first when that changes who sees them.
+    /// - The Inbox: each row goes to its own workspace's Inbox, queued
+    ///   at its end (`Engine.moveItems`, one call per workspace, so one
+    ///   Undo step per workspace). Nothing crosses workspaces.
     /// - Starred: each Open one not yet starred goes on top
     ///   (`Engine.starItems`); they stay in their lists.
     /// - The Bin: `Engine.setBinnedMany`.
@@ -1333,11 +1372,37 @@ final class MainWindowModel: ObservableObject {
             starred.removeAll { ids.contains($0.id) }
             done.removeAll { ids.contains($0.item.id) }
             assigned.removeAll { ids.contains($0.item.id) }
+            inbox.removeAll { ids.contains($0.item.id) }
             bin(refs)
             return false
         case .starred:
             write { try $0.starItems(items: refs) }
             return false
+        case .inbox:
+            // Each workspace's rows, workspaces in the order their first
+            // row came; a row names Home either way (`section`).
+            var groups: [(workspace: String?, ids: [String])] = []
+            for row in rows {
+                let key = section(row.workspace)?.target ?? row.workspace
+                if let at = groups.firstIndex(where: { $0.workspace == key }) {
+                    groups[at].ids.append(row.id)
+                } else {
+                    groups.append((key, [row.id]))
+                }
+            }
+            let here = shown.lens == .inbox
+            if !here {
+                if let selected, ids.contains(selected.id) { clearItem() }
+                // A lens's rows stay: they are starred, assigned or
+                // Done wherever they live.
+                if shown.lens == nil { items.removeAll { ids.contains($0.id) } }
+            }
+            write { engine in
+                for group in groups {
+                    try engine.moveItems(workspace: group.workspace, ids: group.ids, list: Self.inbox, index: 0)
+                }
+            }
+            return here
         case .list(let workspace, let list):
             let here = shown.lens == nil && shown.workspace == workspace && shown.list == list
             let to = section(workspace)
@@ -1357,8 +1422,9 @@ final class MainWindowModel: ObservableObject {
                 } else {
                     if let selected, ids.contains(selected.id) { clearItem() }
                     // A lens's rows stay: they are starred, assigned or
-                    // Done wherever they live.
+                    // Done wherever they live; the Inbox's leave it.
                     if shown.lens == nil { items.removeAll { ids.contains($0.id) } }
+                    if shown.lens == .inbox { inbox.removeAll { ids.contains($0.item.id) } }
                 }
                 write { try $0.moveItemsAcross(items: refs, to: workspace, list: list, index: 0) }
             }
@@ -1499,6 +1565,45 @@ final class MainWindowModel: ObservableObject {
             }
     }
 
+    // MARK: The Inbox filter (`InboxFilter.swift`)
+
+    /// The Inbox filter in effect: the workspace chosen while it is
+    /// open, else none (every workspace). Before any workspace is read
+    /// the choice stands.
+    var inboxFilter: String? {
+        guard let choice = inboxFilterChoice, !sections.isEmpty else { return inboxFilterChoice }
+        return sections.contains { $0.id == choice } ? choice : nil
+    }
+
+    /// The Inbox lens's rows: `inbox` narrowed by the filter. A row
+    /// names Home by its doc id, as the filter does.
+    var inboxRows: [InboxRow] {
+        guard let filter = inboxFilter else { return inbox }
+        return inbox.filter { section($0.workspace)?.id == filter }
+    }
+
+    /// Where an item made in the Inbox goes, as a typed call takes it:
+    /// the filtered workspace's Inbox, Home's (nil) unfiltered.
+    var inboxCaptureTarget: String? {
+        inboxFilter.flatMap { section($0)?.target }
+    }
+
+    /// The name at an Inbox row's far edge: its workspace's, while the
+    /// rows are of more than one (several open, no filter).
+    func inboxNote(_ row: InboxRow) -> String? {
+        guard sections.count > 1, inboxFilter == nil else { return nil }
+        return workspaceLabel(row.workspace)
+    }
+
+    /// Narrow the Inbox to one workspace (its doc id), or to none
+    /// (nil). Device-local; the rows are already read, so nothing is
+    /// read again.
+    func setInboxFilter(_ docId: String?) {
+        guard docId != inboxFilter || docId != inboxFilterChoice else { return }
+        inboxFilterChoice = docId
+        InboxFilterStore.save(docId)
+    }
+
     // MARK: Calendar filter (`CalendarFilter.swift`)
 
     /// The Calendar's device preferences, for `Engine.calendar`: the
@@ -1605,8 +1710,8 @@ final class MainWindowModel: ObservableObject {
     }
 
     /// The toolbar's New Item: the panel is a new item's page with the
-    /// caret in its title, for the list shown, or the Inbox when a
-    /// lens is. Typing the title makes it (`captureTitled`); what is
+    /// caret in its title, for the list shown, or an Inbox when a
+    /// lens is (`inboxCaptureTarget`'s on the Inbox, else Home's). Typing the title makes it (`captureTitled`); what is
     /// picked on the panel before that lands with it. Pressed again,
     /// it starts over.
     func newItem() {
@@ -1617,8 +1722,10 @@ final class MainWindowModel: ObservableObject {
         promoted = nil
         following = nil
         let onList = shown.lens == nil
-        var next = freshCapture(
-            workspace: onList ? shown.workspace : nil, list: onList ? shown.list : Self.inbox, returnTo: back)
+        // The Inbox's goes to the filtered workspace's, the other
+        // lenses' to Home's.
+        let workspace = onList ? shown.workspace : shown.lens == .inbox ? inboxCaptureTarget : nil
+        var next = freshCapture(workspace: workspace, list: onList ? shown.list : Self.inbox, returnTo: back)
         next.phase = .pane
         next.focusTitle = true
         capture = next
@@ -1956,7 +2063,7 @@ struct MainWindowView: View {
     /// whether a list's row carries its Open count, as the web's "Show
     /// list counts in nav".
     @AppStorage(listCountsKey) private var showListCounts = false
-    /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
+    /// The device's Inbox order (`inboxNewestFirstKey`): reverses the
     /// Inbox's rows on screen, never the doc.
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
     /// The workspace whose Sharing sheet is up.
@@ -1988,9 +2095,9 @@ struct MainWindowView: View {
     private static let navRowPad: CGFloat = (SidebarLists.rowHeight - 20) / 2
 
     /// The web nav's shape: the lenses over every workspace on top
-    /// (Starred, Calendar, Done), then one group per open workspace, stacked, Home
+    /// (Inbox, Calendar, Starred, Done), then one group per open workspace, stacked, Home
     /// ("Personal") first: a heading that folds the group, then its
-    /// Inbox and lists. A list row carries its workspace, so picking
+    /// lists. A list row carries its workspace, so picking
     /// one in another group moves both at once.
     private var sidebar: some View {
         let current = model.lens.map(NavTarget.lens) ?? .list(workspace: model.workspace, list: model.list)
@@ -2018,8 +2125,8 @@ struct MainWindowView: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(Color(nsColor: PaneColor.navSelected))
                     }
-                    // Items dragged from the list drop on Starred, the
-                    // Bin and an Inbox (`SidebarDrop.swift`).
+                    // Items dragged from the list drop on the Inbox,
+                    // Starred and the Bin (`SidebarDrop.swift`).
                     if let drop = dropTarget(target) {
                         SidebarDropMarker(drops: model.drops, target: drop)
                             .allowsHitTesting(false)
@@ -2035,6 +2142,7 @@ struct MainWindowView: View {
         }
         func dropTarget(_ target: NavTarget) -> SidebarDropTarget? {
             switch target {
+            case .lens(.inbox): return .inbox
             case .lens(.starred): return .starred
             case .lens(.bin): return .bin
             case .lens: return nil
@@ -2049,6 +2157,14 @@ struct MainWindowView: View {
         }
         return List {
             Section {
+                // Every workspace's Inbox as one queue; counted over
+                // them all, whatever the filter.
+                row(.lens(.inbox), HStack {
+                    Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
+                    Spacer()
+                    count(model.inbox.count)
+                }
+                .contextMenu { inboxOrderPicker })
                 // What is owed or on today, as the web's Upcoming.
                 row(.lens(.agenda), HStack {
                     Label { Text("Calendar") } icon: { NavIcon(image: NavArt.calendar) }
@@ -2088,15 +2204,9 @@ struct MainWindowView: View {
                 Section {
                     workspaceRow(section)
                     if !model.collapsed.contains(section.id) {
-                        row(.list(workspace: section.target, list: MainWindowModel.inbox), HStack {
-                            Label { Text("Inbox") } icon: { NavIcon(image: NavArt.inbox) }
-                            Spacer()
-                            count(section.inboxOpen)
-                        }
-                        .contextMenu { inboxOrderPicker })
                         // The lists drag to reorder: AppKit rows of
                         // their own (`SidebarLists`), one block per
-                        // workspace under its Inbox.
+                        // workspace under its heading.
                         let lists = section.userLists
                         if !lists.isEmpty {
                             SidebarLists(
@@ -2258,7 +2368,7 @@ struct MainWindowView: View {
     }
 
     /// The Inbox's order, oldest first (the queue's own) or newest
-    /// first: a preference of this Mac's, for every Inbox.
+    /// first: a preference of this Mac's.
     private var inboxOrderPicker: some View {
         Picker("Order", selection: $inboxNewestFirst) {
             Text("Oldest First").tag(false)
@@ -2305,6 +2415,7 @@ struct MainWindowView: View {
                     .padding(.bottom, 6)
             }
             switch model.shown.lens {
+            case .inbox: inbox
             case .starred: starred
             case .agenda: agenda
             case .assigned: assigned
@@ -2327,31 +2438,72 @@ struct MainWindowView: View {
     /// A list's rows on the drag-and-drop list (`ItemList`): several
     /// can be selected, and dragged or ⌘-moved to reorder.
     private var list: some View {
-        // An Inbox is a queue in arrival order: shown newest first
-        // when this Mac says so, and never reordered by hand (no row
-        // drag, here or anywhere).
-        let inbox = model.shown.list == MainWindowModel.inbox
-        let items = inbox && inboxNewestFirst ? Array(model.items.reversed()) : model.items
         let workspace = model.shown.workspace
         let listId = model.shown.list
-        // The row to type a new item into is where that item lands: the
-        // end. An Inbox shown newest first has its end at the top, so
-        // it has no such row.
-        let adds = !(inbox && inboxNewestFirst)
         return ItemList(
             surface: model.shown,
-            rows: items.map {
+            rows: model.items.map {
                 ItemListRow(
                     id: $0.id, workspace: workspace, text: $0.text, state: $0.state,
                     starred: model.starredIds.contains($0.id))
             },
             // A capture has the panel: no row is its item.
             selected: model.capture == nil ? model.selected?.id : nil,
-            reorder: !inbox,
+            reorder: true,
             select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
             selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
             toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
             move: { ids, before in model.reorderItems(workspace: workspace, ids: ids, before: before) },
+            menu: itemListMenu,
+            capture: ItemListCapture(
+                began: { model.rowBegan(workspace: workspace, list: listId) },
+                typed: { model.rowTyped($0) },
+                submitted: {
+                    model.rowSubmitted($0, workspace: workspace, list: listId, chained: $1, click: $2)
+                },
+                ended: { model.rowEnded(cancelled: $0, click: $1) },
+                settled: model.captureSettled),
+            drop: sidebarDrop,
+            lingers: true,
+            closes: model.closes)
+            // Under the toolbar, as a list is: the scroll view insets
+            // its own content for it.
+            .ignoresSafeArea()
+    }
+
+    /// The Inbox: every open workspace's Inbox as one queue
+    /// (`Engine.inbox`), narrowed by the filter (`InboxFilter.swift`).
+    /// A queue in arrival order: shown newest first when this Mac says
+    /// so, and never reordered by hand (its rows only drag out, to the
+    /// sidebar). A row's workspace is at its far edge while there are
+    /// several to tell apart; each row's tick, panel and menu act in
+    /// its own workspace. The row after the last makes an item in the
+    /// filtered workspace's Inbox, Home's unfiltered.
+    private var inbox: some View {
+        let rows = model.inboxRows
+        let shown = inboxNewestFirst ? Array(rows.reversed()) : rows
+        let workspace = model.inboxCaptureTarget
+        let listId = MainWindowModel.inbox
+        // The row to type a new item into is where that item lands: the
+        // end. Shown newest first, the end is at the top, so there is
+        // no such row.
+        let adds = !inboxNewestFirst
+        return ItemList(
+            // The filter is part of what is shown: another workspace's
+            // rows are another list, not an edit of these.
+            surface: Surface(lens: .inbox, workspace: model.inboxFilter, list: listId),
+            rows: shown.map {
+                ItemListRow(
+                    id: $0.item.id, workspace: $0.workspace, text: $0.item.text, state: $0.item.state,
+                    starred: model.starredIds.contains($0.item.id), note: model.inboxNote($0))
+            },
+            // A capture has the panel: no row is its item.
+            selected: model.capture == nil ? model.selected?.id : nil,
+            reorder: false,
+            select: { model.selectItem(workspace: $0?.workspace, id: $0?.id) },
+            selectedCount: { [surface = model.shown] in model.rowsSelected($0, on: surface) },
+            toggle: { row, done in model.setDone(workspace: row.workspace, id: row.id, done: done) },
+            move: { _, _ in },
             menu: itemListMenu,
             capture: adds
                 ? ItemListCapture(
@@ -2366,16 +2518,14 @@ struct MainWindowView: View {
             drop: sidebarDrop,
             lingers: true,
             closes: model.closes)
-            // Under the toolbar, as a list is: the scroll view insets
-            // its own content for it.
             .ignoresSafeArea()
             .overlay(alignment: .topLeading) {
                 // The row for a new item is the empty list's first row.
-                if model.items.isEmpty, !adds { emptyNote(Text("Nothing here")) }
+                if rows.isEmpty, !adds { emptyNote(Text("Nothing here")) }
             }
     }
 
-    /// Rows dragged out of a list, Starred, Assigned or Done onto the sidebar: the row
+    /// Rows dragged out of a list, the Inbox, Starred, Assigned or Done onto the sidebar: the row
     /// under the drag is lit, and takes them when they are let go.
     private var sidebarDrop: ItemListDrop {
         ItemListDrop(

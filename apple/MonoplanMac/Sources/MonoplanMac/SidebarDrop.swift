@@ -1,6 +1,6 @@
 // Items dragged out of the list on screen and let go on a sidebar row:
-// a list or an Inbox (they move there), Starred (they are starred) or
-// the Bin (spec/mac-dnd-plan.md phase 3, the item drops). The web's
+// a list (they move there), the Inbox (each goes to its own
+// workspace's), Starred (they are starred) or the Bin (spec/mac-dnd-plan.md phase 3, the item drops). The web's
 // `findDropTarget` / `onDndDragEnd` (`js/web/src/Workspace.tsx`), with
 // its `data-drop-*` rows.
 //
@@ -16,9 +16,11 @@ import SwiftUI
 
 /// What a sidebar row does with items dropped on it.
 enum SidebarDropTarget: Equatable {
+    /// The one Inbox: each item to its own workspace's.
+    case inbox
     case starred
     case bin
-    /// A list of a workspace (nil is Home), its Inbox included.
+    /// A list of a workspace (nil is Home).
     case list(workspace: String?, list: String)
 }
 

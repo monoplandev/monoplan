@@ -66,6 +66,7 @@ import {
 import { loadHideEmptyDays, saveHideEmptyDays } from "./agendaHideEmptyDays.ts";
 import { loadHidePastDays, saveHidePastDays } from "./agendaHidePastDays.ts";
 import { loadAgendaMode, saveAgendaMode, type AgendaMode } from "./agendaMode.ts";
+import { loadInboxScope, saveInboxScope } from "./inboxScope.ts";
 
 import { addDaysToStamp, nowMs, todayStamp, whenDay } from "./format.tsx";
 import { storedWhen } from "./zones.ts";
@@ -422,7 +423,7 @@ export function Workspace(props: {
   // Identity for a view, for equality checks (`ViewKey` objects are
   // recreated freely).
   const viewKey = (v: ViewKey) =>
-    v.kind === "list" ? `list:${docs.viewDocId(v)}:${v.id}` : v.kind;
+    v.kind === "list" ? `list:${v.all ? "*" : docs.viewDocId(v)}:${v.id}` : v.kind;
   // The view the entered item was entered under. Navigating to another
   // view closes the item (the view-change effect below); a route that
   // reveals + enters in one batch has already switched the view by the
@@ -753,11 +754,15 @@ export function Workspace(props: {
   const recentDoneFor = (v: ViewKey): readonly LingerCapture[] =>
     v.kind === "focus"
       ? docs.focusRecentDone()
-      : v.kind === "list"
-        ? viewApp()
-            .recentDone()
-            .filter((r) => r.listId === v.id)
-        : [];
+      : v.kind === "list" && v.all
+        ? docs.docs().flatMap((d) =>
+            d.app.recentDone().filter((r) => r.listId === "inbox"),
+          )
+        : v.kind === "list"
+          ? viewApp()
+              .recentDone()
+              .filter((r) => r.listId === v.id)
+          : [];
   const lingerChain = createMemo(
     (): { ids: Set<string>; expiry: number } => {
       const v = view();
@@ -971,9 +976,84 @@ export function Workspace(props: {
     const t = setTimeout(() => setDoneMoveTick((n) => n + 1), Math.max(next - now, 0) + 1);
     onCleanup(() => clearTimeout(t));
   });
+  // The combined Inbox (`spec/inbox-plan.md` "One Inbox"): every open
+  // doc's Inbox rows as one queue, oldest first, merged on the queue
+  // time the core keeps (`inbox_at`, else `created_at`). A row just
+  // closed keeps its place for the linger beat: it is merged back in
+  // by the same key, since a doc's own index means nothing here.
+  const combinedInbox = createMemo((): ItemView[] => {
+    const out: ItemView[] = [];
+    for (const d of docs.docs()) {
+      const st = d.app.state;
+      for (const id of st.listOpen.inbox ?? []) {
+        const it = st.itemsById[id];
+        if (it) out.push(it);
+      }
+    }
+    lingerTick();
+    const { ids: lingerIds, expiry } = lingerChain();
+    if (Date.now() < expiry) {
+      for (const r of recentDoneFor({ kind: "list", id: "inbox", all: true })) {
+        if (!lingerIds.has(r.id)) continue;
+        const it = docs.getItem(r.id);
+        if (it && isClosed(it) && !isBinned(it)) out.push(it);
+      }
+    }
+    const at = new Map<string, number>();
+    for (const it of out) {
+      at.set(
+        it.id,
+        docs.appOf(it.docId)?.replica.inboxQueueAt(it.id) ?? it.createdAt,
+      );
+    }
+    return out.sort(
+      (a, b) =>
+        at.get(a.id)! - at.get(b.id)! ||
+        a.createdAt - b.createdAt ||
+        (a.docId < b.docId ? -1 : a.docId > b.docId ? 1 : 0) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  });
+  // Open rows across every doc's Inbox: the combined Inbox's count.
+  const combinedInboxCount = (): number =>
+    docs.docs().reduce((n, d) => n + (d.app.state.listOpen.inbox?.length ?? 0), 0);
+  const isCombinedInbox = (): boolean => {
+    const v = view();
+    return v.kind === "list" && v.all === true;
+  };
+  // Where the sidebar's Inbox row and the 4 key go: the Inbox as it was
+  // last left, combined or filtered to one workspace (`inboxScope.ts`);
+  // a filter naming a doc no longer open falls back to every workspace.
+  const inboxEntryView = (): ViewKey => {
+    const scope = loadInboxScope();
+    return scope !== null && docs.appOf(scope)
+      ? docs.listView(scope, "inbox")
+      : { kind: "list", id: "inbox", all: true };
+  };
+  createEffect(() => {
+    const v = view();
+    if (v.kind !== "list" || v.id !== "inbox") return;
+    saveInboxScope(v.all ? null : docs.viewDocId(v));
+  });
+  // The view that shows a row of `docId`'s Inbox: the combined Inbox,
+  // unless the Inbox was last left filtered (to any workspace), then
+  // the row's own workspace's.
+  const inboxViewFor = (docId: string): ViewKey => {
+    const v = inboxEntryView();
+    return v.kind === "list" && v.all ? v : docs.listView(docId, "inbox");
+  };
+  // A list view for an item's home list, the Inbox as above.
+  const listViewFor = (docId: string, listId: string): ViewKey =>
+    listId === "inbox" ? inboxViewFor(docId) : docs.listView(docId, listId);
+  // The combined Inbox's rows name their workspace (the list is Inbox
+  // for all of them), once there is more than one to tell apart.
+  const combinedInboxLabel = (_listId: string, docId?: string): string =>
+    docLabel(docId ?? docs.homeDocId);
+
   const items = createMemo((): ItemView[] => {
     const v = view();
     if (v.kind === "assigned") return assignedItems();
+    if (v.kind === "list" && v.all) return combinedInbox();
     if (v.kind === "list") {
       const st = viewApp().state;
       const out: ItemView[] = [];
@@ -1020,6 +1100,7 @@ export function Workspace(props: {
   // no overlay and counts the rows its filter admits. Zero elsewhere.
   const headerCount = createMemo((): number => {
     const v = view();
+    if (v.kind === "list" && v.all) return combinedInboxCount();
     if (v.kind === "list") return viewApp().state.listOpen[v.id]?.length ?? 0;
     if (v.kind === "focus") return docs.focusItems().length;
     if (v.kind === "assigned") return assignedCount();
@@ -2611,8 +2692,8 @@ export function Workspace(props: {
   };
   onGlobalKey(onNewKey);
 
-  // [ / ]: cycle through the nav views in top-to-bottom order — Upcoming,
-  // Assigned, Focus, Done, Bin, then each doc's lists (Bin only earns a slot while it holds
+  // [ / ]: cycle through the nav views in top-to-bottom order — Inbox
+  // (combined), Upcoming, Assigned, Focus, Done, Bin, then each doc's lists (Bin only earns a slot while it holds
   // items, matching its nav visibility). Wraps at both ends. From a view that
   // isn't in the sequence (e.g. an emptied Bin), ] enters at the top and
   // [ at the bottom, so the bracket pair always re-enters the set.
@@ -2620,19 +2701,24 @@ export function Workspace(props: {
     if (e.key !== "[" && e.key !== "]") return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     // Sidebar order: the fixed views (Bin only while it has a row), then
-    // each doc's section (Home first): its Inbox, then its user lists.
+    // each doc's section (Home first): its user lists.
     const seq: ViewKey[] = [
+      { kind: "list", id: "inbox", all: true },
       { kind: "upcoming" },
       ...(assignedShown() ? [{ kind: "assigned" } as ViewKey] : []),
       { kind: "focus" },
       { kind: "done" },
       ...(docs.binCount() > 0 ? [{ kind: "bin" } as ViewKey] : []),
-      ...docs.docs().flatMap((d): ViewKey[] => [
-        docs.listView(d.docId, "inbox"),
-        ...activeListsOf(d.docId).map((l) => docs.listView(d.docId, l.id)),
-      ]),
+      ...docs.docs().flatMap((d): ViewKey[] =>
+        activeListsOf(d.docId).map((l) => docs.listView(d.docId, l.id)),
+      ),
     ];
-    const idx = seq.findIndex((s) => viewKey(s) === viewKey(view()));
+    // A filtered Inbox stands in the combined Inbox's slot.
+    const cur = view();
+    const here = viewKey(
+      cur.kind === "list" && cur.id === "inbox" ? { kind: "list", id: "inbox", all: true } : cur,
+    );
+    const idx = seq.findIndex((s) => viewKey(s) === here);
     const step = e.key === "]" ? 1 : -1;
     const nextIdx =
       idx === -1
@@ -2653,7 +2739,7 @@ export function Workspace(props: {
     const target = digitNavTarget(e);
     if (!target) return;
     e.preventDefault();
-    setView(target);
+    setView(target.kind === "list" && target.id === "inbox" ? inboxEntryView() : target);
   };
   onGlobalKey(onDigitNavigate);
 
@@ -2665,6 +2751,7 @@ export function Workspace(props: {
   // single document-level listener catches both Dnd instances.
   type DropTarget =
     | { kind: "list"; el: HTMLElement; listId: string; docId: string }
+    | { kind: "inboxOwn"; el: HTMLElement }
     | { kind: "bin"; el: HTMLElement }
     | { kind: "focus"; el: HTMLElement };
   const findDropTarget = (x: number, y: number): DropTarget | null => {
@@ -2674,6 +2761,8 @@ export function Workspace(props: {
         "[data-drop-list-id], [data-drop-bin], [data-drop-focus]",
       );
     if (!el) return null;
+    // The combined Inbox's row: each row to its own doc's Inbox.
+    if (el.dataset.dropInboxOwn !== undefined) return { kind: "inboxOwn", el };
     if (el.dataset.dropListId !== undefined) {
       return {
         kind: "list",
@@ -2736,6 +2825,24 @@ export function Workspace(props: {
       // resolves cleanly. Items keep their list — nothing moves.
       routed.addToFocusMany(idsInOrder);
       selection.clear();
+      return;
+    }
+    if (target.kind === "inboxOwn") {
+      // Into the combined Inbox (`spec/inbox-plan.md` "One Inbox"): no
+      // workspace changes, so nothing crosses over or needs confirming;
+      // each doc's rows move into its own Inbox, one undo step per doc.
+      const byDoc = new Map<string, string[]>();
+      for (const id of idsInOrder) {
+        const it = docs.getItem(id);
+        if (!it) continue;
+        byDoc.set(it.docId, [...(byDoc.get(it.docId) ?? []), id]);
+      }
+      for (const [docId, ids] of byDoc) {
+        const app = docs.appOf(docId);
+        if (app) relocateTo(ids, app, "inbox");
+      }
+      const v = view();
+      if (!(v.kind === "list" && v.id === "inbox")) selection.clear();
       return;
     }
     // Relocation only, into whichever doc the target list is in (rows
@@ -2853,7 +2960,7 @@ export function Workspace(props: {
   // done-only items in Done, otherwise their list.
   const onFindSelect = (r: FindResult) => {
     if (r.kind === "view") {
-      setView(r.id === "inbox" ? { kind: "list", id: "inbox" } : { kind: r.id });
+      setView(r.id === "inbox" ? inboxEntryView() : { kind: r.id });
       return;
     }
     if (r.kind === "list") {
@@ -2874,7 +2981,7 @@ export function Workspace(props: {
         ? { kind: "bin" }
         : r.lifecycle === "done" || r.lifecycle === "cancelled"
           ? { kind: "done" }
-          : docs.listView(r.docId ?? docs.homeDocId, r.listId || "inbox"),
+          : listViewFor(r.docId ?? docs.homeDocId, r.listId || "inbox"),
     );
   };
 
@@ -2925,7 +3032,7 @@ export function Workspace(props: {
       return;
     }
     const docId = it?.docId ?? docs.homeDocId;
-    revealItem(id, docs.listView(docId, homeListId(docId, it?.listId)));
+    revealItem(id, listViewFor(docId, homeListId(docId, it?.listId)));
   };
 
   // ---------- Fragment URLs (`spec/urls.md`) ----------
@@ -2952,7 +3059,7 @@ export function Workspace(props: {
         ? { kind: "done" }
         : isInboxDated(it)
           ? { kind: "upcoming" }
-          : docs.listView(it.docId, homeListId(it.docId, it.listId));
+          : listViewFor(it.docId, homeListId(it.docId, it.listId));
 
   // Reveal + open an item by id, in whichever doc holds it. False when no
   // open doc has it. `on: "upcoming"` (`#upcoming_<id>`) opens it over the
@@ -3515,6 +3622,8 @@ export function Workspace(props: {
         focusCount={docs.focusItems().length}
         upcomingBadge={upcomingBadge()}
         assignedCount={assignedShown() ? assignedCount() : null}
+        inboxCount={combinedInboxCount()}
+        openInbox={() => navigateTo(inboxEntryView())}
         showListCounts={listCountsPref()}
         view={view()}
         setView={navigateTo}
@@ -3805,8 +3914,17 @@ export function Workspace(props: {
                 docs stays distinguishable. Muted so the list name leads.
                 Home's lists carry no prefix: Personal is the default and
                 goes unsaid. The lenses span docs, so they carry none
-                either. */}
-            <Show when={view().kind === "list" && viewDocId() !== docs.homeDocId}>
+                either, the combined Inbox included; the Inbox filtered to
+                one workspace names it, Personal too, so it reads apart
+                from the combined one. */}
+            <Show
+              when={
+                view().kind === "list" &&
+                !isCombinedInbox() &&
+                (viewDocId() !== docs.homeDocId ||
+                  (currentListId() === "inbox" && docs.docs().length > 1))
+              }
+            >
               <span class="title-doc-prefix">
                 {docLabel(viewDocId())}
                 <span
@@ -4037,6 +4155,36 @@ export function Workspace(props: {
                 workspaces and lists the closed items come from
                 (`doneFilter.ts`): device-local, both facets empty by
                 default, which is every open doc. */}
+            {/* The Inbox's workspace filter (`spec/inbox-plan.md` "One
+                Inbox"): the Done menu's workspace facet, picking one
+                workspace at a time. Checking one shows that workspace's
+                Inbox; unchecking it, or Clear, shows every workspace's.
+                Only while there is more than one workspace. */}
+            <Show
+              when={
+                view().kind === "list" &&
+                currentListId() === "inbox" &&
+                docs.docs().length > 1
+              }
+            >
+              <DoneFilterMenu
+                workspaces={docs.docs().map((d) => ({
+                  docId: d.docId,
+                  label: docLabel(d.docId),
+                  shared: !d.home,
+                }))}
+                docChecked={(id) => !isCombinedInbox() && viewDocId() === id}
+                toggleDoc={(id) =>
+                  navigateTo(
+                    !isCombinedInbox() && viewDocId() === id
+                      ? { kind: "list", id: "inbox", all: true }
+                      : docs.listView(id, "inbox"),
+                  )
+                }
+                docCount={isCombinedInbox() ? 0 : 1}
+                clear={() => navigateTo({ kind: "list", id: "inbox", all: true })}
+              />
+            </Show>
             <Show when={view().kind === "done"}>
               <DoneFilterMenu
                 workspaces={docs.docs().map((d) => ({
@@ -4287,9 +4435,18 @@ export function Workspace(props: {
                         viewKind={view().kind}
                         showList={() => {
                           const k = view().kind;
-                          return k === "focus" || k === "assigned" || k === "done" || k === "bin";
+                          return (
+                            k === "focus" || k === "assigned" || k === "done" || k === "bin" ||
+                            (isCombinedInbox() && docs.docs().length > 1)
+                          );
                         }}
-                        listLabel={view().kind === "assigned" ? assignedListLabel : listLabel}
+                        listLabel={
+                          view().kind === "assigned"
+                            ? assignedListLabel
+                            : isCombinedInbox()
+                              ? combinedInboxLabel
+                              : listLabel
+                        }
                         isSharedDoc={(docId) => docId !== docs.homeDocId}
                         assigneeOf={assigneeOf}
                         showState={() => {

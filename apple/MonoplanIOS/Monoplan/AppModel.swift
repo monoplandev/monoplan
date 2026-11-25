@@ -67,6 +67,11 @@ final class AppModel: ObservableObject {
     /// to this account in every open workspace, reread on `Changed`.
     @Published private(set) var assigned: [AssignedEntry] = []
     @Published private(set) var assignedError: String?
+    /// The combined Inbox (`Engine.inbox`, spec/inbox-plan.md "One
+    /// Inbox"): every open workspace's Inbox as one queue, oldest
+    /// first, reread on `Changed`. Home's Inbox row counts it.
+    @Published private(set) var inbox: [InboxEntry] = []
+    @Published private(set) var inboxError: String?
     /// The Open items that carry a place, every workspace, and the
     /// closed ones too when the Map page's filter asks for them
     /// (`Engine.placedItems`): what the Map page shows. Read while that
@@ -204,6 +209,7 @@ final class AppModel: ObservableObject {
             refreshAgenda()
             refreshStarred()
             refreshAssigned()
+            refreshInbox()
             refreshDone()
             refreshReminders()
         case .connecting:
@@ -235,6 +241,7 @@ final class AppModel: ObservableObject {
         refreshAgenda()
         refreshStarred()
         refreshAssigned()
+        refreshInbox()
         refreshDone()
         refreshSearch()
         refreshBin()
@@ -990,11 +997,6 @@ final class AppModel: ObservableObject {
         listsByDoc = listsByDoc.filter { open.contains($0.key) }
         browsedLists = browsedLists.filter { open.contains($0.value.docId) }
         refreshListRows()
-        for doc in session.docs {
-            // Each Inbox's Open items, for the count on its Home row:
-            // read as a browsed list, so a write of ours rereads it too.
-            refreshList(ListRef(docId: doc.docId, listId: "inbox", name: String(localized: "Inbox")))
-        }
     }
 
     /// Each open workspace's list rows alone (names, icons, open
@@ -1011,11 +1013,6 @@ final class AppModel: ObservableObject {
                 if let fetched = doneFetchedFilter, fetched != doneFilter { refreshDone() }
             }
         }
-    }
-
-    /// How many Open items a workspace's Inbox holds; nil until read.
-    func inboxCount(_ docId: String) -> Int? {
-        listItems["\(docId)/inbox"]?.count
     }
 
     /// `Engine.items`: one browsed list's Open items.
@@ -1182,6 +1179,35 @@ final class AppModel: ObservableObject {
             if let rows { self?.assigned = rows }
             self?.assignedError = error
         }
+    }
+
+    /// `Engine.inbox`.
+    func refreshInbox() {
+        read({ try $0.inbox() }) { [weak self] rows, error in
+            if let rows { self?.inbox = rows }
+            self?.inboxError = error
+        }
+    }
+
+    /// The workspace an Inbox row is in: its doc id, Personal's when
+    /// the row names none.
+    func docId(of entry: InboxEntry) -> String {
+        entry.docId ?? session?.primaryDocId ?? ""
+    }
+
+    /// The Inbox page's workspace filter as stored (`inboxWorkspaceKey`:
+    /// a doc id, empty for every workspace), applied: nil for every
+    /// workspace, as it is for a doc that is no longer open.
+    func inboxFilter(_ stored: String) -> String? {
+        guard !stored.isEmpty, session?.docs.contains(where: { $0.docId == stored }) == true else { return nil }
+        return stored
+    }
+
+    /// Where a capture on the Inbox page goes: the filtered
+    /// workspace's Inbox, else Personal's.
+    func inboxCaptureList(_ stored: String) -> ListRef? {
+        guard let docId = inboxFilter(stored) ?? session?.primaryDocId, !docId.isEmpty else { return nil }
+        return ListRef(docId: docId, listId: "inbox", name: String(localized: "Inbox"))
     }
 
     /// `Engine.reminders`, handed to the scheduler: the notifications

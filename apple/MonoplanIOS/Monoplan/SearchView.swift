@@ -40,20 +40,14 @@ struct SearchView: View {
     }
 
     private var builtIns: [BuiltIn] {
-        var all = [
+        let all = [
+            BuiltIn(title: String(localized: "Inbox"), systemImage: nil, pick: .page(.inbox), catalog: "Inbox"),
             BuiltIn(title: String(localized: "Starred"), systemImage: nil, pick: .page(.starred)),
             BuiltIn(title: String(localized: "Calendar"), systemImage: nil, pick: .page(.agenda), catalog: "Calendar"),
             BuiltIn(title: String(localized: "Map"), systemImage: "map", pick: .page(.map)),
             BuiltIn(title: String(localized: "Done"), systemImage: nil, pick: .page(.done), catalog: "Done"),
             BuiltIn(title: String(localized: "Bin"), systemImage: "trash", pick: .page(.bin)),
         ]
-        if let home = model.session?.primaryDocId {
-            all.append(BuiltIn(
-                title: String(localized: "Inbox"), systemImage: nil,
-                pick: .list(ListRef(docId: home, listId: "inbox", name: String(localized: "Inbox"))),
-                catalog: "Inbox"
-            ))
-        }
         return all.filter { matchesName(name: $0.title, query: trimmed) }
     }
 

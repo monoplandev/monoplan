@@ -179,6 +179,12 @@ extension AssignedEntry {
     var ref: ItemRef { ItemRef(docId: docId, itemId: item.id, title: item.text) }
 }
 
+extension InboxEntry {
+    /// The row's identity across workspaces.
+    var key: String { "\(docId ?? "")/\(item.id)" }
+    var ref: ItemRef { ItemRef(docId: docId, itemId: item.id, title: item.text) }
+}
+
 extension DoneEntry {
     /// The row's identity across workspaces.
     var key: String { "\(docId ?? "")/\(item.id)" }

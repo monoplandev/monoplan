@@ -37,6 +37,7 @@ use monoplan_cli::api::{
     bin::BinEntry,
     done::{DoneEntry, DoneFilter},
     find::FindHit,
+    inbox::InboxEntry,
     items::{Item, ItemInfo, ItemState, NewItemFields, Place},
     json::ImportCounts,
     lists::{ListFilter, ListInfo},
@@ -1436,6 +1437,13 @@ impl Engine {
     /// (spec/sharing-plan.md "Assignment").
     pub fn assigned(&self) -> Result<Vec<AssignedEntry>, EngineError> {
         Ok(self.client.call_blocking(None, api::assigned::assigned)?)
+    }
+
+    /// Every open workspace's Inbox as one queue, oldest first, each
+    /// row tagged with its workspace (spec/inbox-plan.md "One Inbox").
+    /// Newest first is the device's preference: reverse it.
+    pub fn inbox(&self) -> Result<Vec<InboxEntry>, EngineError> {
+        Ok(self.client.call_blocking(None, api::inbox::inbox)?)
     }
 
     /// What this device may remind about: every open workspace's Open

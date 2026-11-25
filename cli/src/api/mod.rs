@@ -33,6 +33,7 @@ pub mod assigned;
 pub mod bin;
 pub mod done;
 pub mod find;
+pub mod inbox;
 pub mod items;
 pub mod json;
 pub mod lists;

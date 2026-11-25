@@ -280,6 +280,11 @@ export function Nav(props: {
    *  any workspace. Null hides the entry (nothing assigned, and not the
    *  current view). */
   assignedCount: number | null;
+  /** Open rows across every workspace's Inbox: the Inbox entry's count. */
+  inboxCount: number;
+  /** Open the Inbox as it was last left, combined or filtered
+   *  (`spec/inbox-plan.md` "One Inbox"). */
+  openInbox: () => void;
   /** The device's list-counts preference (`listCounts.ts`); when true, render the live-item count
    *  badge beside each non-Inbox list in every section (none when the
    *  list is empty). Inbox badges are always shown regardless. */
@@ -372,6 +377,27 @@ export function Nav(props: {
       {props.header}
       <div class="nav-scroll" tabIndex={-1} ref={navScrollEl}>
       <div class="nav-group">
+        {/* Inbox: one entry for every workspace's Inbox, the combined
+            queue (`spec/inbox-plan.md` "One Inbox"); its header filters
+            to one workspace. Lit for the filtered views too. A drop on it
+            sends each row to its own workspace's Inbox. */}
+        <button
+          type="button"
+          class="nav-item"
+          data-active={
+            props.view.kind === "list" && props.view.id === "inbox" ? "" : undefined
+          }
+          data-drop-list-id="inbox"
+          data-drop-inbox-own=""
+          tabIndex={-1}
+          onClick={() => props.openInbox()}
+        >
+          <span class="nav-item-icon" innerHTML={archiveSvg} />
+          {m().nav.inbox}
+          <Show when={props.inboxCount > 0}>
+            <span class="nav-item-count">{props.inboxCount}</span>
+          </Show>
+        </button>
         {/* Upcoming: the calendar lens — a cross-cutting
             view like Done / Bin, so a static entry with a fixed icon. */}
         <button
@@ -769,7 +795,7 @@ function DocSection(props: {
           v.kind === "list" && isActive(v.id) && lists().some((l) => l.id === v.id);
         if (own) navSelection.selectOnly(v.id);
         else navSelection.clear();
-        // Landing on one of this group's rows (Inbox or a visible list) by
+        // Landing on one of this group's rows (a visible list) by
         // a route that bypasses the nav — [ / ] cycling, the Find palette,
         // a digit key, a URL — unfolds a collapsed group so the active row
         // is actually on screen. Only runs on a view *change*: folding the
@@ -780,7 +806,7 @@ function DocSection(props: {
           collapsed() &&
           v.kind === "list" &&
           isActive(v.id) &&
-          (v.id === "inbox" || lists().some((l) => l.id === v.id))
+          lists().some((l) => l.id === v.id)
         ) {
           setCollapsedPersisted(false);
         }
@@ -1168,26 +1194,8 @@ function DocSection(props: {
         </ContextMenu>
       </Show>
       <Show when={!collapsed()}>
-      {/* Inbox is reserved: it has no `ListMeta` row and carries the
-          localized built-in label, so it's a static entry with no rename
-          affordance and no context menu. It sits at the head of the lists
-          group — visually one of the lists, but outside the Dnd so it can
-          never be reordered, multi-selected, or dragged. */}
-      <button
-        type="button"
-        class="nav-item"
-        data-active={isActive("inbox") ? "" : undefined}
-        data-drop-list-id="inbox"
-        data-drop-doc-id={docId}
-        tabIndex={-1}
-        onClick={() => open("inbox")}
-      >
-        <span class="nav-item-icon" innerHTML={archiveSvg} />
-        {m().nav.inbox}
-        <Show when={openCount("inbox") > 0}>
-          <span class="nav-item-count">{openCount("inbox")}</span>
-        </Show>
-      </button>
+      {/* No Inbox row here: one Inbox for every workspace sits in the top
+          group (`spec/inbox-plan.md` "One Inbox"). */}
       <Show when={lists().length > 0}>
         <Dnd
           items={dndLists()}

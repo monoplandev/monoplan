@@ -1,9 +1,10 @@
 // Home: the root page and the app's one navigation stack; there is
-// no tab bar. First the pages that are not one list: Starred, Agenda,
-// Assigned (only while something is assigned), Map, Done and Bin
-// (Starred and Assigned with their counts). Then a section per open workspace (Personal first, as
-// `Engine.workspaces` orders them), each with its Inbox (and how many
-// Open items it holds) and then its
+// no tab bar. First the pages that are not one list: Inbox (every
+// workspace's in one queue, `InboxView`), Calendar,
+// Assigned (only while something is assigned), Starred, Map, Done and Bin
+// (Inbox, Starred and Assigned with their counts). Then a section per open workspace (Personal first, as
+// `Engine.workspaces` orders them; Personal's only while it has a
+// list), each with its
 // active lists in the doc's order, each led by its emoji (a folder
 // when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
@@ -22,7 +23,8 @@
 // is pushed. While the profile has no account, a Sign In
 // button sits at the top left and opens the sign-in sheet.
 // A floating bar (`BottomBar`: search, and an
-// add button that captures a new item into the list being shown, else
+// add button that captures a new item into the list being shown, on
+// the Inbox page into the filtered workspace's Inbox, else
 // the Personal Inbox) sits under every page but the Map, whose sheet
 // has its own search; while its field has
 // focus or text, `SearchView` covers the stack. Every page is pushed
@@ -31,9 +33,6 @@
 // (an alert), choose emoji (the system emoji keyboard,
 // `EmojiKeyboard.swift`), archive (confirmed; the page pops) and
 // delete (its items to the Inbox or the Bin, asked; the page pops).
-// An Inbox's page has its own "..." menu: oldest or newest first, a
-// preference of this device's. The Inbox is a queue in arrival order
-// (spec/inbox-plan.md), so its rows are never dragged to a new place.
 // A row of a list's page swiped left is selected, and the page is then
 // selecting (the system's edit mode; "Select Items" in the "..." menu
 // starts it with nothing picked): a tap picks or drops a row, two
@@ -185,6 +184,7 @@ struct SharedWorkspaceBadge: View {
 
 /// The pages Home pushes that are not one list.
 enum HomePage: Hashable {
+    case inbox
     case starred
     case agenda
     case assigned
@@ -218,6 +218,10 @@ struct HomeView: View {
     /// captures to.
     @State private var shownList: ListRef?
     @State private var showSignIn = false
+    /// The Inbox page is up: the add button captures into its
+    /// filtered workspace's Inbox (`inboxWorkspaceKey`).
+    @State private var inboxShown = false
+    @AppStorage(inboxWorkspaceKey) private var inboxFilter = ""
     /// The Map page is up: its sheet stands where the bottom bar does.
     @State private var mapShown = false
     /// The list page, or Starred, is selecting rows: its toolbar
@@ -287,6 +291,12 @@ struct HomeView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
+                    // One Inbox for every workspace, counted; nothing
+                    // is drawn for an empty one.
+                    NavigationLink(value: HomePage.inbox) {
+                        Label { Text("Inbox") } icon: { CatalogIcon(name: "Inbox") }
+                            .counted(model.inbox.count)
+                    }
                     NavigationLink(value: HomePage.agenda) {
                         // What is owed or on today, as the web's Upcoming.
                         Label { Text("Calendar") } icon: { CatalogIcon(name: "Calendar") }
@@ -347,11 +357,14 @@ struct HomeView: View {
                         }
                     }
                 }
-                ForEach(model.session?.docs ?? [], id: \.docId) { doc in
+                // Personal's section only while it has a list to show
+                // (its Inbox is the top group's); a shared one's always,
+                // for the actions in its header.
+                ForEach((model.session?.docs ?? []).filter { doc in
+                    !(model.listsByDoc[doc.docId] ?? []).userLists.isEmpty
+                        || model.sharedWorkspaceName(doc.docId) != nil
+                }, id: \.docId) { doc in
                     Section {
-                        // The Inbox's Open items, counted; nothing is
-                        // drawn for an empty one.
-                        row(ListRef(docId: doc.docId, listId: "inbox", name: String(localized: "Inbox")), count: model.inboxCount(doc.docId) ?? 0)
                         ForEach((model.listsByDoc[doc.docId] ?? []).userLists) { list in
                             // Counted only when Settings says so
                             // (the web's "Show list counts in nav").
@@ -478,12 +491,18 @@ struct HomeView: View {
                 }
             }
             .navigationDestination(for: ListRef.self) { list in
-                ListItemsView(list: list, selecting: $selectingItems)
-                    .onAppear { shownList = list }
-                    .onDisappear { if shownList == list { shownList = nil } }
+                // A workspace's Inbox is a row of the one Inbox page.
+                if list.listId == "inbox" {
+                    inboxPage
+                } else {
+                    ListItemsView(list: list, selecting: $selectingItems)
+                        .onAppear { shownList = list }
+                        .onDisappear { if shownList == list { shownList = nil } }
+                }
             }
             .navigationDestination(for: HomePage.self) { page in
                 switch page {
+                case .inbox: inboxPage
                 case .starred: StarredView(selecting: $selectingItems)
                 case .agenda: AgendaView()
                 case .assigned: AssignedView()
@@ -602,14 +621,23 @@ struct HomeView: View {
         .animation(.default, value: searchActive)
         .onChange(of: query) { model.search(query) }
         // A capture's item is shown where it landed: its list is pushed
-        // unless that is the page already up (under the sheet, when
-        // the capture stays open as the item's page), and the list
-        // page scrolls to it.
+        // (the Inbox page for any workspace's Inbox) unless that is the
+        // page already up (under the sheet, when the capture stays open
+        // as the item's page), and the page scrolls to it.
         .onChange(of: model.captured) {
-            guard let captured = model.captured, shownList?.key != captured.list.key else { return }
+            guard let captured = model.captured else { return }
+            if captured.list.listId == "inbox" {
+                guard !inboxShown else { return }
+            } else {
+                guard shownList?.key != captured.list.key else { return }
+            }
             query = ""
             searching = false
-            path.append(captured.list)
+            if captured.list.listId == "inbox" {
+                path.append(HomePage.inbox)
+            } else {
+                path.append(captured.list)
+            }
         }
         // A tapped place alert for several tasks has no one item to
         // open: the Map page, where they are listed nearest first.
@@ -620,7 +648,9 @@ struct HomeView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !mapShown && !selectingItems {
-                BottomBar(query: $query, searching: $searching, captureList: shownList)
+                BottomBar(
+                    query: $query, searching: $searching,
+                    captureList: shownList ?? (inboxShown ? model.inboxCaptureList(inboxFilter) : nil))
             }
         }
         // The inset on the stack does not reach the scroll views inside
@@ -628,6 +658,14 @@ struct HomeView: View {
         // margin: the last row scrolls clear of the bar.
         .contentMargins(.bottom, BottomBar.clearance, for: .scrollContent)
         .opensItems()
+    }
+
+    /// The Inbox page, from its Home row or from a workspace's Inbox
+    /// named anywhere else.
+    private var inboxPage: some View {
+        InboxView(selecting: $selectingItems)
+            .onAppear { inboxShown = true }
+            .onDisappear { inboxShown = false }
     }
 
     /// Make the list and push its page; a failure is said in an alert.
@@ -820,8 +858,9 @@ extension View {
     }
 }
 
-/// One list's Open items, in list order, for any list in any workspace
-/// (an Inbox included). Refetched on every doc change while shown.
+/// One list's Open items, in list order, for any user-created list in
+/// any workspace (an Inbox is `InboxView`'s). Refetched on every doc
+/// change while shown.
 struct ListItemsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -847,9 +886,6 @@ struct ListItemsView: View {
     @State private var archiveError: String?
     @State private var confirmDelete = false
     @State private var deleteError: String?
-    /// The device's Inbox order (`inboxNewestFirstKey`): reverses an
-    /// Inbox's rows on screen, never the doc.
-    @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
 
     /// The list as it is now: the page was pushed with the name and
     /// emoji of that moment, and either can be changed from here (or
@@ -859,33 +895,18 @@ struct ListItemsView: View {
         return ListRef(docId: list.docId, listId: list.listId, name: row.name, icon: row.icon)
     }
 
-    /// Only a user-created list can be renamed, given an emoji or
-    /// archived.
-    private var editable: Bool { list.listId != "inbox" }
-
-    private var isInbox: Bool { list.listId == "inbox" }
-
-    /// The rows in the order shown: an Inbox newest first when the
-    /// device says so, else as the engine orders them.
-    private func shown(_ items: [Item]) -> [Item] {
-        isInbox && inboxNewestFirst ? Array(items.reversed()) : items
-    }
-
-    /// A capture into this list: scroll its row into view. A capture
-    /// lands at the bottom of an Inbox shown oldest first (the queue's
-    /// end), so the last row is brought up from the bottom edge.
+    /// A capture into this list: scroll its row into view.
     private func showCaptured(in items: [Item], _ proxy: ScrollViewProxy) {
         guard let captured = model.captured, captured.list.key == list.key,
               items.contains(where: { $0.id == captured.itemId })
         else { return }
-        let anchor: UnitPoint = items.last?.id == captured.itemId ? .bottom : .top
-        withAnimation { proxy.scrollTo(captured.itemId, anchor: anchor) }
+        withAnimation { proxy.scrollTo(captured.itemId, anchor: .top) }
         model.showedCaptured()
     }
 
     /// The picked rows, in the order shown.
     private var picked: [ItemRef] {
-        shown(model.listItems[list.key] ?? []).filter { selection.contains($0.id) }
+        (model.listItems[list.key] ?? []).filter { selection.contains($0.id) }
             .map { ItemRef(docId: list.docId, itemId: $0.id, title: $0.text) }
     }
 
@@ -905,13 +926,11 @@ struct ListItemsView: View {
 
     var body: some View {
         Group {
-            if let loaded = model.listItems[list.key], !loaded.isEmpty {
-                let items = shown(loaded)
+            if let items = model.listItems[list.key], !items.isEmpty {
                 ScrollViewReader { proxy in
                     // A long press and drag moves a row: the list parts
                     // to show where it will land (`onMove`), and the
-                    // drop is the list's order from then on. Not in an
-                    // Inbox, whose order is arrival, nor while
+                    // drop is the list's order from then on. Not while
                     // selecting, where every row would grow a handle.
                     List(selection: $selection) {
                         ForEach(items) { item in
@@ -931,7 +950,7 @@ struct ListItemsView: View {
                                 .tint(.accentColor)
                             }
                         }
-                        .onMove(perform: isInbox || selecting ? nil : { model.reorderItem(in: list, from: $0, to: $1) })
+                        .onMove(perform: selecting ? nil : { model.reorderItem(in: list, from: $0, to: $1) })
                     }
                     .listStyle(.plain)
                     .environment(\.editMode, .constant(selecting ? .active : .inactive))
@@ -946,8 +965,8 @@ struct ListItemsView: View {
             }
         }
         .navigationTitle(title)
-        // The list's icon as Home's menu shows it (emoji, the Inbox's
-        // tray, else a folder), its name, and how many Open items it
+        // The list's icon as Home's menu shows it (emoji, else a
+        // folder), its name, and how many Open items it
         // has, once they have loaded; a shared workspace's list has the
         // workspace's name before its own.
         .countedTitle(
@@ -960,7 +979,7 @@ struct ListItemsView: View {
         .toolbar {
             if selecting {
                 selectionToolbar
-            } else if editable {
+            } else {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         selectItemsButton
@@ -989,19 +1008,6 @@ struct ListItemsView: View {
                         }
                     } label: {
                         Label("List options", systemImage: "ellipsis")
-                    }
-                }
-            } else if isInbox {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        selectItemsButton
-                        Picker("Order", selection: $inboxNewestFirst) {
-                            Label("Oldest First", systemImage: "arrow.down").tag(false)
-                            Label("Newest First", systemImage: "arrow.up").tag(true)
-                        }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Label("Inbox options", systemImage: "ellipsis")
                     }
                 }
             }
@@ -1181,7 +1187,7 @@ struct ListItemsView: View {
             } else {
                 ContentUnavailableView(
                     "Nothing open",
-                    systemImage: list.listId == "inbox" ? "tray" : "folder",
+                    systemImage: "folder",
                     description: Text("Open items in \(current.name) show here.")
                 )
             }

@@ -2605,6 +2605,16 @@ impl Replica {
         self.doc().get_item(item_id).map(|i| item_to_json(&i))
     }
 
+    /// An item's Inbox queue time (`spec/inbox-plan.md` "Order"):
+    /// `inbox_at`, else `created_at`; `undefined` for no such item. The
+    /// combined Inbox merges every doc's Inbox on it ("One Inbox").
+    #[wasm_bindgen(js_name = inboxQueueAt)]
+    pub fn inbox_queue_at(&self, item_id: &str) -> Option<f64> {
+        self.doc()
+            .get_item(item_id)
+            .map(|i| i.inbox_at.unwrap_or(i.created_at) as f64)
+    }
+
     #[wasm_bindgen(js_name = getListMetaJson)]
     pub fn get_list_meta_json(&self, list_id: &str) -> Option<String> {
         self.doc().get_list_meta(list_id).map(|l| list_to_json(&l))
