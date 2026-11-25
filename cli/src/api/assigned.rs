@@ -1,5 +1,5 @@
 //! Assigned: the open items assigned to this account, in every open
-//! workspace (`spec/sharing-plan.md` "Assignment"). The web's Assigned
+//! workspace but the personal one (`spec/sharing-plan.md` "Assignment"). The web's Assigned
 //! lens (`DocsLayer.assignedItems`), with its order.
 
 use std::cmp::Ordering;
@@ -28,13 +28,19 @@ fn date(item: &Item) -> Option<&str> {
 /// binned) whose assignee is the doc's own account, tasks and events
 /// alike, each tagged with its workspace. Dated items first by their
 /// `when`, then the rest newest first. A doc with no account
-/// (an accountless profile) has none.
+/// (an accountless profile) has none, and nor does the personal
+/// workspace (`Doc::is_personal`): assignment does not exist there, so
+/// an assignee that reached it (an import from before imports dropped
+/// it) is not shown, since nothing there could clear it.
 pub fn assigned(cx: &Ctx) -> anyhow::Result<Vec<AssignedEntry>> {
     let mut rows: Vec<AssignedEntry> = cx
         .sources()
         .into_iter()
         .flat_map(|(tag, doc)| {
             let doc_id = doc_tag(tag).0;
+            if doc.is_personal() {
+                return Vec::new();
+            }
             let Some(me) = doc.author().map(str::to_owned) else {
                 return Vec::new();
             };
@@ -111,5 +117,28 @@ mod tests {
         let docs = [&anon];
         let cx = Ctx::bare(&anon, &docs, &lens);
         assert!(assigned(&cx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn skips_the_personal_workspace() {
+        let mut home = Doc::new().unwrap();
+        let mut work = Doc::new().unwrap();
+        home.set_author(Some("me"));
+        home.set_personal(true);
+        work.set_author(Some("me"));
+        let stray = home.add_item(LIST_INBOX, "imported").unwrap();
+        home.set_item_assignee(&stray, Some("me")).unwrap();
+        let mine = work.add_item(LIST_INBOX, "mine").unwrap();
+        work.set_item_assignee(&mine, Some("me")).unwrap();
+
+        let lens = Lens::home(&home);
+        let docs = [&home, &work];
+        let cx = Ctx::bare(&home, &docs, &lens);
+        let ids: Vec<String> = assigned(&cx)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.item.id)
+            .collect();
+        assert_eq!(ids, [mine]);
     }
 }

@@ -242,7 +242,7 @@ describe("docs layer", () => {
     dispose();
   });
 
-  test("Assigned spans every doc: one's own open items, dated first", () => {
+  test("Assigned spans every doc but Home: one's own open items, dated first", () => {
     const { home, other, layer, dispose } = setup();
     const mine = other.addItem("inbox", "mine");
     const dated = other.addItem("inbox", "mine, dated");
@@ -260,9 +260,11 @@ describe("docs layer", () => {
     const ids = (keep?: Parameters<typeof layer.assignedItems>[1]) =>
       layer.assignedItems("me", keep).map((it) => it.id);
     expect(ids()[0]).toBe(dated);
-    expect([...ids()].sort()).toEqual([mine, dated, inHome].sort());
+    // Home's is not listed: assignment does not exist there.
+    expect(ids()).not.toContain(inHome);
+    expect([...ids()].sort()).toEqual([mine, dated].sort());
     // The linger predicate admits a closed row, never a binned one.
-    expect([...ids(() => true)].sort()).toEqual([mine, dated, inHome, closed].sort());
+    expect([...ids(() => true)].sort()).toEqual([mine, dated, closed].sort());
     expect(layer.assignedItems("nobody")).toEqual([]);
     dispose();
   });

@@ -2154,6 +2154,10 @@ pub struct Doc {
     /// default) writes no attribution — anonymous web sessions and
     /// local-only CLI profiles have no account. See [`Doc::set_author`].
     author: Option<String>,
+    /// This is the account's personal workspace (Home): a fact about
+    /// the account, not the doc's content, so the host says so at boot
+    /// ([`Doc::set_personal`]). `false` until told.
+    personal: bool,
 }
 
 /// Configure an UndoManager bound to `inner`, excluding remote-tagged
@@ -2210,6 +2214,7 @@ impl Doc {
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
             author: None,
+            personal: false,
         })
     }
 
@@ -2245,6 +2250,7 @@ impl Doc {
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
             author: None,
+            personal: false,
         }
     }
 
@@ -2255,6 +2261,20 @@ impl Doc {
     /// items are untouched; a trimmed-empty id clears. Attribution is
     /// per write, not per doc, so the same doc opened by two members
     /// stamps each one's own id.
+    /// Say whether this is the account's personal workspace (Home).
+    /// Hosts call it at boot beside [`Doc::set_author`]: which doc is
+    /// Home is the account's membership, which the doc's content does
+    /// not hold. Home is one person, so assignment does not exist
+    /// there (`spec/sharing-plan.md` "Assignment"): an import lands
+    /// unassigned and the Assigned read skips the doc.
+    pub fn set_personal(&mut self, personal: bool) {
+        self.personal = personal;
+    }
+
+    pub fn is_personal(&self) -> bool {
+        self.personal
+    }
+
     pub fn set_author(&mut self, account_id: Option<&str>) {
         self.author = account_id
             .map(str::trim)
@@ -4949,6 +4969,9 @@ impl Doc {
     /// malformed `when` values. All writes land in a single Loro
     /// commit; UI events are emitted via the standard pre/post
     /// state-diff.
+    ///
+    /// Into the personal workspace ([`Doc::set_personal`]) the items
+    /// land with no assignee: nothing there shows one or can clear it.
     pub fn import_json(&self, export: &JsonExport) -> Result<ImportSummary, DocError> {
         if export.version != 1 {
             return Err(DocError::Invalid(format!(
@@ -5060,6 +5083,18 @@ impl Doc {
                 new_id()
             };
             let placement = new_placement(&target_list_id);
+            // The assignee is carried as written, except into the
+            // personal workspace (`set_personal`).
+            let unassigned;
+            let src_item = if self.personal && src_item.assignee.is_some() {
+                unassigned = ExportItem {
+                    assignee: None,
+                    ..src_item.clone()
+                };
+                &unassigned
+            } else {
+                src_item
+            };
             let state = self.write_item_from_export(
                 &new_item_id,
                 src_item,
@@ -6885,6 +6920,7 @@ impl Doc {
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
             author: None,
+            personal: false,
         };
         doc.rebuild_index();
         Ok(doc)
@@ -11928,6 +11964,27 @@ mod tests {
     }
 
     #[test]
+    fn import_json_drops_the_assignee_only_into_the_personal_workspace() {
+        let src = Doc::new().unwrap();
+        let id = src.add_item(LIST_INBOX, "theirs").unwrap();
+        src.set_item_assignee(&id, Some("acct-1")).unwrap();
+        let export = src.export_json();
+
+        let shared = Doc::new().unwrap();
+        shared.import_json(&export).unwrap();
+        assert_eq!(
+            shared.get_item(&id).unwrap().assignee.as_deref(),
+            Some("acct-1")
+        );
+
+        let mut home = Doc::new().unwrap();
+        home.set_personal(true);
+        let summary = home.import_json(&export).unwrap();
+        assert_eq!(summary.items_added, 1);
+        assert_eq!(home.get_item(&id).unwrap().assignee, None);
+    }
+
+    #[test]
     fn import_json_twice_is_a_no_op() {
         let src = Doc::new().unwrap();
         let work = src.add_list("Work").unwrap();
@@ -14225,6 +14282,7 @@ mod tests {
             search: Mutex::new(SearchIndex::new()),
             _diff_sub,
             author: None,
+            personal: false,
         };
         restored.rebuild_index();
 

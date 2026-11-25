@@ -374,11 +374,15 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   };
   createEffect(pruneDeadForeignRefs);
 
+  // Not Home's: assignment does not exist there, so an assignee that
+  // reached it (an old import) is not shown (`api::assigned` in Rust).
   const assignedItems = (
     accountId: string,
     keep?: (it: ItemView) => boolean,
   ): ItemView[] =>
-    allItems()
+    docs()
+      .filter((d) => !d.home)
+      .flatMap((d) => Object.values(d.app.state.itemsById))
       .filter(
         (it) =>
           it.assignee === accountId &&

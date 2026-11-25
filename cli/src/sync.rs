@@ -176,7 +176,7 @@ impl Engine {
         let author = account.identity.as_ref().map(|i| i.account_id.as_str());
         let mut docs = BTreeMap::new();
         for doc_id in doc_ids {
-            let state = boot_doc_state(&storage, &secrets, doc_id, author)?;
+            let state = boot_doc_state(&storage, &secrets, doc_id, author, doc_id == primary)?;
             docs.insert(doc_id, state);
         }
 
@@ -557,7 +557,7 @@ impl Engine {
         crate::storage::seed_snapshot(&self.store, &dek, doc_id, &doc)?;
         let account = self.store.read_account()?;
         let author = account.identity.as_ref().map(|i| i.account_id.as_str());
-        let state = boot_doc_state(&self.store, &secrets, doc_id, author)?;
+        let state = boot_doc_state(&self.store, &secrets, doc_id, author, false)?;
         self.docs.insert(doc_id, state);
         Ok(doc_id)
     }
@@ -653,7 +653,7 @@ impl Engine {
                 },
             );
             self.profile.write_secrets(&secrets)?;
-            match boot_doc_state(&self.store, &secrets, doc_id, author) {
+            match boot_doc_state(&self.store, &secrets, doc_id, author, false) {
                 Ok(state) => {
                     self.docs.insert(doc_id, state);
                     adopted.push(doc_id);
@@ -712,12 +712,15 @@ pub(crate) async fn list_memberships(
 
 /// Boot one doc from its op log + snapshot. A doc with no rows yet
 /// (a membership first seen on this device) reconstructs empty; the
-/// server's snapshot fills it on open.
+/// server's snapshot fills it on open. `personal`: the doc is the
+/// account's Home (`Doc::set_personal`); one created or joined while
+/// running never is.
 fn boot_doc_state(
     storage: &SqliteStorage,
     secrets: &crate::config::Secrets,
     doc_id: DocId,
     author: Option<&str>,
+    personal: bool,
 ) -> Result<DocState, SyncError> {
     let dek = dek_for_doc(secrets, doc_id)?;
     // The doc's own stored peer, bound before the replay import so its
@@ -725,6 +728,7 @@ fn boot_doc_state(
     let peer_id = storage.doc_peer_id(doc_id)?;
     let (mut doc, boot_meta) = crate::storage::boot_doc(storage, &dek, doc_id, Some(peer_id))?;
     doc.set_author(author);
+    doc.set_personal(personal);
     let last_synced_at = storage.read_sync_cursor(doc_id)?.last_sync_at;
     let mut replica = Replica::new(
         doc,

@@ -220,6 +220,13 @@ impl Doc {
     /// into `createdBy` on items this doc creates from now on. Call once
     /// at boot, after replay and before the replica takes the doc; leave
     /// unset for anonymous sessions.
+    /// Say whether this is the account's personal workspace (Home),
+    /// at boot beside `setAuthor` (`Doc::set_personal`).
+    #[wasm_bindgen(js_name = setPersonal)]
+    pub fn set_personal(&mut self, personal: bool) {
+        self.inner.set_personal(personal);
+    }
+
     #[wasm_bindgen(js_name = setAuthor)]
     pub fn set_author(&mut self, account_id: Option<String>) {
         self.inner.set_author(account_id.as_deref());

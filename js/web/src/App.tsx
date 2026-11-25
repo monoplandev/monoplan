@@ -392,6 +392,9 @@ function BootGate(props: {
         // Items this session creates carry the account id (`createdBy`,
         // spec/data-model.md "Item"); an anonymous session has none.
         if (!props.session.anonymous) doc.setAuthor(props.session.accountId);
+        // Which doc is Home is the account's fact, not the doc's: said
+        // here (`Doc::set_personal`). A doc opened later never is.
+        doc.setPersonal(isHome);
         return {
           docId,
           dek,
