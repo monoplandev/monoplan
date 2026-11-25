@@ -50,16 +50,15 @@
   --error-text: #991b1b;
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
-  /* Today's number in the month grids and today's agenda heading: a
-     pink mark (behind the number, beside the heading), a deeper pink
-     with the number in white here, paler with the number in black in
-     the dark theme. */
-  --calendar-today-bg: #ff708b;
+  /* Today's number in the month grids: a pink mark behind the
+     number, a deeper pink with the number in white here, paler with
+     the number in black in the dark theme. */
+  --calendar-today-bg: #ff5c6c;
   --calendar-today-text: #fff;
-  /* TEMP trial: the today mark's shape (a mask). From Tabler Icons by
-     Paweł Kuna, MIT:
-     https://github.com/tabler/tabler-icons/blob/master/LICENSE */
-  --calendar-today-shape: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.81 2c2.018 0 3.478 1.232 3.874 3.129l.016.089l.172-.057c.34-.104.684-.16 1.055-.175l.227-.005c2.09 0 3.925 1.93 3.925 4.094c0 1.095-.51 2.087-1.364 2.835l-.118.098l.06.048c.88.737 1.36 1.605 1.416 2.656l.006.213c0 2.24-1.739 4.094-3.925 4.094c-.445 0-.923-.084-1.374-.233l-.043.193c-.395 1.736-1.806 2.933-3.662 3.016l-.208.005c-2.018 0-3.477-1.232-3.873-3.13l-.03-.161l-.011.006a4.1 4.1 0 0 1-1.26.243l-.226.005c-2.09 0-3.925-1.93-3.925-4.094c0-1.096.51-2.087 1.378-2.84l.073-.062l-.03-.023c-.88-.737-1.359-1.605-1.415-2.656l-.006-.213c0-2.239 1.74-4.094 3.925-4.094c.44 0 .92.098 1.391.27l.036.013l.008-.048c.331-1.84 1.776-3.125 3.7-3.211z'/%3E%3C/svg%3E");
+  /* The mini calendar's today: a softer mark, the number underlined
+     on it (black here, white on a deep red in the dark theme). */
+  --mini-today-bg: #ffb0b8;
+  --mini-today-text: #000;
   --dnd-select-bg: #dbeafe;
   /* Divider under a selected row: a blue-grey a step darker than the
      selection fill so the row's edge still reads against it. */
@@ -107,8 +106,10 @@
   --error-text: #f87171;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
-  --calendar-today-bg: #ff859c;
+  --calendar-today-bg: #ff7380;
   --calendar-today-text: #000;
+  --mini-today-bg: #6e2a32;
+  --mini-today-text: #fff;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #2d374d;
@@ -318,6 +319,14 @@ body {
   width: 100%;
   max-width: 26px;
   height: 24px;
+}
+/* Not under a selection or a preview, which keep their own colour. */
+.mini-calendar .calendar-cell-trigger[data-today]:not([data-selected], [data-preview]) {
+  color: var(--mini-today-text);
+  text-decoration: underline;
+}
+.mini-calendar .calendar-cell-trigger[data-today]::before {
+  background: var(--mini-today-bg);
 }
 
 [data-theme="dark"] .nav {
@@ -562,19 +571,10 @@ body {
   color: var(--text-muted);
 }
 
-/* Today's heading led by a disc in the mini calendar's today yellow. */
-.upcoming-day[data-urgency="today"] .upcoming-day-label::before {
-  content: "";
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-right: 6px;
-  position: relative;
-  top: 2px;
-  /* Drawn at 120% without taking more room in the line. */
-  transform: scale(1.2);
-  background: var(--calendar-today-bg);
-  mask: var(--calendar-today-shape) center / contain no-repeat;
+/* Today's name and the Overdue heading in the today mark's pink. */
+.upcoming-day-today,
+.upcoming-day[data-urgency="overdue"] .upcoming-day-label {
+  color: var(--calendar-today-bg);
 }
 
 /* The blank slot of an empty day, one row high: the day's drop
@@ -4758,15 +4758,16 @@ button.file-name:hover {
   isolation: isolate;
 }
 
-/* The today disc behind today's number. Off under a selection or a preview, which fill the cell. */
+/* The today mark behind today's number: the cell filled, its corners
+   rounded as the cell's. Off under a selection or a preview, which
+   fill the cell. */
 .calendar-cell-trigger[data-today]::before {
   content: "";
   position: absolute;
-  /* 120% of the cell: the mark spills 10% past each edge. */
-  inset: -10%;
+  inset: 0;
   z-index: -1;
+  border-radius: inherit;
   background: var(--calendar-today-bg);
-  mask: var(--calendar-today-shape) center / contain no-repeat;
 }
 
 .calendar-cell-trigger[data-today][data-selected]::before,

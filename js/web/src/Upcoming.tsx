@@ -1372,6 +1372,8 @@ export function Upcoming(props: {
     }
     return date;
   };
+  // Today's name, in the today pink ahead of the rest of its heading.
+  const isToday = (g: DayGroup) => g.key === todayStamp(nowMs());
 
   // The end clock of a timed span, on the row of its last day only.
   const spanEnd = (r: DayRow): string | null => {
@@ -1482,7 +1484,12 @@ export function Upcoming(props: {
             data-drop-target={dropDay() === g.key ? "" : undefined}
           >
             <header class="upcoming-day-header">
-              <h2 class="upcoming-day-label">{dayHeading(g)}</h2>
+              <h2 class="upcoming-day-label">
+                <Show when={isToday(g)} fallback={dayHeading(g)}>
+                  <span class="upcoming-day-today">{m().calendar.today}</span>
+                  {dayHeading(g).slice(m().calendar.today.length)}
+                </Show>
+              </h2>
               <Show when={props.onAddOnDay && canAdd(g)}>
                 <button
                   type="button"
