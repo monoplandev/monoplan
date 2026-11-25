@@ -51,10 +51,11 @@
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
   /* Today's number in the month grids and today's agenda heading: a
-     pink mark (behind the number, beside the heading), the same in
-     both themes, and the number's black on it. */
-  --calendar-today-bg: #ff859c;
-  --calendar-today-text: #000;
+     pink mark (behind the number, beside the heading), a deeper pink
+     with the number in white here, paler with the number in black in
+     the dark theme. */
+  --calendar-today-bg: #ff708b;
+  --calendar-today-text: #fff;
   /* TEMP trial: the today mark's shape (a mask). From Tabler Icons by
      Paweł Kuna, MIT:
      https://github.com/tabler/tabler-icons/blob/master/LICENSE */
@@ -107,6 +108,7 @@
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
   --calendar-today-bg: #ff859c;
+  --calendar-today-text: #000;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #2d374d;
@@ -4750,7 +4752,7 @@ button.file-name:hover {
 }
 
 .calendar-cell-trigger[data-today] {
-  font-weight: 500;
+  font-weight: 400;
   color: var(--calendar-today-text);
   position: relative;
   isolation: isolate;
