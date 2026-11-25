@@ -153,6 +153,8 @@ export type Messages = {
     /** Context-menu item on a user list: opens the emoji picker for its icon. */
     changeListIcon: string;
     newList: string;
+    /** Text button in a workspace's nav group while it has no lists. */
+    createList: string;
     /** Heading over the account's Home doc (Inbox + lists). Every other
      *  open doc gets a sibling heading carrying its own name. */
     personal: string;
@@ -749,6 +751,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       renameList: "Renombrar",
       changeListIcon: "Cambiar icono",
       newList: "Nueva lista",
+      createList: "Crear lista…",
       personal: "Personal",
       untitledDoc: "Espacio sin nombre",
       newDoc: "Nuevo espacio",
@@ -1177,6 +1180,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       renameList: "Rename",
       changeListIcon: "Change icon",
       newList: "New list",
+      createList: "Create list…",
       personal: "Personal",
       untitledDoc: "Untitled workspace",
       newDoc: "New workspace",

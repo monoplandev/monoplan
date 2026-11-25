@@ -1182,7 +1182,7 @@ body {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   height: 28px;
   text-align: left;
@@ -1277,6 +1277,21 @@ body {
   font-size: 0.9em;
   font-variant-numeric: tabular-nums;
 }
+/* "Create list…" in a workspace with no lists: a row-shaped text
+   button, faint at rest so the empty group stays quiet. */
+.nav-first-list {
+  color: var(--text-faint);
+}
+
+.nav-first-list .nav-item-icon {
+  color: inherit;
+}
+
+.nav-first-list:hover,
+.nav-first-list:focus-visible {
+  color: inherit;
+}
+
 /* New-list row (NewListForm): the form is the row, holding the icon
    button and the name field; the row lights while either has focus. */
 .nav-new-list {

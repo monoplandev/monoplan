@@ -1334,6 +1334,21 @@ function DocSection(props: {
           }}
         </Dnd>
       </Show>
+      {/* An empty workspace says how to start: the "+" in the heading
+          shows on hover only, so this is the one affordance at rest. It
+          gives way to the form it opens. Archived lists don't count;
+          they have no nav row either. */}
+      <Show when={lists().length === 0 && !adding()}>
+        <button
+          type="button"
+          class="nav-item nav-first-list"
+          tabIndex={-1}
+          onClick={startAdding}
+        >
+          <span class="nav-item-icon" innerHTML={plusSvg} />
+          {m().nav.createList}
+        </button>
+      </Show>
       <Show when={adding()}>
         <NewListForm
           name={name()}
