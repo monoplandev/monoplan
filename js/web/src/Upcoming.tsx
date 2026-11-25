@@ -344,6 +344,9 @@ export function Upcoming(props: {
   // Selection lights `selDay`'s rows of the selected items.
   const isLit = (id: string, day: string): boolean =>
     day === selDay() && selectedSet().has(id);
+  // A selected event's bar turns blue on every row it has, so a span's
+  // other days show which rows are the same event.
+  const isPicked = (id: string): boolean => selectedSet().has(id);
   // Every row on the page in display order, an item's several rows
   // included: what plain ↑ / ↓ step through.
   const pageRows = createMemo(() =>
@@ -1498,6 +1501,7 @@ export function Upcoming(props: {
             <For each={g.rows}>
                 {(r) => {
                   const selected = createMemo(() => isLit(r.item.id, g.key));
+                  const picked = createMemo(() => isPicked(r.item.id));
                   // Starred (pinned to Focus): a star follows the title.
                   const starred = createMemo(() =>
                     props.app.isFocused(r.item.id),
@@ -1523,6 +1527,7 @@ export function Upcoming(props: {
                     data-key={r.item.id}
                     data-day={g.key}
                     aria-selected={selected() ? "true" : "false"}
+                    data-picked={picked() ? "" : undefined}
                     data-tone={r.tone}
                     data-dragging={dragging().has(r.item.id) ? "" : undefined}
                     data-span-tail={isSpanTail(r, g.key) ? "" : undefined}

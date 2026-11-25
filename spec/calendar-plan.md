@@ -113,7 +113,8 @@ says what the date means and changes one thing, what a past `when` means
 one with no list is here and not in Inbox (`inbox-plan.md`).
 Its calendar row has no checkbox while it is open (2026-11-17, web, iOS,
 macOS): a dot holds the box's place (an upright pill, a calendar's event bar, since
-2026-11-18 on the web, iOS and macOS, as tall as the row), and the box shows, ticked or
+2026-11-18 on the web, iOS and macOS, as tall as the row; blue on the web
+while the event is selected, on every day's row of a span, 2026-11-25), and the box shows, ticked or
 crossed, once the event is done or cancelled from the item surface or
 the row's menu (`events-plan.md`). The close-action
 objection lapsed on 2026-09-30 when a past `when` stopped needing a

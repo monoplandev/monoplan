@@ -762,6 +762,12 @@ body {
   background: var(--border-input);
 }
 
+/* A selected event's bar is blue, on every row the event has: a span's
+   rows on its other days are not selected, but show as the same event. */
+.upcoming-row[data-picked] .upcoming-row-event-pill {
+  background: var(--link);
+}
+
 /* Time lane: a fixed column at the row's right edge (`order` moves it
    past the body and meta), wide enough for the longest 12-hour form
    ("12:30 PM") and right-aligned, so the times line up down the day
