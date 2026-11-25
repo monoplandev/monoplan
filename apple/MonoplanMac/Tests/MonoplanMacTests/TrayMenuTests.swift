@@ -52,6 +52,8 @@ final class TrayMenuTests: XCTestCase {
         ])
         XCTAssertEqual(lines.map(\.done), [false, false, false, true, false])
         XCTAssertEqual(lines.map(\.overdue), [true, false, false, false, false])
+        // The two events lead with the pill.
+        XCTAssertEqual(lines.map(\.event), [false, true, true, false, false])
     }
 
     func testLinesCarryWhereTheItemLives() {
@@ -64,6 +66,27 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(TodayMenu.lines(from: sample, now: date(8, 59))[1].note, "in 1m")
         XCTAssertEqual(TodayMenu.lines(from: sample, now: date(9, 20))[1].note, "started 20m ago")
         XCTAssertEqual(TodayMenu.lines(from: sample, now: date(15, 0))[2].note, "now")
+    }
+
+    func testMenuBarNamesTheEventUnderWayOrAboutToStart() {
+        // Standup 09:00–09:15, Dentist 14:30–15:30; tasks never show.
+        XCTAssertEqual(NowEvent.shown(from: sample, now: date(8, 30)), .init(title: "", next: date(8, 55)))
+        let soon = Calendar.current.date(byAdding: .second, value: 30, to: date(8, 56))!
+        XCTAssertEqual(
+            NowEvent.shown(from: sample, now: soon), .init(title: "Standup · in 3m", next: date(8, 57)))
+        XCTAssertEqual(NowEvent.shown(from: sample, now: date(9, 0)), .init(title: "Standup", next: date(9, 15)))
+        XCTAssertEqual(NowEvent.shown(from: sample, now: date(9, 15)), .init(title: "", next: date(14, 25)))
+        XCTAssertEqual(NowEvent.shown(from: sample, now: date(15, 0)), .init(title: "Dentist", next: date(15, 30)))
+        XCTAssertEqual(NowEvent.shown(from: sample, now: date(16, 0)), .init(title: "", next: nil))
+        // What is next wins over what is under way.
+        let overlap = [AgendaGroup(day: "2026-10-26", today: true, rows: [
+            entry("l", "Long workshop on something or other", event: true, when: "2026-10-26T08:00", duration: 240),
+            entry("s", "Call", event: true, when: "2026-10-26T10:00"),
+        ])]
+        XCTAssertEqual(NowEvent.shown(from: overlap, now: date(9, 0)).title, "Long workshop on someth…")
+        XCTAssertEqual(NowEvent.shown(from: overlap, now: date(9, 58)).title, "Call · in 2m")
+        // No duration: named until its start, never under way.
+        XCTAssertEqual(NowEvent.shown(from: overlap, now: date(10, 0)).title, "Long workshop on someth…")
     }
 
     func testNoTodayGroupIsNoLines() {
@@ -91,27 +114,28 @@ final class TrayMenuTests: XCTestCase {
         XCTAssertEqual(TodayMenu.lines(from: [group], now: date(8, 0))[0].title, "09:00  " + clipped)
     }
 
-    func starred(_ pos: UInt32, _ id: String, _ text: String, list: String, listName: String?, docId: String? = nil) -> StarredItem {
-        StarredItem(
-            pos: pos, id: id, text: text, listId: list, state: .todo, place: nil,
-            docId: docId, docName: nil, listName: listName)
+    func inboxEntry(_ id: String, _ text: String, docId: String? = nil) -> InboxEntry {
+        InboxEntry(
+            item: Item(
+                id: id, text: text, listId: "inbox", state: .backlog, lifecycleAt: 0, createdAt: 0,
+                createdBy: nil, assignee: nil, startedAt: nil, doneAt: nil, binnedAt: nil, when: nil,
+                whenSuggested: nil, event: false, duration: nil, place: nil),
+            docId: docId)
     }
 
-    func testStarredShowsTheFirstThreeClippedWithTheirLists() {
+    func testInboxShowsTheHeadOfTheQueueInTheDeviceOrder() {
         let rows = [
-            starred(1, "a", "Ship the tray", list: "work", listName: "Work", docId: "doc-2"),
-            starred(2, "b", "Book flights", list: "inbox", listName: "Inbox"),
-            starred(3, "c", String(repeating: "c", count: 40), list: "gone", listName: nil),
-            starred(4, "d", "Fourth", list: "inbox", listName: "Inbox"),
+            inboxEntry("a", "Oldest", docId: "doc-2"),
+            inboxEntry("b", String(repeating: "b", count: 40)),
+            inboxEntry("c", "Newest"),
         ]
-        let lines = StarredMenu.lines(from: rows)
-        XCTAssertEqual(lines.map(\.id), ["a", "b", "c"])
-        XCTAssertEqual(lines[2].title, String(repeating: "c", count: 31) + "…")
-        // A list the engine could not name shows nothing, not an id.
-        XCTAssertEqual(lines.map(\.note), ["Work", "Inbox", nil])
-        XCTAssertEqual(lines.map(\.listId), ["work", "inbox", "gone"])
-        XCTAssertEqual(lines.map(\.docId), ["doc-2", nil, nil])
-        XCTAssertTrue(StarredMenu.lines(from: []).isEmpty)
+        let lines = InboxMenu.lines(from: rows, newestFirst: false, limit: 2)
+        XCTAssertEqual(lines.map(\.id), ["a", "b"])
+        XCTAssertEqual(lines[1].title, String(repeating: "b", count: 31) + "…")
+        XCTAssertEqual(lines.map(\.listId), ["inbox", "inbox"])
+        XCTAssertEqual(lines.map(\.docId), ["doc-2", nil])
+        XCTAssertEqual(InboxMenu.lines(from: rows, newestFirst: true, limit: 2).map(\.id), ["c", "b"])
+        XCTAssertTrue(InboxMenu.lines(from: [], newestFirst: false).isEmpty)
     }
 
     func sync(online: Bool, lastSyncedAt: Int64? = nil, reason: String? = nil, localOnly: Bool = false, pending: Bool = false) -> SyncState {

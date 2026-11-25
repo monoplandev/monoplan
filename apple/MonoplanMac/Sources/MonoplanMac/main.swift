@@ -43,7 +43,13 @@ final class TrayController: NSObject, NSMenuDelegate {
     /// A sign-out from the menus is under way: no second one meanwhile.
     private var signingOut = false
     private var lines: [MenuLine] = []
-    private var starred: [MenuLine] = []
+    /// Today's agenda as last read: what the menu bar's event is
+    /// picked from, again at each of its boundaries without a read.
+    private var today: [AgendaGroup] = []
+    private var eventTimer: Timer?
+    private var inbox: [MenuLine] = []
+    /// Inbox rows past the ones the menu shows.
+    private var inboxMore = 0
     private var fetchError: String?
     private var refreshQueued = false
     /// This Mac's reminders: notifications for the items with a time
@@ -115,6 +121,9 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
         monitor.start(queue: DispatchQueue(label: "app.monoplan.mac.path"))
         pathMonitor = monitor
+        // Settings › General "Show the current event in the menu bar".
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(updateStatusTitle), name: UserDefaults.didChangeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
     }
@@ -162,16 +171,24 @@ final class TrayController: NSObject, NSMenuDelegate {
     private func refresh() {
         guard let calls = engineController.calls else { return }
         calls.run({ engine in
-            // Today is the headline; a failed Starred read just leaves
-            // the section empty rather than replacing it. A failed
-            // reminders read leaves what is scheduled as it is.
-            (try engine.agenda(days: 0, pastDays: 0), (try? engine.starred()) ?? [], try? engine.reminders())
+            // Today is the headline; a failed Inbox read just leaves
+            // the section out rather than replacing it. A failed
+            // reminders read leaves what is scheduled as it is. The
+            // Inbox is the window's: its workspace filter and order.
+            (
+                try engine.agenda(days: 0, pastDays: 0),
+                (try? engine.inbox(filter: InboxFilterStore.load())) ?? [],
+                try? engine.reminders()
+            )
         }) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success((let groups, let starred, let reminders)):
+            case .success((let groups, let inbox, let reminders)):
                 self.lines = TodayMenu.lines(from: groups, now: Date())
-                self.starred = StarredMenu.lines(from: starred)
+                self.today = groups
+                self.inbox = InboxMenu.lines(
+                    from: inbox, newestFirst: UserDefaults.standard.bool(forKey: inboxNewestFirstKey))
+                self.inboxMore = inbox.count - self.inbox.count
                 self.fetchError = nil
                 if let reminders {
                     self.reminders.update(reminders.map {
@@ -191,6 +208,33 @@ final class TrayController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// The menu bar's event beside the moon (`NowEvent`): set from the
+    /// last read, and again by a timer at the moment it next changes,
+    /// so an event shows as it starts rather than at the next minute's
+    /// read. Nothing without an engine, or with the setting off.
+    @objc private func updateStatusTitle() {
+        eventTimer?.invalidate()
+        eventTimer = nil
+        var title = ""
+        if NowEvent.isOn(), case .connected = engineController.state, fetchError == nil {
+            let now = Date()
+            let shown = NowEvent.shown(from: today, now: now)
+            title = shown.title
+            if let next = shown.next {
+                // A touch late rather than early: the boundary has passed.
+                let timer = Timer(
+                    fire: next.addingTimeInterval(0.5), interval: 0, repeats: false
+                ) { [weak self] _ in self?.updateStatusTitle() }
+                RunLoop.main.add(timer, forMode: .common)
+                eventTimer = timer
+            }
+        }
+        guard let button = statusItem.button, button.title != title else { return }
+        button.title = title
+        button.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
+        statusItem.length = title.isEmpty ? NSStatusItem.squareLength : NSStatusItem.variableLength
+    }
+
     // MARK: Menu
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -200,12 +244,13 @@ final class TrayController: NSObject, NSMenuDelegate {
 
     private func rebuildMenu() {
         if debug {
-            NSLog("MonoplanMac: state=%@ lines=%@ starred=%@ error=%@",
+            NSLog("MonoplanMac: state=%@ lines=%@ inbox=%@ error=%@",
                   String(describing: engineController.state),
                   lines.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
-                  starred.map { "\($0.title)\($0.note.map { " [\($0)]" } ?? "")" }.joined(separator: " | "),
+                  inbox.map(\.title).joined(separator: " | "),
                   fetchError ?? "-")
         }
+        updateStatusTitle()
         menu.removeAllItems()
 
         let todayHeader = String(localized: "Today · \(Self.headerFormatter.string(from: Date()))")
@@ -215,7 +260,7 @@ final class TrayController: NSObject, NSMenuDelegate {
             addDisabled(todayHeader)
             addDisabled(String(localized: "Not running · \(reason)"))
         case .connected:
-            let noteTab = Self.noteTabLocation(for: lines + starred)
+            let noteTab = Self.noteTabLocation(for: lines + inbox)
             // Overdue is its own section above Today, there only while
             // something is overdue.
             let overdue = fetchError == nil ? lines.filter(\.overdue) : []
@@ -233,12 +278,14 @@ final class TrayController: NSObject, NSMenuDelegate {
             } else {
                 for line in today { menu.addItem(rowItem(line, noteTab: noteTab)) }
             }
-            menu.addItem(.separator())
-            addDisabled(String(localized: "Starred"))
-            if starred.isEmpty {
-                addDisabled(String(localized: "Nothing starred"))
-            } else {
-                for line in starred { menu.addItem(rowItem(line, noteTab: noteTab)) }
+            // The Inbox is there only while something is in it.
+            if !inbox.isEmpty {
+                menu.addItem(.separator())
+                addDisabled(String(localized: "Inbox"))
+                for line in inbox { menu.addItem(rowItem(line, noteTab: noteTab)) }
+                if inboxMore > 0 {
+                    addAction(String(localized: "\(inboxMore) more…"), #selector(openInbox))
+                }
             }
         }
 
@@ -296,13 +343,42 @@ final class TrayController: NSObject, NSMenuDelegate {
     }
 
     /// One right-aligned tab stop shared by every row: the widest title
-    /// plus a gap plus the widest note. Notes then end on a common right
-    /// edge across Today and Starred, and the menu is exactly as wide as
-    /// its widest title-plus-note, no wider.
+    /// (an event's with its pill), a gap and the widest note. Notes then end on a
+    /// common right edge across the sections, and the menu is exactly as
+    /// wide as its widest title-plus-note, no wider.
     private static func noteTabLocation(for lines: [MenuLine]) -> CGFloat {
-        let titles = lines.map { NSAttributedString(string: displayTitle($0), attributes: [.font: titleFont]).size().width }
+        let titles = lines.map {
+            NSAttributedString(string: displayTitle($0), attributes: [.font: titleFont]).size().width
+                + ($0.event ? leadWidth : 0)
+        }
         let notes = lines.compactMap { $0.note }.map { NSAttributedString(string: $0, attributes: [.font: noteFont]).size().width }
         return ceil((titles.max() ?? 0) + noteGap + (notes.max() ?? 0))
+    }
+
+    /// The event pill's width and the gap after it. Only an event's
+    /// row has it: every other row starts where the pill does.
+    private static let pillWidth: CGFloat = 3
+    private static let leadWidth: CGFloat = pillWidth + 6
+
+    /// What an event's row leads with: the event pill (the short upright
+    /// bar of the Calendar's `EventPill`, grey, about as tall as the
+    /// capitals). An attachment
+    /// in the title rather than `NSMenuItem.image`, which would open an
+    /// icon column on every row of the menu.
+    private static func eventPill() -> NSAttributedString {
+        let height = ceil(titleFont.capHeight) + 2
+        let size = NSSize(width: leadWidth, height: height)
+        let attachment = NSTextAttachment()
+        attachment.image = NSImage(size: size, flipped: false) { _ in
+            let bar = NSRect(x: 0, y: 0, width: pillWidth, height: height)
+            NSColor.tertiaryLabelColor.setFill()
+            NSBezierPath(roundedRect: bar, xRadius: pillWidth / 2, yRadius: pillWidth / 2).fill()
+            return true
+        }
+        // Centred on the capitals: the baseline is y = 0.
+        attachment.bounds = NSRect(
+            x: 0, y: (titleFont.capHeight - height) / 2, width: size.width, height: size.height)
+        return NSAttributedString(attachment: attachment)
     }
 
     /// A click opens the window on the item's list (`openItem`).
@@ -313,7 +389,9 @@ final class TrayController: NSObject, NSMenuDelegate {
             itemId: line.id, listId: line.listId, docId: line.docId, onCalendar: line.onCalendar)
         var titleAttributes: [NSAttributedString.Key: Any] = [.font: Self.titleFont]
         if line.done { titleAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
-        let title = NSMutableAttributedString(string: Self.displayTitle(line), attributes: titleAttributes)
+        let title = NSMutableAttributedString()
+        if line.event { title.append(Self.eventPill()) }
+        title.append(NSAttributedString(string: Self.displayTitle(line), attributes: titleAttributes))
         if let note = line.note {
             title.append(NSAttributedString(
                 string: "\t\(note)",
@@ -490,6 +568,11 @@ final class TrayController: NSObject, NSMenuDelegate {
         mainWindow.show(
             list: target.listId, workspace: target.docId, item: target.itemId,
             onCalendar: target.onCalendar)
+    }
+
+    /// The Inbox's "more" row: the window on the Inbox.
+    @objc private func openInbox() {
+        mainWindow.show(list: MainWindowModel.inbox)
     }
 
     /// Quitting ends the engine too (`applicationShouldTerminate`), which

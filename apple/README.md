@@ -90,16 +90,23 @@ amendments 2026-10-27 and 2026-11-15). One process: it runs the Rust engine loop
 in-process (`Engine` from `MonoplanCore`, the same loop as `monoplan
 daemon`) on a background thread, and its tray and window call that
 engine's typed methods (`EngineCalls`), never the socket. The tray
-reads `Engine.agenda(days: 0)` and `Engine.starred()` again whenever
+reads `Engine.agenda(days: 0)` and `Engine.inbox` again whenever
 the engine reports a change, once a minute, and when the menu opens.
 The menu shows Today's rows (time, title, "in 2h 15m" / "now" / "due
-today" / "overdue"), a Starred section with the first three rows of
-the Focus lens, each with its list's name muted on the right, an
+today" / "overdue"; an open event leads with the Calendar's event
+pill), an Inbox section, there only while the Inbox has items, with the
+first five rows of the Inbox as the window shows it (its workspace
+filter and order) and an "N more…" row for the rest, an
 offline notice when there is no server, "Open Monoplan" (the window,
 below), "Settings…" and "Quit Monoplan" (which stops the engine:
 persist, fold, release the profile). Both reads span every open
 workspace. An item row opens the window on the item's list. The rows
-are rendered in `Sources/MonoplanMac/TrayMenu.swift`.
+are rendered in `Sources/MonoplanMac/TrayMenu.swift`. Beside the moon the
+menu bar names today's open timed event that is under way, or one
+starting within five minutes ("Standup · in 3m"), which wins over one
+under way (`NowEvent`; Settings › General "Show the current event in
+the menu bar", this Mac only, on by default). A timer set for the
+title's next change keeps it exact between reads.
 
 Engine rules (`Sources/MonoplanMac/EngineController.swift`): the engine
 runs whenever the app does, on the app's own profile

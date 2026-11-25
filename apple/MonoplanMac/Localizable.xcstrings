@@ -33,6 +33,16 @@
         }
       }
     },
+    "%lld more…" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld más…"
+          }
+        }
+      }
+    },
     "%lldd" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2486,6 +2496,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mostrar todo"
+          }
+        }
+      }
+    },
+    "Show the current event in the menu bar" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar el evento actual en la barra de menús"
           }
         }
       }

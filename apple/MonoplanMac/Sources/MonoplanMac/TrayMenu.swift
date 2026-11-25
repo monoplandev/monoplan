@@ -1,5 +1,5 @@
 // The tray menu's rows, rendered from the engine's typed records
-// (`Engine.agenda` → `AgendaGroup`, `Engine.starred` → `StarredItem`;
+// (`Engine.agenda` → `AgendaGroup`, `Engine.inbox` → `InboxEntry`;
 // spec/swift-bindings-plan.md). Pure: rendering takes `now` as a
 // parameter so it is unit-tested without a clock or an engine.
 
@@ -7,7 +7,7 @@ import Foundation
 import MonoplanCore
 import MonoplanMacKit
 
-/// One line of the Today or Starred section.
+/// One line of the Overdue, Today or Inbox section.
 struct MenuLine: Equatable {
     let id: String
     let title: String
@@ -18,6 +18,9 @@ struct MenuLine: Equatable {
     /// The row is a task past its planned day: it goes in the menu's
     /// Overdue section, above Today.
     let overdue: Bool
+    /// The row leads with the event pill, as its Calendar row does
+    /// (`AgendaEntry.showsCheck`): an open event.
+    var event = false
     /// Where the item lives, which is what a click opens the window
     /// on: its list, in its workspace (nil for Home's).
     let listId: String
@@ -45,6 +48,7 @@ enum TodayMenu {
                 note: note(for: row, now: now, calendar: calendar),
                 done: row.state == .done,
                 overdue: row.tone == .overdue,
+                event: !row.showsCheck,
                 listId: row.listId,
                 docId: row.docId,
                 onCalendar: row.listId == MainWindowModel.inbox && row.when != nil
@@ -104,22 +108,86 @@ enum TodayMenu {
     }
 }
 
-enum StarredMenu {
-    /// How many starred rows the tray shows: the top of the list is the
-    /// point of curating it.
-    static let limit = 3
+/// The event the menu bar names beside the moon: one under way, or one
+/// about to start. Device-only, on by default (Settings › General).
+enum NowEvent {
+    /// The `UserDefaults` key; absent reads as on.
+    static let key = "menuBarShowsEvent"
+    static let defaultOn = true
 
-    /// The item's list is the muted note, by the name the engine
-    /// resolved for it; nothing when it has none.
-    static func lines(from rows: [StarredItem], limit: Int = limit) -> [MenuLine] {
-        rows.prefix(limit).map { row in
+    static func isOn(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key) as? Bool ?? defaultOn
+    }
+
+    /// How long before its start an event is named.
+    static let lead: TimeInterval = 5 * 60
+    /// Shorter than the menu's rows: the menu bar is shared.
+    static let maxTitleLength = 24
+
+    struct Shown: Equatable {
+        /// "Standup" under way, "Standup · in 3m" ahead.
+        let title: String
+        /// When the title next changes (a countdown's next minute, an
+        /// event starting, ending or coming within the lead): nil when
+        /// nothing today will change it.
+        let next: Date?
+    }
+
+    /// Among today's open timed events: the one starting within the
+    /// lead, soonest first, since what is next is the news; else the
+    /// one under way that started last. An event with no duration is
+    /// never under way: it is named until its start.
+    static func shown(from groups: [AgendaGroup], now: Date, calendar: Calendar = .current) -> Shown {
+        let rows = groups.first(where: { $0.today })?.rows ?? []
+        var spans: [(title: String, start: Date, end: Date)] = []
+        // A span has a row on each of its days: one entry an event.
+        var seen = Set<String>()
+        for row in rows where !row.showsCheck && TodayMenu.isTimed(row) {
+            guard seen.insert("\(row.docId ?? "")/\(row.id)").inserted,
+                  let when = row.when, let start = Agenda.start(of: when, calendar: calendar)
+            else { continue }
+            let end = start.addingTimeInterval(TimeInterval(row.duration ?? 0) * 60)
+            spans.append((clipped(row.text), start, end))
+        }
+        var changes = spans.flatMap { [$0.start.addingTimeInterval(-lead), $0.start, $0.end] }
+        var title: String?
+        let ahead = spans.filter { $0.start > now && $0.start.timeIntervalSince(now) <= lead }
+        if let soon = ahead.min(by: { $0.start < $1.start }) {
+            let until = soon.start.timeIntervalSince(now)
+            title = "\(soon.title) · " + String(localized: "in \(TodayMenu.span(until))")
+            // The countdown's next whole minute.
+            let step = until.truncatingRemainder(dividingBy: 60)
+            changes.append(now.addingTimeInterval(step > 0 ? step : 60))
+        } else if let current = spans.filter({ $0.start <= now && now < $0.end }).max(by: { $0.start < $1.start }) {
+            title = current.title
+        }
+        return Shown(title: title ?? "", next: changes.filter { $0 > now }.min())
+    }
+
+    static func clipped(_ text: String) -> String {
+        if text.count <= maxTitleLength { return text }
+        return String(text.prefix(maxTitleLength - 1)) + "…"
+    }
+}
+
+enum InboxMenu {
+    /// How many Inbox rows the tray shows: enough to see what is
+    /// waiting, the rest is the window's.
+    static let limit = 5
+
+    /// The head of the combined Inbox as this Mac shows it: the
+    /// engine's queue is oldest first, reversed when the device's
+    /// order is newest first (`inboxNewestFirstKey`).
+    static func lines(from rows: [InboxEntry], newestFirst: Bool, limit: Int = limit) -> [MenuLine] {
+        let shown = newestFirst ? Array(rows.reversed()) : rows
+        return shown.prefix(limit).map { row in
             MenuLine(
-                id: row.id,
-                title: TodayMenu.clipped(row.text),
-                note: row.listName.map(TodayMenu.clipped),
+                id: row.item.id,
+                title: TodayMenu.clipped(row.item.text),
+                note: nil,
                 done: false,
                 overdue: false,
-                listId: row.listId,
+                listId: MainWindowModel.inbox,
                 docId: row.docId
             )
         }
