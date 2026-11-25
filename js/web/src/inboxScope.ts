@@ -19,7 +19,7 @@ function load(): string[] {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
   } catch {
-    // Unparseable (an older single doc id) or no storage: all workspaces.
+    // Unparseable or no storage: all workspaces.
     return [];
   }
 }

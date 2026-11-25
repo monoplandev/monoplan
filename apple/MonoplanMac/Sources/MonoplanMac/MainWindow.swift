@@ -8,7 +8,7 @@
 // folds the group, and each has a "…" menu: Export and Import JSON
 // (`WorkspaceJSON.swift`), and on a shared workspace Share…
 // (`SharingSheet.swift`) and Delete or Leave; a list's row has
-// Delete, its items to the Inbox or the Bin),
+// Delete, its open items to the Bin),
 // and either the open items of the selected list with a tick and a
 // field to add one, or a lens over every workspace: the Inbox (every
 // workspace's as one queue, `InboxFilter.swift`), Starred in its
@@ -221,9 +221,7 @@ enum SurfaceStore {
         guard let stored = defaults.dictionary(forKey: key), let list = stored["list"] as? String else {
             return nil
         }
-        var lens = (stored["lens"] as? String).flatMap(Lens.init(rawValue:))
-        // A workspace's Inbox, as pages were kept before the one Inbox.
-        if lens == nil, list == MainWindowModel.inbox { lens = .inbox }
+        let lens = (stored["lens"] as? String).flatMap(Lens.init(rawValue:))
         return Surface(lens: lens, workspace: stored["workspace"] as? String, list: list)
     }
 
@@ -619,7 +617,7 @@ final class MainWindowModel: ObservableObject {
     /// The count beside the bar's title, muted after the name.
     var titleCount: Int {
         switch shown.lens {
-        case .inbox: return inboxRows.count
+        case .inbox: return inbox.count
         case .starred: return starred.count
         case .assigned: return assigned.count
         case .bin: return binned.count
@@ -1590,9 +1588,6 @@ final class MainWindowModel: ObservableObject {
         return picked.isEmpty ? sections : sections.filter { picked.contains($0.id) }
     }
 
-    /// The Inbox lens's rows, as the engine narrowed and merged them.
-    var inboxRows: [InboxRow] { inbox }
-
     /// Where an item made in the Inbox goes, as a typed call takes it:
     /// Home's Inbox (nil) while Personal is shown, else the first shown
     /// workspace's, so the new row is seen.
@@ -2508,7 +2503,7 @@ struct MainWindowView: View {
     /// its own workspace. The row after the last makes an item in the
     /// filtered workspace's Inbox, Home's unfiltered.
     private var inbox: some View {
-        let rows = model.inboxRows
+        let rows = model.inbox
         let shown = inboxNewestFirst ? Array(rows.reversed()) : rows
         let workspace = model.inboxCaptureTarget
         let listId = MainWindowModel.inbox

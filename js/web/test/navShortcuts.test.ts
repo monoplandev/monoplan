@@ -26,7 +26,7 @@ describe("digitNavTarget", () => {
     expect(digitNavTarget(key("1"))).toEqual({ kind: "upcoming" });
     expect(digitNavTarget(key("2"))).toEqual({ kind: "focus" });
     expect(digitNavTarget(key("3"))).toEqual({ kind: "done" });
-    expect(digitNavTarget(key("4"))).toEqual({ kind: "list", id: "inbox", all: true });
+    expect(digitNavTarget(key("4"))).toEqual({ kind: "list", id: "inbox" });
   });
 
   test("Bin has no digit", () => {

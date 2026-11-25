@@ -88,13 +88,10 @@ export function createFindState(docs: DocsLayer, assignedShown: () => boolean) {
       // Default menu: the built-in views then every active list of every
       // doc, in nav order (Home first) — the surface doubles as a
       // jump-to-view switcher before the user types anything. Archived
-      // lists stay reachable by query only. Another doc's Inbox is a
-      // list row here (the built-in Inbox entry is Home's).
+      // lists stay reachable by query only. The one Inbox is the
+      // built-in entry; no workspace has a row for its own.
       const lists: SearchResult[] = [];
       for (const d of docs.docs()) {
-        if (!d.home) {
-          lists.push({ id: "inbox", kind: "list", title: m().nav.inbox, docId: d.docId, score: 0 });
-        }
         const st = d.app.state;
         for (const id of st.listsOrder) {
           const l = st.listsById[id];
@@ -187,17 +184,13 @@ export function FindResultBody(props: {
   const lifecycle = () => findResultLifecycle(props.item);
   // Chosen icon for a list result (a literal emoji grapheme), or
   // undefined when unset — falls back to the default file glyph,
-  // mirroring the nav. Another doc's Inbox row carries the Inbox glyph.
+  // mirroring the nav.
   const listIcon = (): string | undefined =>
     props.item.kind === "list"
       ? props.docs.listOf(props.item.docId ?? props.docs.homeDocId, props.item.id)?.icon
       : undefined;
   const viewIcon = (): string | undefined =>
-    props.item.kind === "view"
-      ? VIEW_ICONS[props.item.id]
-      : props.item.kind === "list" && props.item.id === "inbox"
-        ? VIEW_ICONS.inbox
-        : undefined;
+    props.item.kind === "view" ? VIEW_ICONS[props.item.id] : undefined;
   const listLabel = () => findResultListLabel(props.docs, m().nav, props.item);
   // Which doc a non-Home result lives in, as a trailing column.
   const docLabel = (): string => {

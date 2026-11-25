@@ -663,7 +663,7 @@ export function createWorkspaceRuntime(props: {
   // (`refreshDocKeys` in App.tsx) or from their own `DocClosed`.
   const forgetOpenDoc = async (docId: string, r: DocRuntime): Promise<void> => {
     if (docs.viewDocId(view()) === docId)
-      setView({ kind: "list", id: "inbox", all: true });
+      setView({ kind: "list", id: "inbox" });
     if (relisting) relistStale = true;
     forgetPresence(docId);
     files.forget(docId);

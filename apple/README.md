@@ -512,8 +512,8 @@ and the page opens on Today's header: the list is a UIKit collection
 view (`AgendaCollection.swift`, 2026-11-17: the SwiftUI rows hosted in
 its cells), because a SwiftUI `List` cannot be opened part-way down
 reliably. **Home** (`HomeView.swift`,
-2026-11-13) is the root and the index: first a section with Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.workspaces`,
-Personal first), each with its Inbox and then its active lists
+2026-11-13) is the root and the index: first a section with the one Inbox (every workspace's, `InboxView.swift`), Starred, Agenda, Map, Done and Bin, then a section per open workspace (`Engine.workspaces`,
+Personal first), each with its active lists
 (the typed `Engine.lists(workspace:filter: .all)`,
 one read per doc, refetched with the session on every `Changed`;
 `userLists` in `TypedRows.swift` drops archived and reserved rows). A list shows its

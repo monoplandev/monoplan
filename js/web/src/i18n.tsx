@@ -323,13 +323,9 @@ export type Messages = {
     /** Accessible name for the Done / Focus views' display-options popover
      *  trigger. */
     displayOptions: string;
-    /** Switch label (Done / Focus options popover) toggling the origin-list
-     *  badge. */
     /** Switch label (list display options) toggling the per-row lifecycle
      *  state badge on the flat list view. */
     showState: string;
-    /** Inbox display option: show the queue newest first (a device
-     *  preference; the queue itself is oldest first). */
     /** Done view header filter (`DoneFilterMenu`): the trigger's name,
      *  its two submenus, the Lists submenu's text box and empty state,
      *  and the item dropping every check. */

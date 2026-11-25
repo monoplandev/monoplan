@@ -1164,9 +1164,10 @@ impl Engine {
         })?)
     }
 
-    /// Delete a user-created list: its items move to Inbox, at the end
-    /// of the queue, and with `ToBin` are binned too. One undo step
-    /// restores the list and its items (`spec/inbox-plan.md`).
+    /// Delete a user-created list: its row goes and every item it held
+    /// is left with no list (Inbox); with `ToBin`, what the apps pass,
+    /// its open items are binned too. One undo step restores the list
+    /// and its items (`spec/inbox-plan.md`).
     pub fn delete_list(
         &self,
         workspace: Option<String>,

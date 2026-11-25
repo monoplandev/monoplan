@@ -32,7 +32,7 @@
 // A user-created list's page has a "..." menu at the top right: rename
 // (an alert), choose emoji (the system emoji keyboard,
 // `EmojiKeyboard.swift`), archive (confirmed; the page pops) and
-// delete (its items to the Inbox or the Bin, asked; the page pops).
+// delete (its open items to the Bin, confirmed; the page pops).
 // A row of a list's page swiped left is selected, and the page is then
 // selecting (the system's edit mode; "Select Items" in the "..." menu
 // starts it with nothing picked): a tap picks or drops a row, two
@@ -219,9 +219,9 @@ struct HomeView: View {
     @State private var shownList: ListRef?
     @State private var showSignIn = false
     /// The Inbox page is up: the add button captures into its
-    /// filtered workspace's Inbox (`inboxWorkspaceKey`).
+    /// filtered workspace's Inbox (`inboxFilterKey`).
     @State private var inboxShown = false
-    @AppStorage(inboxWorkspaceKey) private var inboxFilter = ""
+    @AppStorage(inboxFilterKey) private var inboxFilter = ""
     /// The Map page is up: its sheet stands where the bottom bar does.
     @State private var mapShown = false
     /// The list page, or Starred, is selecting rows: its toolbar

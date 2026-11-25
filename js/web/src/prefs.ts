@@ -23,13 +23,11 @@ export type ViewKey =
       /** The doc the list lives in. Absent ≡ the account's Home doc, so
        *  rows written before docs existed, and every URL for a Home
        *  list, keep their shape; the runtime's `setView` normalises a
-       *  Home doc id away (`spec/sharing-plan.md` Phase 5). */
+       *  Home doc id away (`spec/sharing-plan.md` Phase 5). Never set
+       *  on the Inbox (`id: "inbox"`): that view is every workspace's
+       *  Inbox as one queue (`spec/inbox-plan.md` "One Inbox"), its
+       *  workspace filter a device preference (`inboxScope.ts`). */
       docId?: string;
-      /** Inbox only, always set there: every workspace's Inbox as one
-       *  queue, the combined Inbox (`spec/inbox-plan.md` "One Inbox").
-       *  `docId` is then absent; no view names one doc's Inbox. Its
-       *  workspace filter is a device preference (`inboxScope.ts`). */
-      all?: true;
     }
   | { kind: "focus" }
   | { kind: "upcoming" }

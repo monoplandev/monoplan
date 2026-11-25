@@ -48,7 +48,7 @@ export function parseHash(hash: string): Route | null {
   switch (token) {
     case "inbox":
     case "list_inbox":
-      return { kind: "view", view: { kind: "list", id: "inbox", all: true } };
+      return { kind: "view", view: { kind: "list", id: "inbox" } };
     // The reserved `events` list has no view of its own: the calendar
     // is its home (`spec/events-plan.md`).
     case "list_events":

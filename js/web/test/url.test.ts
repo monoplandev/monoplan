@@ -14,8 +14,8 @@ const OTHER = "0192f5c1a3b74e6c9d2f8a1b3c4d5e70";
 
 describe("hash routes", () => {
   test("parses every token", () => {
-    expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
-    expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox", all: true } });
+    expect(parseHash("#inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
+    expect(parseHash("#list_inbox")).toEqual({ kind: "view", view: { kind: "list", id: "inbox" } });
     // The reserved `events` list's home is the calendar.
     expect(parseHash("#list_events")).toEqual({ kind: "view", view: { kind: "upcoming" } });
     expect(parseHash("#focus")).toEqual({ kind: "view", view: { kind: "focus" } });
@@ -55,7 +55,7 @@ describe("hash routes", () => {
 
   test("no list hash names a doc", () => {
     const doc = "01a15717-7622-7323-8997-af3e145454d2";
-    expect(viewHash({ kind: "list", id: "inbox", docId: doc })).toBe("#inbox");
+    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox");
     // A user list's id is unique across docs, so its hash carries none.
     expect(viewHash({ kind: "list", id: ID, docId: doc })).toBe(`#list_${ID}`);
   });
@@ -68,11 +68,6 @@ describe("hash routes", () => {
     }
     const r = parseHash(itemHash(ID));
     expect(r).toEqual({ kind: "item", id: ID });
-  });
-
-  test("every Inbox view is the combined Inbox's hash", () => {
-    expect(viewHash({ kind: "list", id: "inbox", all: true })).toBe("#inbox");
-    expect(viewHash({ kind: "list", id: "inbox" })).toBe("#inbox");
   });
 
   test("open item wins over the view", () => {

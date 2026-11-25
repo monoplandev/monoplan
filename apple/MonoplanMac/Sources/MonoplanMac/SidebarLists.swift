@@ -4,8 +4,8 @@
 // reorder half). The web's nav does the same with its own component
 // (`nav.tsx` `onReorder`).
 //
-// The rest of the sidebar stays a SwiftUI `List`: the lenses, each
-// workspace's heading and its Inbox (which never moves, as on the web).
+// The rest of the sidebar stays a SwiftUI `List`: the lenses (the one
+// Inbox among them) and each workspace's heading.
 // This is one row of that list, as tall as its lists, set into the
 // `List` with no row insets and `bleed` wider than the cell each side,
 // so its rows and their selection line up with the system rows above

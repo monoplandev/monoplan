@@ -1482,7 +1482,7 @@ impl ItemMeta {
     /// Inbox's queue sort key (`spec/inbox-plan.md` "Order"):
     /// `(inbox_at ?? created_at, created_at)`, then the id.
     fn queue_key(&self) -> (i64, i64) {
-        (self.inbox_at.unwrap_or(self.created_at), self.created_at)
+        crate::inbox::key(self.inbox_at, self.created_at)
     }
 }
 

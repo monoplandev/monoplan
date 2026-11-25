@@ -1182,10 +1182,10 @@ final class AppModel: ObservableObject {
     }
 
     /// `Engine.inbox`, narrowed to the Inbox page's filter as stored
-    /// (`inboxWorkspaceKey`): the engine picks the workspaces and
+    /// (`inboxFilterKey`): the engine picks the workspaces and
     /// merges their rows.
     func refreshInbox() {
-        let filter = Self.inboxFilterIds(UserDefaults.standard.string(forKey: inboxWorkspaceKey) ?? "")
+        let filter = Self.inboxFilterIds(UserDefaults.standard.string(forKey: inboxFilterKey) ?? "")
         read({ try $0.inbox(filter: filter) }) { [weak self] rows, error in
             if let rows { self?.inbox = rows }
             self?.inboxError = error
@@ -1198,7 +1198,7 @@ final class AppModel: ObservableObject {
         entry.docId ?? session?.primaryDocId ?? ""
     }
 
-    /// The Inbox page's workspace filter as stored (`inboxWorkspaceKey`):
+    /// The Inbox page's workspace filter as stored (`inboxFilterKey`):
     /// the picked doc ids, comma-separated; empty is every workspace.
     static func inboxFilterIds(_ stored: String) -> [String] {
         stored.split(separator: ",").map(String.init).filter { !$0.isEmpty }

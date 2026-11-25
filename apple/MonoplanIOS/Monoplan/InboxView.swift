@@ -2,12 +2,12 @@
 // and the item sheet): every open workspace's Inbox as one queue
 // (`Engine.inbox`, spec/inbox-plan.md "One Inbox"). Each doc keeps its
 // own Inbox; this is a read across them, as Assigned is. Oldest first,
-// or newest first as this device prefers (the "..." menu's Order, the
-// same key the single Inbox had). The Inbox is a queue in arrival
+// or newest first as this device prefers (the "..." menu's Order,
+// `inboxNewestFirstKey`). The Inbox is a queue in arrival
 // order, so its rows are never dragged to a new place.
 // With more than one workspace open, the filter at the top right
 // narrows the rows: "All Workspaces" (the default), or any number of
-// workspaces checked at once (a device preference, `inboxWorkspaceKey`;
+// workspaces checked at once (a device preference, `inboxFilterKey`;
 // one no longer open is ignored). The engine applies it
 // (`Engine.inbox(filter:)`), so a change reads the rows again. The
 // title never names a workspace: it is one Inbox. While rows of more
@@ -26,7 +26,7 @@ import SwiftUI
 /// `UserDefaults` key of the Inbox page's workspace filter: the picked
 /// doc ids comma-separated, or absent / empty for every workspace
 /// (`AppModel.inboxFilterIds`).
-let inboxWorkspaceKey = "inboxWorkspace"
+let inboxFilterKey = "inboxFilter"
 
 struct InboxView: View {
     @EnvironmentObject private var model: AppModel
@@ -38,7 +38,7 @@ struct InboxView: View {
     /// rows on screen, never a doc.
     @AppStorage(inboxNewestFirstKey) private var inboxNewestFirst = false
     /// The workspace filter as stored; the engine applies it.
-    @AppStorage(inboxWorkspaceKey) private var storedFilter = ""
+    @AppStorage(inboxFilterKey) private var storedFilter = ""
 
     /// The keys of the rows picked while selecting.
     @State private var selection: Set<String> = []

@@ -19,10 +19,16 @@ pub fn scope<'a, K: PartialEq>(open: &'a [K], filter: &[K]) -> Vec<&'a K> {
     }
 }
 
-/// An item's place in the queue: `inbox_at`, else `created_at`, then
-/// `created_at` (`spec/inbox-plan.md` "Order").
+/// The queue's sort key from an item's registers: `inbox_at`, else
+/// `created_at`, then `created_at` (`spec/inbox-plan.md` "Order"). The
+/// one definition: a doc's own Inbox projection sorts on it too.
+pub fn key(inbox_at: Option<i64>, created_at: i64) -> (i64, i64) {
+    (inbox_at.unwrap_or(created_at), created_at)
+}
+
+/// An item's place in the queue ([`key`]).
 pub fn queue_key(item: &ItemView) -> (i64, i64) {
-    (item.inbox_at.unwrap_or(item.created_at), item.created_at)
+    key(item.inbox_at, item.created_at)
 }
 
 /// What one doc's Inbox contributes: its listed rows (Open, not

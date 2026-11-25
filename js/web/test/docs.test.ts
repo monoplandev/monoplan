@@ -98,14 +98,14 @@ describe("docs layer", () => {
     expect(layer.docIdOf("nope")).toBeUndefined();
     expect(layer.getItem(b)?.text).toBe("other item");
     expect(layer.getItem(b)?.docId).toBe(OTHER);
-    // A user list resolves to its doc; the reserved lists to Home.
+    // A user list resolves to its doc; the Inbox has no row to find.
     const list = other.addList("Work");
     expect(layer.docIdOfList(list)).toBe(OTHER);
-    expect(layer.docIdOfList("inbox")).toBe(HOME);
+    expect(layer.docIdOfList("inbox")).toBeUndefined();
     // Canonical list views: Home carries no doc id, and every doc's
     // Inbox is the combined Inbox, which names none.
-    expect(layer.listView(HOME, "inbox")).toEqual({ kind: "list", id: "inbox", all: true });
-    expect(layer.listView(OTHER, "inbox")).toEqual({ kind: "list", id: "inbox", all: true });
+    expect(layer.listView(HOME, "inbox")).toEqual({ kind: "list", id: "inbox" });
+    expect(layer.listView(OTHER, "inbox")).toEqual({ kind: "list", id: "inbox" });
     expect(layer.listView(OTHER, list)).toEqual({ kind: "list", id: list, docId: OTHER });
     expect(layer.viewDocId({ kind: "list", id: list, docId: OTHER })).toBe(OTHER);
     expect(layer.viewDocId({ kind: "focus" })).toBe(HOME);

@@ -339,7 +339,7 @@ export function Workspace(props: {
   // Archived badge and the menu flips to Unarchive.
   const archive = createArchiveListFlow();
   // Header-menu delete shares the nav's dialog. The list's row goes, so
-  // the view hops to its doc's Inbox, where the items now are.
+  // the view hops to the Inbox.
   const deleteFlow = createDeleteListFlow();
   // Display label for a doc: Home is "Personal"; others carry their
   // name, or the untitled fallback.
@@ -423,7 +423,7 @@ export function Workspace(props: {
   // Identity for a view, for equality checks (`ViewKey` objects are
   // recreated freely).
   const viewKey = (v: ViewKey) =>
-    v.kind === "list" ? `list:${v.all ? "*" : docs.viewDocId(v)}:${v.id}` : v.kind;
+    v.kind === "list" ? `list:${docs.viewDocId(v)}:${v.id}` : v.kind;
   // The view the entered item was entered under. Navigating to another
   // view closes the item (the view-change effect below); a route that
   // reveals + enters in one batch has already switched the view by the
@@ -480,18 +480,14 @@ export function Workspace(props: {
   const [viewOverrides, setViewOverrides] = createSignal<Record<string, string>>(
     loadViewPrefs(),
   );
-  // Override-map key: a user list id is unique across docs, but every
-  // doc has an `inbox`, so a non-Home Inbox is keyed by its doc too.
+  // Override-map key: the list's id, under its doc's when that is not
+  // Home (the shape the stored map has always had).
   const listKey = (docId: string, listId: string): string =>
     docId === docs.homeDocId ? listId : `${docId}/${listId}`;
-  // The list's saved default view, or null when none is saved. Inbox has
-  // no ListMeta row, so its default lives in the doc-level settings.
-  const savedViewIn = (docId: string, listId: string): ViewSpec | null => {
-    const st = docs.appOf(docId)?.state;
-    return parseView(
-      listId === "inbox" ? st?.settings.inboxView : st?.listsById[listId]?.defaultView,
-    );
-  };
+  // The list's saved default view, or null when none is saved (the
+  // Inbox has none here, `listViewIn`).
+  const savedViewIn = (docId: string, listId: string): ViewSpec | null =>
+    parseView(docs.appOf(docId)?.state.listsById[listId]?.defaultView);
   const savedView = (listId: string): ViewSpec | null => savedViewIn(viewDocId(), listId);
   // What this client actually renders: local override, else the synced
   // default, else the built-in flat list. Inbox has no display options
@@ -507,8 +503,7 @@ export function Workspace(props: {
     const v = view();
     return v.kind === "list" && listView(v.id).board ? v.id : null;
   });
-  // Remount key for the board: a list id is unique across docs except
-  // the reserved `inbox`, so the doc is part of it.
+  // Remount key for the board: the list and its doc.
   const boardKey = createMemo((): string | null => {
     const id = boardListId();
     return id === null ? null : `${viewDocId()}/${id}`;
@@ -754,7 +749,7 @@ export function Workspace(props: {
   const recentDoneFor = (v: ViewKey): readonly LingerCapture[] =>
     v.kind === "focus"
       ? docs.focusRecentDone()
-      : v.kind === "list" && v.all
+      : v.kind === "list" && v.id === "inbox"
         ? docs.docs().flatMap((d) =>
             d.app.recentDone().filter((r) => r.listId === "inbox"),
           )
@@ -1023,7 +1018,7 @@ export function Workspace(props: {
   });
   const isCombinedInbox = (): boolean => {
     const v = view();
-    return v.kind === "list" && v.all === true;
+    return v.kind === "list" && v.id === "inbox";
   };
   // The open workspaces the filter picks; empty is "All workspaces".
   const inboxPicked = (): string[] =>
@@ -1057,7 +1052,7 @@ export function Workspace(props: {
   const items = createMemo((): ItemView[] => {
     const v = view();
     if (v.kind === "assigned") return assignedItems();
-    if (v.kind === "list" && v.all) return combinedInbox();
+    if (v.kind === "list" && v.id === "inbox") return combinedInbox();
     if (v.kind === "list") {
       const st = viewApp().state;
       const out: ItemView[] = [];
@@ -1104,7 +1099,7 @@ export function Workspace(props: {
   // no overlay and counts the rows its filter admits. Zero elsewhere.
   const headerCount = createMemo((): number => {
     const v = view();
-    if (v.kind === "list" && v.all) return combinedInboxCount();
+    if (v.kind === "list" && v.id === "inbox") return combinedInboxCount();
     if (v.kind === "list") return viewApp().state.listOpen[v.id]?.length ?? 0;
     if (v.kind === "focus") return docs.focusItems().length;
     if (v.kind === "assigned") return assignedCount();
@@ -2718,7 +2713,7 @@ export function Workspace(props: {
     // Sidebar order: the fixed views (Bin only while it has a row), then
     // each doc's section (Home first): its user lists.
     const seq: ViewKey[] = [
-      { kind: "list", id: "inbox", all: true },
+      { kind: "list", id: "inbox" },
       { kind: "upcoming" },
       ...(assignedShown() ? [{ kind: "assigned" } as ViewKey] : []),
       { kind: "focus" },
@@ -2971,7 +2966,7 @@ export function Workspace(props: {
   // done-only items in Done, otherwise their list.
   const onFindSelect = (r: FindResult) => {
     if (r.kind === "view") {
-      setView(r.id === "inbox" ? { kind: "list", id: "inbox", all: true } : { kind: r.id });
+      setView(r.id === "inbox" ? { kind: "list", id: r.id } : { kind: r.id });
       return;
     }
     if (r.kind === "list") {
@@ -3094,17 +3089,12 @@ export function Workspace(props: {
     if (route.kind === "view") {
       // A list is looked up across every open doc (`spec/urls.md`): an
       // unknown one (deleted, or from another account) is ignored. The
-      // reserved inbox has no ListMeta row; its URL names its doc when
-      // that isn't Home, and an unknown doc is ignored the same way.
+      // Inbox has no ListMeta row and names no doc: it always resolves.
       let target = route.view;
-      if (target.kind === "list") {
-        if (target.id === "inbox") {
-          if (target.docId !== undefined && !docs.appOf(target.docId)) return;
-        } else {
-          const docId = docs.docIdOfList(target.id);
-          if (docId === undefined) return;
-          target = docs.listView(docId, target.id);
-        }
+      if (target.kind === "list" && target.id !== "inbox") {
+        const docId = docs.docIdOfList(target.id);
+        if (docId === undefined) return;
+        target = docs.listView(docId, target.id);
       }
       const sameView = viewKey(target) === viewKey(untrack(view));
       batch(() => {
@@ -3634,7 +3624,7 @@ export function Workspace(props: {
         upcomingBadge={upcomingBadge()}
         assignedCount={assignedShown() ? assignedCount() : null}
         inboxCount={combinedInboxCount()}
-        openInbox={() => navigateTo({ kind: "list", id: "inbox", all: true })}
+        openInbox={() => navigateTo({ kind: "list", id: "inbox" })}
         showListCounts={listCountsPref()}
         view={view()}
         setView={navigateTo}
@@ -3740,11 +3730,11 @@ export function Workspace(props: {
         open={newDocOpen()}
         onOpenChange={setNewDocOpen}
         onCreate={props.createDoc}
-        onCreated={(docId) => navigateTo(docs.listView(docId, "inbox"))}
+        onCreated={(docId) => navigateTo(listViewFor(docId, "inbox"))}
       />
       <InviteDialog
         joinDoc={props.joinDoc}
-        onJoined={(docId) => navigateTo(docs.listView(docId, "inbox"))}
+        onJoined={(docId) => navigateTo(listViewFor(docId, "inbox"))}
       />
       <ConfirmDialog
         open={emptyBinConfirmOpen()}

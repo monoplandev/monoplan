@@ -545,9 +545,10 @@ impl Doc {
             .map_err(js_err)
     }
 
-    /// Delete a user list (`spec/inbox-plan.md`): every item moves to
-    /// Inbox, and with `to_bin` the ones not already binned are binned.
-    /// One commit, one undo step.
+    /// Delete a user list (`spec/inbox-plan.md`): its row goes and every
+    /// item it held is left with no list (Inbox); with `to_bin`, what
+    /// every client passes, its open items are binned too. One commit,
+    /// one undo step.
     #[wasm_bindgen(js_name = deleteList)]
     pub fn delete_list(&self, list_id: &str, to_bin: bool) -> Result<(), JsError> {
         let mode = if to_bin {
@@ -2369,9 +2370,10 @@ impl Replica {
             .map_err(js_err)
     }
 
-    /// Delete a user list (`spec/inbox-plan.md`): every item moves to
-    /// Inbox, and with `to_bin` the ones not already binned are binned.
-    /// One commit, one undo step.
+    /// Delete a user list (`spec/inbox-plan.md`): its row goes and every
+    /// item it held is left with no list (Inbox); with `to_bin`, what
+    /// every client passes, its open items are binned too. One commit,
+    /// one undo step.
     #[wasm_bindgen(js_name = deleteList)]
     pub fn delete_list(&self, list_id: &str, to_bin: bool) -> Result<(), JsError> {
         let mode = if to_bin {

@@ -746,8 +746,8 @@ function DocSection(props: {
   // via Unarchive), so a list with no open items archives without a
   // dialog; one with open items confirms first, the items staying in
   // the list (`ArchiveListDialog`). Archiving the list currently on screen
-  // would leave a stale view; hop to this doc's Inbox before applying
-  // the mutation.
+  // would leave a stale view; hop to the Inbox before applying the
+  // mutation.
   const archive = createArchiveListFlow();
   const archiveList = (id: string) =>
     archive.request({
@@ -758,8 +758,7 @@ function DocSection(props: {
       },
     });
   // Delete confirms, then bins the items (`DeleteListDialog`); the
-  // list's row goes, so hop to this doc's Inbox first when it is on
-  // screen. A non-Home doc counts as shared unless its member list is
+  // list's row goes, so hop to the Inbox first when it is on screen. A non-Home doc counts as shared unless its member list is
   // loaded and says one, as the cross-workspace move does.
   const deleteFlow = createDeleteListFlow();
   const deleteList = (id: string) =>

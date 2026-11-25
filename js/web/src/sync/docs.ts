@@ -118,8 +118,7 @@ export interface DocsLayer {
   /** Merged `getItem`: the item from whichever doc holds it. */
   getItem(itemId: string): ItemView | undefined;
   /** The doc holding a `ListMeta` row with this id (user list ids are
-   *  unique across docs; the reserved `inbox` / `events` resolve to
-   *  Home). */
+   *  unique across docs). The reserved `inbox` has no row: undefined. */
   docIdOfList(listId: string): string | undefined;
   listOf(docId: string, listId: string): ListView | undefined;
   /** The doc a view is scoped to: a list view's doc (Home when the key
@@ -258,7 +257,6 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     return undefined;
   };
   const docIdOfList = (listId: string): string | undefined => {
-    if (listId === "inbox") return homeDocId;
     for (const d of docs()) {
       if (d.app.state.listsById[listId]) return d.docId;
     }
@@ -273,7 +271,7 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
   // (`spec/inbox-plan.md` "One Inbox"): no view names one doc's Inbox.
   const listView = (docId: string, listId: string): ViewKey =>
     listId === "inbox"
-      ? { kind: "list", id: "inbox", all: true }
+      ? { kind: "list", id: "inbox" }
       : docId === homeDocId
         ? { kind: "list", id: listId }
         : { kind: "list", id: listId, docId };
