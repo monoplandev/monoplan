@@ -1,6 +1,6 @@
 // The item panel's subtasks (spec/subtasks.md): text nodes with done /
 // not done, owned by the item. A column of rows, each a checkbox and a
-// text field, over a trailing "Add subtask" field that keeps the caret
+// text field, over a trailing "Subtask" field that keeps the caret
 // after Return so a list can be typed straight down. A field wraps, so
 // a long subtask takes as many lines as it needs, with the checkbox and
 // the grip on its first line; the text itself stays one line (Return
@@ -122,11 +122,11 @@ struct SubtasksField: View {
                 .foregroundStyle(.tertiary)
                 .frame(width: 20, height: Self.rowHeight)
             // The placeholder is our own `Text`, in the ink of the
-            // panel's unset "Date" and "Place" rows: a field's own
+            // panel's unset "Date" and "Location" rows: a field's own
             // prompt is drawn in the system's placeholder colour.
             ZStack(alignment: .topLeading) {
                 if addDraft.isEmpty {
-                    Text("Add subtask")
+                    Text("Subtask")
                         .lineLimit(1)
                         .foregroundStyle(.tertiary)
                         .allowsHitTesting(false)

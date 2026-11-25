@@ -273,7 +273,7 @@ struct ItemPanel: View {
                 PanelField(text: place.label) { PanelGlyph(image: NavArt.pin) }
                     .padding(.bottom, trim)
             } else {
-                PanelField(text: String(localized: "Place"), empty: true) { PanelGlyph(image: NavArt.pin) }
+                PanelField(text: String(localized: "Location"), empty: true) { PanelGlyph(image: NavArt.pin) }
                     .padding(.bottom, trim)
             }
             if let place = item.item.place, let lat = place.lat, let lon = place.lon {

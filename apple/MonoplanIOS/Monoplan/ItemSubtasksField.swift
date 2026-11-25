@@ -127,7 +127,8 @@ struct ItemSubtasksField: View {
             Image(systemName: "plus")
                 .foregroundStyle(.tertiary)
                 .frame(width: 24, height: rowHeight)
-            TextField("Add subtask", text: $addDraft, selection: $addSelection, axis: .vertical)
+            TextField("Subtask", text: $addDraft, selection: $addSelection, axis: .vertical)
+                .accessibilityLabel("Add subtask")
                 .focused($focus, equals: .add)
                 .submitLabel(.next)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { addFieldHeight = $0 }

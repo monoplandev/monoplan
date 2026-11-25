@@ -163,7 +163,7 @@ struct ItemCaptureView: View {
                     // for a title.
                     fieldRow("calendar", String(localized: "Date"), what: String(localized: "date"), opens: .date)
                     Divider()
-                    fieldRow(String(localized: "Place"), what: String(localized: "place"), opens: .place) { PinIcon() }
+                    fieldRow(String(localized: "Location"), what: String(localized: "place"), opens: .place) { PinIcon() }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -465,7 +465,7 @@ struct ItemView: View {
                 if let place = item.place {
                     FieldRow(text: place.label, note: place.address) { PinIcon() }
                 } else {
-                    FieldRow(text: String(localized: "Place"), empty: true) { PinIcon() }
+                    FieldRow(text: String(localized: "Location"), empty: true) { PinIcon() }
                 }
                 if item.place != nil {
                     Spacer(minLength: 8)

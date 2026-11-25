@@ -1784,6 +1784,16 @@
         }
       }
     },
+    "Location" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ubicación"
+          }
+        }
+      }
+    },
     "Location is turned off for Monoplan, so no alerts are shown." : {
       "extractionState" : "stale",
       "localizations" : {

@@ -1398,6 +1398,16 @@
         }
       }
     },
+    "Location" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ubicación"
+          }
+        }
+      }
+    },
     "Lists added: %lld" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2006,17 +2016,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Personal"
-          }
-        }
-      }
-    },
-    "Place" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Lugar"
           }
         }
       }

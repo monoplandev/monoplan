@@ -4,7 +4,7 @@
 // search box. At rest it is
 // the place's label on one line (cut with an ellipsis when it
 // is longer; the panel puts the address under the map), or a muted
-// "Place" when there is none. Under the pointer a set place shows a ✕
+// "Location" when there is none. Under the pointer a set place shows a ✕
 // at the box's end, which takes it off the item. A click turns the row
 // into a search box with a list under it: one run of rows, no
 // headings, in the order of the iOS place editor
@@ -85,7 +85,7 @@ struct PlaceField: View {
 
     // MARK: Rows
 
-    /// The place at rest: its label on one line, or a muted "Place".
+    /// The place at rest: its label on one line, or a muted "Location".
     private var shown: some View {
         Button {
             picking = true
@@ -94,7 +94,7 @@ struct PlaceField: View {
                 PanelGlyph(image: NavArt.pin)
                     .foregroundStyle(place == nil ? .tertiary : .secondary)
                     .frame(width: 20)
-                Text(verbatim: place?.label ?? String(localized: "Place"))
+                Text(verbatim: place?.label ?? String(localized: "Location"))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(place == nil ? .tertiary : .primary)

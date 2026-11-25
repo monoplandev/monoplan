@@ -939,7 +939,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     place: {
       label: "Lugar",
-      placeholder: "Lugar",
+      placeholder: "Ubicación",
       remove: "Quitar lugar",
       edit: "Editar lugar",
       asTyped: "Tal como está escrito",
@@ -1362,7 +1362,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
     },
     place: {
       label: "Place",
-      placeholder: "Place",
+      placeholder: "Location",
       remove: "Remove place",
       edit: "Edit place",
       asTyped: "As typed",

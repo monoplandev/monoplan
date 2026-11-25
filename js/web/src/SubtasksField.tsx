@@ -1,6 +1,6 @@
 // The task surface's subtasks (`spec/subtasks.md`): text nodes with
 // done / not done, owned by the item. A column of rows, each a checkbox
-// and a text field, over a trailing "Add subtask" field that keeps the
+// and a text field, over a trailing "Subtask" field that keeps the
 // caret after Enter so a list can be typed straight down. A field is a
 // textarea that grows with its text, so a long subtask wraps onto as
 // many lines as it needs; the text itself stays one line (Enter
@@ -267,7 +267,7 @@ export function SubtasksField(props: {
           rows={1}
           ref={addRef}
           onInput={(e) => onFieldInput(e.currentTarget)}
-          placeholder={m().workspace.addSubtask}
+          placeholder={m().workspace.subtask}
           aria-label={m().workspace.addSubtask}
           onBlur={add}
           onKeyDown={(e) => {
