@@ -331,6 +331,7 @@ final class AppModel: ObservableObject {
     func setDone(_ ref: ItemRef, done: Bool) {
         let workspace = selector(ref.docId)
         let id = ref.itemId
+        if done { DoneSound.play() }
         call({ try $0.setDone(workspace: workspace, id: id, done: done) }) { [weak self] result in
             switch result {
             case .success: self?.wrote(to: ref)
@@ -344,6 +345,7 @@ final class AppModel: ObservableObject {
     /// reread as `setDone` does.
     func setState(_ ref: ItemRef, state: ItemState) {
         let (workspace, id) = (selector(ref.docId), ref.itemId)
+        if state == .done { DoneSound.play() }
         write({ try $0.setState(workspace: workspace, id: id, state: state) }, to: ref)
     }
 

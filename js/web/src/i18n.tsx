@@ -594,6 +594,8 @@ export type Messages = {
     dark: string;
     showListCounts: string;
     showMiniCalendar: string;
+    /** Plays a sound on ticking an item done (`doneSound.ts`). */
+    doneSound: string;
     /** 12 / 24-hour clock preference; "Auto" reuses `auto`. */
     timeFormat: string;
     timeFormat12: string;
@@ -1014,6 +1016,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       dark: "Oscuro",
       showListCounts: "Mostrar contadores de listas en la navegación",
       showMiniCalendar: "Mostrar minicalendario en la navegación",
+      doneSound: "Sonido al completar una tarea",
       timeFormat: "Formato de hora",
       timeFormat12: "12 h",
       timeFormat24: "24 h",
@@ -1433,6 +1436,7 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       dark: "Dark",
       showListCounts: "Show list counts in nav",
       showMiniCalendar: "Show mini calendar in nav",
+      doneSound: "Play a sound on completing a task",
       timeFormat: "Time format",
       timeFormat12: "12h",
       timeFormat24: "24h",

@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var showDeleteAccount = false
     @AppStorage(listCountsKey) private var showListCounts = false
+    @AppStorage(DoneSound.key) private var doneSound = false
     @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
     @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
     /// Notifications are turned off for the app in the system's
@@ -33,6 +34,7 @@ struct SettingsView: View {
         List {
             Section("General") {
                 Toggle("Show list counts in Home", isOn: $showListCounts)
+                Toggle("Play a sound on completing a task", isOn: $doneSound)
             }
             remindersSection
             PlaceAlertsSection(

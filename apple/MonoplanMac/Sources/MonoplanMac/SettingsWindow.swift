@@ -400,6 +400,7 @@ struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     /// Read by the window's sidebar (`MainWindowView`).
     @AppStorage(listCountsKey) private var showListCounts = false
+    @AppStorage(DoneSound.key) private var doneSound = false
     @AppStorage(ReminderSettings.eventKey) private var eventReminder = ReminderSettings.defaultEvent
     @AppStorage(ReminderSettings.taskKey) private var taskReminder = ReminderSettings.defaultTask
     /// Notifications are turned off for the app in System Settings: no
@@ -475,6 +476,7 @@ struct GeneralPane: View {
             }
             .pickerStyle(.segmented)
             Toggle("Show list counts in sidebar", isOn: $showListCounts)
+            Toggle("Play a sound on completing a task", isOn: $doneSound)
             Toggle("Open window at launch", isOn: Binding(
                 get: { model.openWindowAtLaunch },
                 set: { model.setOpenWindowAtLaunch($0) }

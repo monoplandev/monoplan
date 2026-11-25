@@ -2545,6 +2545,16 @@
         }
       }
     },
+    "Play a sound on completing a task" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sonido al completar una tarea"
+          }
+        }
+      }
+    },
     "Privacy Policy" : {
       "extractionState" : "stale",
       "localizations" : {

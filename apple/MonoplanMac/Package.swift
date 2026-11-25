@@ -45,7 +45,10 @@ let package = Package(
                 .product(name: "MonoplanDnd", package: "MonoplanDnd"),
                 .product(name: "MonoplanDndCore", package: "MonoplanDnd"),
             ],
-            path: "Sources/MonoplanMac"
+            path: "Sources/MonoplanMac",
+            // The tick sound (`DoneSound`): the Xcode target bundles it,
+            // the test executable never plays it.
+            exclude: ["done.wav"]
         ),
         .testTarget(
             name: "MonoplanMacKitTests",

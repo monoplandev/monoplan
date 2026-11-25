@@ -29,6 +29,7 @@ import {
   timeFormatPref,
   type TimeFormatPreference,
 } from "./format.tsx";
+import { doneSoundPref, setDoneSoundPref } from "./doneSound.ts";
 import { listCountsPref, setListCountsPref } from "./listCounts.ts";
 import { miniCalendarShown, setMiniCalendarShown } from "./MiniCalendar.tsx";
 
@@ -407,6 +408,22 @@ export function Settings(props: {
                       aria-label={m().settings.showMiniCalendar}
                       checked={miniCalendarShown()}
                       onChange={(checked) => setMiniCalendarShown(checked)}
+                    >
+                      <Switch.Input class="settings-switch-input" />
+                      <Switch.Control class="settings-switch-control">
+                        <Switch.Thumb class="settings-switch-thumb" />
+                      </Switch.Control>
+                    </Switch>
+                  </div>
+                  <div class="settings-row">
+                    <div class="settings-row-label">
+                      {m().settings.doneSound}
+                    </div>
+                    <Switch
+                      class="settings-switch"
+                      aria-label={m().settings.doneSound}
+                      checked={doneSoundPref()}
+                      onChange={(checked) => setDoneSoundPref(checked)}
                     >
                       <Switch.Input class="settings-switch-input" />
                       <Switch.Control class="settings-switch-control">

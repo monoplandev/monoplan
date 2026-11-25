@@ -959,6 +959,7 @@ final class MainWindowModel: ObservableObject {
     func tick(_ item: Item) {
         let workspace = shown.workspace
         noteClose(item.id, closed: true)
+        DoneSound.play()
         write { try $0.setDone(workspace: workspace, id: item.id, done: true) }
     }
 
@@ -980,6 +981,7 @@ final class MainWindowModel: ObservableObject {
     /// Tick or untick a lens's row, in its own workspace.
     func setDone(workspace: String?, id: String, done: Bool) {
         noteClose(id, closed: done)
+        if done { DoneSound.play() }
         write { try $0.setDone(workspace: workspace, id: id, done: done) }
     }
 
@@ -1237,6 +1239,7 @@ final class MainWindowModel: ObservableObject {
     /// Move an item to any workflow state (`Engine.setState`).
     func setState(workspace: String?, id: String, state: ItemState) {
         noteClose(id, closed: state.isClosed)
+        if state == .done { DoneSound.play() }
         write { try $0.setState(workspace: workspace, id: id, state: state) }
     }
 

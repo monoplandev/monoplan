@@ -62,6 +62,7 @@
 
 import { placeSuggestionsJson } from "@monoplan/core/wasm";
 import { batch, createEffect, createSignal, type Accessor } from "solid-js";
+import { playDoneSound } from "../doneSound.ts";
 import { restoreCapturedPositions } from "../linger.ts";
 import type { PlaceSuggestion } from "../placeSuggest.ts";
 import type { ViewKey } from "../prefs.ts";
@@ -487,11 +488,17 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     },
     setDone(id, done) {
       forItem(id, (app) => app.setDone(id, done));
-      if (done) pruneForeignFocus([id]);
+      if (done) {
+        pruneForeignFocus([id]);
+        playDoneSound();
+      }
     },
     setDoneMany(ids, done) {
       for (const [app, group] of groupByDoc(ids)) app.setDoneMany(group, done);
-      if (done) pruneForeignFocus(ids);
+      if (done) {
+        pruneForeignFocus(ids);
+        if (ids.length > 0) playDoneSound();
+      }
     },
     undoneIntoFocus(ids) {
       if (ids.length === 0) return;
@@ -545,10 +552,12 @@ export function createDocsLayer(home: HomeApp, initial: readonly DocApp[]): Docs
     setLifecycle(id, lifecycle) {
       forItem(id, (app) => app.setLifecycle(id, lifecycle));
       if (closing(lifecycle)) pruneForeignFocus([id]);
+      if (lifecycle === "done") playDoneSound();
     },
     setLifecycleMany(ids, lifecycle) {
       for (const [app, group] of groupByDoc(ids)) app.setLifecycleMany(group, lifecycle);
       if (closing(lifecycle)) pruneForeignFocus(ids);
+      if (lifecycle === "done" && ids.length > 0) playDoneSound();
     },
     moveItem(id, listId, indexInList) {
       forItem(id, (app) => {
