@@ -51,9 +51,9 @@
   --due-today-bg: #ffecd6;
   --due-today-text: #ff8a1f;
   /* Today's number in the month grids and today's agenda heading: a
-     yellow disc (behind the number, beside the heading), paler in the
-     dark theme, and the number's black on it. */
-  --calendar-today-bg: #ffc882;
+     pink mark (behind the number, beside the heading), the same in
+     both themes, and the number's black on it. */
+  --calendar-today-bg: #ff859c;
   --calendar-today-text: #000;
   /* TEMP trial: the today mark's shape (a mask). From Tabler Icons by
      Paweł Kuna, MIT:
@@ -106,7 +106,7 @@
   --error-text: #f87171;
   --due-today-bg: #3a2614;
   --due-today-text: #ffa04d;
-  --calendar-today-bg: #fdffb3;
+  --calendar-today-bg: #ff859c;
   --dnd-select-bg: #293a5b;
   --dnd-select-border: #33466e;
   --dnd-select-live-bg: #2d374d;
