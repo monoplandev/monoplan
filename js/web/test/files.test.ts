@@ -452,5 +452,6 @@ describe("file helpers", () => {
     expect(formatFileSize(1023, "en-US")).toBe("1,023 B");
     expect(formatFileSize(2048, "en-US")).toBe("2 KB");
     expect(formatFileSize(5 * 1024 * 1024 + 300_000, "en-US")).toBe("5.3 MB");
+    expect(formatFileSize(1024 * 1024 * 1024, "en-US")).toBe("1 GB");
   });
 });

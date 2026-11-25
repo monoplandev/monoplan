@@ -13,6 +13,7 @@ import {
 import { deriveLogin } from "@monoplan/core/wasm";
 import { api, ApiError, type Device } from "./api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { formatFileSize } from "./fileFormat.ts";
 import { exportDocJson, exportSlug } from "./nav.tsx";
 import type { DocEntry, DocsLayer } from "./sync/docs.ts";
 import dotsVerticalSvg from "./icons/dots-vertical.svg?raw";
@@ -227,6 +228,24 @@ export function Settings(props: {
       setDevicesLoading(false);
     }
   }
+
+  // Attachment storage for the Account section (spec/attachments.md
+  // §Routes): the pooled figures come with the file list of any doc the
+  // account owns, and it always owns its Home doc. Read each time the
+  // section is entered; a failed read (offline) keeps the last figures.
+  const [storage, setStorage] = createSignal<{ used: number; limit: number } | null>(null);
+  createEffect(() => {
+    if (!props.open || section() !== "account" || props.session.anonymous) return;
+    const docId = props.session.primaryDocId;
+    void api.listFiles(docId).then(
+      (res) => {
+        if (res.used_bytes != null && res.limit_bytes != null) {
+          setStorage({ used: res.used_bytes, limit: res.limit_bytes });
+        }
+      },
+      (e) => console.error("storage usage failed:", e),
+    );
+  });
 
   // Refetch every time the Devices section is entered while authenticated.
   // `devicesLoading` is read untracked — it's a guard against stomping an
@@ -443,6 +462,19 @@ export function Settings(props: {
                         <div class="settings-row-label">{m().settings.email}</div>
                         <div class="settings-row-value">
                           {props.session.email}
+                        </div>
+                      </div>
+                      <div class="settings-row">
+                        <div class="settings-row-label">{m().settings.storage}</div>
+                        <div class="settings-row-value">
+                          <Show when={storage()} fallback="—">
+                            {(s) =>
+                              m().settings.storageUsed(
+                                formatFileSize(s().used, locale()),
+                                formatFileSize(s().limit, locale()),
+                              )
+                            }
+                          </Show>
                         </div>
                       </div>
                       <div class="settings-row">

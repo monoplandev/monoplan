@@ -605,6 +605,10 @@ export type Messages = {
     localOnlyAccount: string;
     loginToSeeDevices: string;
     email: string;
+    /** The Account section's attachment storage row: its label and the
+     *  pooled figures, already formatted as sizes. */
+    storage: string;
+    storageUsed: (used: string, limit: string) => string;
     thisDevice: string;
     lastSeen: string;
     deviceActions: string;
@@ -1029,6 +1033,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         "Estás usando una cuenta solo local. Usa Iniciar sesión o Crear cuenta desde el menú de la cuenta para hacer copia de seguridad de tus datos y sincronizar entre dispositivos.",
       loginToSeeDevices: "Inicia sesión para ver los dispositivos vinculados a tu cuenta.",
       email: "Correo",
+      storage: "Almacenamiento",
+      storageUsed: (used, limit) => `${used} de ${limit} usados`,
       thisDevice: "Este dispositivo",
       lastSeen: "Última vez visto",
       deviceActions: "Acciones del dispositivo",
@@ -1452,6 +1458,8 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
         "You're using a local-only account. Use Sign in or Sign up from the account menu to back up your data and sync across devices.",
       loginToSeeDevices: "Log in to see devices linked to your account.",
       email: "Email",
+      storage: "Storage",
+      storageUsed: (used, limit) => `${used} of ${limit} used`,
       thisDevice: "This device",
       lastSeen: "Last seen",
       deviceActions: "Device actions",

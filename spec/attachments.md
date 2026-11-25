@@ -445,9 +445,13 @@ the core and wasm additions it needed.
 - **No rename on the web** (cut 2026-11-24): a file keeps the name it was
   attached under. `Doc::rename_file` and the wasm `renameFile` stay; the
   store and the surface do not call them.
+- **Storage row** (2026-11-25, not browser-checked): Settings → Account
+  shows the pooled `used_bytes` of `limit_bytes` ("12.3 MB of 1 GB used"),
+  read from the list route of the Home doc (which the account always
+  owns) each time the section is entered. A dash until the first read
+  lands, and while offline.
 - **Not built:** drop or paste to attach, upload progress, a retry on a
-  failed upload row (dismiss and pick again), the quota figures anywhere in
-  the UI, image previews.
+  failed upload row (dismiss and pick again), image previews.
 
 ## Open
 
