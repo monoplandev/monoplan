@@ -201,6 +201,20 @@ pub async fn tombstone_file(
     .await
 }
 
+/// Delete a row outright, tombstoned or not: the record half of a
+/// `DELETE`. `false` when there is no such row.
+pub async fn delete_file_row(db: &Db, doc_id: Uuid, file_id: FileId) -> anyhow::Result<bool> {
+    let doc_bytes = doc_id.as_bytes().to_vec();
+    db.call(move |c| {
+        let n = c.execute(
+            "DELETE FROM doc_files WHERE doc_id = ? AND id = ?",
+            params![doc_bytes, file_id.as_bytes().as_slice()],
+        )?;
+        Ok(n > 0)
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestoreFile {
     /// The tombstone is cleared (or was never set).

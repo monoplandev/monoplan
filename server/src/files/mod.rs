@@ -69,8 +69,9 @@ impl fmt::Display for FileId {
 }
 
 /// Remove every file whose tombstone is older than the grace period:
-/// the row, then the bytes. This is the only place attachment bytes
-/// are destroyed short of deleting the whole doc. The row delete
+/// the row, then the bytes. Besides a member's `DELETE` and
+/// deleting the whole doc, this is the only place attachment bytes
+/// are destroyed. The row delete
 /// re-checks the tombstone, so a file restored while the pass runs
 /// keeps both its row and its bytes.
 pub async fn purge_expired(state: &AppState) -> anyhow::Result<usize> {

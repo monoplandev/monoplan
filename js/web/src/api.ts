@@ -465,10 +465,18 @@ export const api = {
     return new Uint8Array(await res.arrayBuffer());
   },
 
-  /** Tombstone a blob (any member). Repeating it keeps the first stamp;
-   *  404 when the server has no such file. */
+  /** Delete a blob for good (any member): the server removes the row
+   *  and the bytes at once, tombstoned or not. 404 when it has no such
+   *  file. */
   async deleteFile(docId: string, fileId: string): Promise<void> {
     await del<unknown>(filePath(docId, fileId));
+  },
+
+  /** Tombstone a blob (any member): gone to readers, restorable inside
+   *  the grace period. Repeating it keeps the first stamp; 404 when
+   *  the server has no such file. */
+  async tombstoneFile(docId: string, fileId: string): Promise<void> {
+    await post<unknown>(`${filePath(docId, fileId)}/tombstone`, {});
   },
 
   /** Clear a tombstone. A no-op on a live file; 404 once purged, 507

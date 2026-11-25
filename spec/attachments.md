@@ -45,6 +45,7 @@ Each entry is one **atomic plain map** (a single LWW value, as `place`):
 | `created_at` | i64 | unix millis |
 | `created_by` | string? | account id, on shared workspaces; self-asserted like the item register |
 | `to_purge` | i64? | unix millis the attachment was removed; present ≡ **marked for purge** (below) |
+| `destroy` | bool? | with `to_purge` only: the removal is permanent, the server destroys the bytes at once instead of tombstoning them (below) |
 
 A file has **one owner item**, named by the entry. There is no per-item list
 of file ids: an item's attachments are the entries whose `item` is its id, in
@@ -60,15 +61,24 @@ about an entry changes after it is written.
 
 Removing an attachment does not delete its entry. It writes `to_purge` on it
 (decided 2026-11-24, replacing delete-then-`DELETE`): the entry leaves every
-view at once and stays in the doc as the durable instruction to tombstone its
+view at once and stays in the doc as the durable instruction to remove its
 blob. The instruction syncs like any other change, so a removal made offline
 is acted on by whichever member's client is next online, the removing device
 included, instead of waiting for the owner's sweep to notice a blob no entry
 names.
 
+A mark is one of two kinds (decided 2026-11-25). A **destroying** mark
+(`destroy: true`) is a deliberate, permanent removal: `remove_file` and the
+hard delete of an item. The client sends `DELETE` and the server removes the
+row and the bytes on that request. Neither is an undo step, so
+nothing can ask for the bytes back. A **plain** mark is the release half of a
+cross-doc move or the sweep's ownerless entry: the client sends
+`POST .../tombstone`, because an undo of the move or a late reference can
+still want the file inside the grace period.
+
 An entry therefore has three states: **live**, **marked** (`to_purge` set,
-blob still stored), and **gone** (entry deleted, after the server tombstoned
-the blob). Only a live entry is in `ItemView.files`, has a key to read, or can
+blob still stored), and **gone** (entry deleted, after the server destroyed or
+tombstoned the blob). Only a live entry is in `ItemView.files`, has a key to read, or can
 be renamed. A marked entry still holds its id: attaching under it is refused.
 
 Later consumers reference a file by id and never hold bytes or keys
@@ -77,17 +87,22 @@ and resolves the rest through the entry.
 
 ### Mutations
 
-Each is one commit and one undo step.
+Each is one commit, and one undo step unless it says otherwise.
 
 - `attach_file(item_id, file_id, name, mime, size, key)`: writes the entry.
   Called only **after** the upload has succeeded (below).
 - `rename_file(file_id, name)`.
-- `remove_file(file_id)`: marks the entry for purge. Undo clears the mark.
+- `remove_file(file_id)`: marks the entry for purge, destroying. Permanent:
+  origin `"file-remove"`, excluded from undo (undo steps over it to the edit
+  before; undoing the attach of a removed file does not bring it back). The
+  web asks for confirmation first.
 - **Hard delete** of an item (`delete_binned`, `empty_bin`) marks its
-  entries for purge in the same commit.
+  entries for purge, destroying, in the same commit (which already drops the
+  undo history).
 - `forget_files(file_ids)`: deletes the entries among them that are still
   marked, once the server has tombstoned their blobs. Origin `"sweep"`,
-  excluded from undo, no event. `files_to_purge()` lists what is waiting.
+  excluded from undo, no event. `files_to_purge()` lists what is waiting,
+  `files_to_destroy()` the destroying subset.
 - **Bin keeps.** A binned item keeps its entries and its blobs, so restore
   never loses a file.
 - **Duplicate** does not copy attachments (first pass).
@@ -165,7 +180,8 @@ the doc and answers 404 to anyone else.
 ```
 PUT    /api/docs/:doc_id/files/:file_id           -- raw body; store a blob
 GET    /api/docs/:doc_id/files/:file_id           -- the blob; 410 if tombstoned
-DELETE /api/docs/:doc_id/files/:file_id           -- tombstone (any member)
+DELETE /api/docs/:doc_id/files/:file_id           -- delete for good, row and bytes (any member)
+POST   /api/docs/:doc_id/files/:file_id/tombstone -- tombstone (any member)
 POST   /api/docs/:doc_id/files/:file_id/restore   -- clear a tombstone (any member)
 POST   /api/docs/:doc_id/files/:file_id/copy      -- { to_doc_id }; member of both
 GET    /api/docs/:doc_id/files                    -- { doc_bytes, used_bytes?, limit_bytes?, files: [{ id, bytes, created_at, deleted_at? }] }
@@ -187,7 +203,11 @@ GET    /api/docs/:doc_id/files                    -- { doc_bytes, used_bytes?, l
   `used_bytes` / `limit_bytes` to the owner only: to a member they would
   say something about workspaces the member is not in. No per-account
   override and no plan logic yet.
-- **Tombstone, never delete.** `DELETE` stamps `deleted_at`. A purge task
+- **`DELETE` deletes** (any member, 2026-11-25): the bytes and then the row,
+  at once, tombstoned or not; 404 when there is no row. It is what a
+  destroying purge mark sends. Bytes first, so a request that fails between
+  the two can be repeated.
+- **Tombstone otherwise.** `POST .../tombstone` stamps `deleted_at`. A purge task
   removes the row and the bytes **30 days** later. `restore` clears the stamp
   inside that window, and is 507 `quota` if the bytes no longer fit: a
   tombstoned row does not count towards the quota, so an unchecked restore
@@ -223,13 +243,15 @@ user opens the file. Decrypted bytes are held for the session at most and
 never written to the local store.
 
 **Purge.** Any member's client, when online: read `files_to_purge()`,
-`DELETE` each blob, and pass the ids the server answered (2xx, or 404 / 410:
+`DELETE` the blobs of the ids in `files_to_destroy()` and tombstone the rest,
+and pass the ids the server answered (2xx, or 404 / 410:
 already gone) to `forget_files`. Run after a local removal or hard delete, and
 on connect once the replica is caught up, which is what picks up a removal
 made offline or on another device. Two devices doing it at once is harmless:
-a repeated `DELETE` keeps the first stamp and `forget_files` skips an entry
-that is already gone. An entry that is live again by then (an undo) is
-skipped too, and its blob comes back through the 410 path below.
+a repeated tombstone keeps the first stamp, a repeated `DELETE` is a 404, and
+`forget_files` skips an entry that is already gone. An entry that is live
+again by then (an undone release) is skipped too, and its blob comes back
+through the 410 path below.
 
 **Missing bytes.** A 404 or 410 on an entry the doc still holds renders the
 row as unavailable. On 410 the client calls `restore` and retries: a reference
@@ -250,7 +272,8 @@ Two ways a blob stops being wanted:
 
 1. **Deliberate.** `remove_file`, a hard delete, or the release half of a
    cross-doc move. The entry is marked for purge and any member's client
-   finishes it ("Purge" above). Nothing here depends on the sweep.
+   finishes it ("Purge" above): the first two destroy the bytes, the release
+   tombstones them. Nothing here depends on the sweep.
 2. **Orphans.** A blob no entry names (an upload whose commit never landed;
    an attach or an adopt that was undone, which deletes the entry outright),
    or a live entry whose owner item is gone (one device attached while
@@ -268,9 +291,9 @@ per doc:
 
 The 24 hours covers an upload still on its way to its commit. The 30 days
 covers everything else a sweeping client cannot see: a device that has been
-offline, a reference revived by a merge. No client ever causes bytes to be
-destroyed directly; the server's purge is the only thing that does, and only
-after the window.
+offline, a reference revived by a merge. The sweep never causes bytes to be
+destroyed directly: only a destroying mark does that, and for the rest the
+server's purge does, after the window.
 
 ## Not in the first pass
 
@@ -310,7 +333,7 @@ tests in `server/tests/files.rs`).
   inserts the row; bytes stored for a row that then fails that check are
   removed.
 - **Restore checks the quota** (above). Restoring a live file is a no-op 200.
-- **Repeating `DELETE` keeps the first stamp**, so it cannot extend the grace
+- **Repeating a tombstone keeps the first stamp**, so it cannot extend the grace
   period.
 - **Copy** of a tombstoned source is 410.
 - **Purge** runs at startup and hourly. It deletes the row first (re-checking
@@ -341,7 +364,7 @@ Phase 2, the core (`core/src/doc.rs`, tests `files_*` beside it).
 - **Removal with the item.** Hard delete and `release_items` (the giving
   half of a cross-doc move) both mark the items' entries for purge in the
   same commit. Undoing a release puts the item back and clears the marks.
-- **Undo after the purge finished** (`remove_file`, then `forget_files`,
+- **Undo after the purge finished** (`release_items`, then `forget_files`,
   then undo) brings the entry back live. Its blob is tombstoned by then, so
   the host restores it on the 410.
 - **`file_key` / `file_owner`** answer for live entries only.
@@ -389,14 +412,20 @@ the core and wasm additions it needed.
   or SVG blob opened in a tab would run with access to the local keys.
   Nothing is cached; every open fetches.
 - **Housekeeping is pulsed.** The runtime pulses a doc after each server
-  frame for it and every doc when the socket comes up; a pulse settles
-  3 seconds after the last one, and does nothing while the doc has changes
-  the server has not acknowledged (the ack is itself a frame, so it pulses
-  again). A settle is the purge, then the sweep if one is due. Nothing
-  runs for a signed-out session.
-- **Purge** stops at the first `DELETE` that fails for a reason other than
-  404 / 410 and forgets what was answered up to there. An undo inside the
-  3 seconds clears the mark before anything is sent.
+  frame for it and every doc when the socket comes up. A pulse that finds
+  entries marked for purge and no changes the server has not acknowledged
+  settles at once (2026-11-25), so a removal is sent as soon as its mark
+  has synced: the push's ack is itself a frame, and that is the pulse that
+  acts. Any other pulse settles 3 seconds after the last one, and a settle
+  does nothing while the doc has unacknowledged changes. After a purge that
+  stopped on a failed request the doc's pulses wait the 3 seconds again
+  until one completes. A settle is the purge, then the sweep if one is due.
+  Nothing runs for a signed-out session.
+- **Purge** stops at the first request that fails for a reason other than
+  404 / 410 and forgets what was answered up to there. A file's own removal
+  cannot be undone. An undo of a move that lands before the release's mark
+  is acknowledged clears it with nothing sent; a later one brings the entry
+  back live over a tombstoned blob, which the read path restores.
 - **The sweep learns ownership from the list route**: the pooled quota
   figures come to the owner only, so their presence is the test. Every
   member's client therefore asks for the list once a day per doc and a

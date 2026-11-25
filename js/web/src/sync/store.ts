@@ -616,14 +616,17 @@ export interface DocApp extends DocItemActions {
     size: number,
     key: Uint8Array,
   ): void;
-  /** Remove an attachment: it leaves the item at once and its entry
-   *  stays marked until a client has tombstoned the blob. Undo brings
-   *  it back. */
+  /** Remove an attachment for good: it leaves the item at once and its
+   *  entry stays marked until a client has had the server destroy the
+   *  blob. Never an undo step. */
   removeFile(fileId: string): void;
   /** The key a live attachment's blob opens with. */
   fileKey(fileId: string): Uint8Array | undefined;
-  /** Ids of the entries marked for purge: blobs still to tombstone. */
+  /** Ids of the entries marked for purge: blobs still to remove. */
   filesToPurge(): string[];
+  /** The ones among them the server is to destroy at once (a
+   *  deliberate removal); the rest are tombstoned. */
+  filesToDestroy(): string[];
   /** Delete the marked entries among `fileIds`, once the server has
    *  tombstoned their blobs. Never an undo step. */
   forgetFiles(fileIds: string[]): number;
@@ -1780,14 +1783,20 @@ function buildApp(replica: Replica, home: boolean): HomeApp {
     attachFile(itemId, fileId, name, mime, size, key) {
       mutate(() => replica.attachFile(itemId, fileId, name, mime, size, key));
     },
+    // Permanent: the core commits it under its undo-excluded
+    // `file-remove` origin, so no step is recorded here either.
     removeFile(fileId) {
-      mutate(() => replica.removeFile(fileId));
+      replica.removeFile(fileId);
+      flush();
     },
     fileKey(fileId) {
       return replica.fileKey(fileId) ?? undefined;
     },
     filesToPurge() {
       return replica.filesToPurge();
+    },
+    filesToDestroy() {
+      return replica.filesToDestroy();
     },
     // The two maintenance writes commit under the core's undo-excluded
     // sweep origin and change nothing a view shows.

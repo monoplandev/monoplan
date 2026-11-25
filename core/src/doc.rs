@@ -105,6 +105,12 @@ pub const NOTES_ORIGIN_PREFIX: &str = "notes:";
 /// `UndoManager` so a background sweep never becomes the user's next
 /// undo step (`spec/sync-protocol.md` "Commit origin tagging").
 pub const SWEEP_ORIGIN: &str = "sweep";
+/// Commit origin for removing an attachment (`Doc::remove_file`). The
+/// removal is permanent: the server destroys the bytes as soon as a
+/// client acts on the mark, so there is nothing an undo could bring
+/// back. Excluded from the workspace `UndoManager`
+/// (`spec/attachments.md` "Marked for purge").
+pub const FILE_REMOVE_ORIGIN: &str = "file-remove";
 /// Commit origin for display settings: a list's saved default view,
 /// the list-count toggle, the calendar's hidden docs. They change how
 /// the workspace is shown, not what is in it, so they are excluded from the workspace `UndoManager`: undo
@@ -257,6 +263,7 @@ const ROOT_FILES: &str = "files";
 /// its blob, so a removal made offline is acted on by whichever client
 /// is next online instead of waiting for the sweep.
 const KEY_TO_PURGE: &str = "to_purge";
+const KEY_DESTROY: &str = "destroy";
 /// Upper bound on an attachment's name, in bytes.
 pub const MAX_FILE_NAME_BYTES: usize = 255;
 /// Upper bound on an attachment's media type, in bytes.
@@ -314,6 +321,11 @@ struct FileEntry {
     /// any view goes, and waiting for a client to tombstone its blob
     /// and then delete it (`Doc::files_to_purge`). `None` ≡ live.
     to_purge: Option<i64>,
+    /// With `to_purge`: the removal was deliberate and permanent
+    /// (`remove_file`, a hard delete), so the client asks the server
+    /// to destroy the bytes at once instead of tombstoning them
+    /// (`Doc::files_to_destroy`). Means nothing on a live entry.
+    destroy: bool,
 }
 
 impl FileEntry {
@@ -331,6 +343,9 @@ impl FileEntry {
         }
         if let Some(t) = self.to_purge {
             m.push((KEY_TO_PURGE.into(), t.into()));
+            if self.destroy {
+                m.push((KEY_DESTROY.into(), true.into()));
+            }
         }
         LoroValue::Map(m.into())
     }
@@ -368,6 +383,7 @@ impl FileEntry {
             },
             key,
             to_purge: int_of(KEY_TO_PURGE),
+            destroy: matches!(m.get(KEY_DESTROY), Some(LoroValue::Bool(true))),
         })
     }
 }
@@ -2148,6 +2164,7 @@ fn make_undo_manager(inner: &LoroDoc) -> UndoManager {
     um.add_exclude_origin_prefix("remote");
     um.add_exclude_origin_prefix(NOTES_ORIGIN_PREFIX);
     um.add_exclude_origin_prefix(SWEEP_ORIGIN);
+    um.add_exclude_origin_prefix(FILE_REMOVE_ORIGIN);
     um.add_exclude_origin_prefix(VIEW_ORIGIN);
     um
 }
@@ -3323,6 +3340,7 @@ impl Doc {
             },
             key,
             to_purge: None,
+            destroy: false,
         };
         files.insert(file_id, entry.to_loro_value())?;
         self.inner.commit();
@@ -3348,31 +3366,51 @@ impl Doc {
         Ok(())
     }
 
-    /// Remove an attachment: mark its entry for purge. It leaves every
-    /// view at once and stays in the doc as the instruction to
-    /// tombstone its blob ([`files_to_purge`](Self::files_to_purge)),
-    /// which any client can act on, so a removal made offline needs no
-    /// later clean-up to find it. Undo clears the mark.
+    /// Remove an attachment, for good: mark its entry for purge, to be
+    /// destroyed. It leaves every view at once and stays in the doc as
+    /// the instruction to destroy its blob
+    /// ([`files_to_purge`](Self::files_to_purge),
+    /// [`files_to_destroy`](Self::files_to_destroy)), which any client
+    /// can act on, so a removal made offline needs no later clean-up
+    /// to find it. Never an undo step ([`FILE_REMOVE_ORIGIN`]): the
+    /// bytes do not come back.
     pub fn remove_file(&self, file_id: &str) -> Result<(), DocError> {
         let mut entry = self
             .live_file_entry(file_id)
             .ok_or_else(|| DocError::Invalid(format!("no such file: {file_id}")))?;
         entry.to_purge = Some(now_millis());
+        entry.destroy = true;
         self.files_map().insert(file_id, entry.to_loro_value())?;
-        self.inner.commit();
+        self.inner
+            .commit_with(CommitOptions::new().origin(FILE_REMOVE_ORIGIN));
         self.files_changed(&entry.item);
         Ok(())
     }
 
     /// The ids of the entries marked for purge, in id order: blobs some
-    /// client still has to tombstone on the server. A host that is
-    /// online sends the `DELETE` for each and passes the ones the
-    /// server answered (2xx, or 404 / 410: already gone) to
-    /// [`forget_files`](Self::forget_files).
+    /// client still has to remove on the server. A host that is
+    /// online sends the `DELETE` for each (a destroying one for the ids
+    /// in [`files_to_destroy`](Self::files_to_destroy), a tombstone for
+    /// the rest) and passes the ones the server answered (2xx, or 404 /
+    /// 410: already gone) to [`forget_files`](Self::forget_files).
     pub fn files_to_purge(&self) -> Vec<String> {
         self.file_entries()
             .into_iter()
             .filter(|e| e.to_purge.is_some())
+            .map(|e| e.file.id)
+            .collect()
+    }
+
+    /// The subset of [`files_to_purge`](Self::files_to_purge) whose
+    /// removal was deliberate and permanent (`remove_file`, a hard
+    /// delete), in id order: the server is asked to destroy these
+    /// bytes at once. The rest (the release half of a cross-doc move,
+    /// the sweep's ownerless entries) are only tombstoned, because an
+    /// undo or a late reference can still want them back.
+    pub fn files_to_destroy(&self) -> Vec<String> {
+        self.file_entries()
+            .into_iter()
+            .filter(|e| e.to_purge.is_some() && e.destroy)
             .map(|e| e.file.id)
             .collect()
     }
@@ -3421,6 +3459,7 @@ impl Doc {
                 continue;
             }
             entry.to_purge = Some(now);
+            entry.destroy = false;
             files.insert(&entry.file.id, entry.to_loro_value())?;
             marked += 1;
         }
@@ -4244,6 +4283,8 @@ impl Doc {
         for file_id in &file_ids {
             if let Some(mut entry) = self.file_entry(file_id) {
                 entry.to_purge = Some(now);
+                // A hard delete is permanent, a release can be undone.
+                entry.destroy = permanent;
                 files.insert(file_id, entry.to_loro_value())?;
             }
         }
@@ -5253,6 +5294,7 @@ impl Doc {
                 },
                 key,
                 to_purge: None,
+                destroy: false,
             };
             files.insert(&f.id, entry.to_loro_value())?;
         }
@@ -6929,6 +6971,7 @@ impl Doc {
             hasher.update(f.file.created_at.to_be_bytes());
             hash_opt_str(&mut hasher, f.file.created_by.as_deref());
             hash_opt_i64(&mut hasher, f.to_purge);
+            hasher.update([u8::from(f.to_purge.is_some() && f.destroy)]);
         }
         // Focus: the curated order fixes logical state (`spec/focus.md`),
         // exactly as each list's resolved order does. Hash the raw
@@ -12569,15 +12612,16 @@ mod tests {
         assert_eq!(doc.file_key(&map), None);
         let _ = doc.drain_events();
 
-        // Undo brings the entry back, as one surgical event.
+        // A removal is not an undo step: undo reverses the rename before
+        // it, as one surgical event, and the removed file stays gone.
         assert!(doc.undo().unwrap());
-        assert_eq!(doc.get_item(&id).unwrap().files.len(), 2);
-        assert_eq!(doc.file_key(&map), Some([9; 32]));
+        assert_eq!(file_names(&doc, &id), vec!["ticket.pdf"]);
+        assert_eq!(doc.file_key(&map), None);
         let events = doc.drain_events();
         assert_eq!(events.len(), 1, "{events:?}");
         assert!(matches!(
             &events[0],
-            AppEvent::ItemFilesChanged { id: eid, files } if eid == &id && files.len() == 2
+            AppEvent::ItemFilesChanged { id: eid, files } if eid == &id && files.len() == 1
         ));
 
         // Rejected input.
@@ -12734,7 +12778,7 @@ mod tests {
     }
 
     #[test]
-    fn files_undo_of_a_removal_clears_the_mark() {
+    fn files_removal_is_permanent_and_never_an_undo_step() {
         let doc = Doc::new().unwrap();
         let id = doc.add_item(LIST_INBOX, "trip").unwrap();
         let (one, two) = (file_id(1), file_id(2));
@@ -12743,21 +12787,48 @@ mod tests {
         doc.attach_file(&id, &two, "two.pdf", "", 2, &[2; 32])
             .unwrap();
 
+        // The removal asks for the bytes to be destroyed.
         doc.remove_file(&one).unwrap();
-        assert!(doc.undo().unwrap());
-        assert!(doc.files_to_purge().is_empty());
-        assert_eq!(doc.file_key(&one), Some([1; 32]));
-        // A stale purge of a file that is live again does nothing.
-        assert_eq!(doc.forget_files(&[&one]).unwrap(), 0);
+        assert_eq!(doc.files_to_purge(), vec![one.clone()]);
+        assert_eq!(doc.files_to_destroy(), vec![one.clone()]);
 
-        // Undone after the purge finished: the entry comes back live
-        // (its blob is tombstoned, which the host restores on a 410).
-        doc.remove_file(&two).unwrap();
-        assert_eq!(doc.forget_files(&[&two]).unwrap(), 1);
+        // Undo steps over it to the edit before (attaching `two`).
         assert!(doc.undo().unwrap());
-        assert_eq!(doc.file_key(&two), Some([2; 32]));
-        assert!(doc.files_to_purge().is_empty());
-        assert_eq!(doc.get_item(&id).unwrap().files.len(), 2);
+        assert_eq!(doc.file_key(&two), None);
+        assert_eq!(doc.file_key(&one), None);
+        assert_eq!(doc.files_to_destroy(), vec![one.clone()]);
+
+        // Undoing the attach of the removed file never brings it back.
+        assert!(doc.undo().unwrap());
+        assert_eq!(doc.file_key(&one), None);
+        assert!(doc.get_item(&id).unwrap().files.is_empty());
+        while doc.redo().unwrap() {}
+        assert_eq!(doc.file_key(&one), None);
+    }
+
+    #[test]
+    fn files_release_and_sweep_marks_are_not_destroyed() {
+        let doc = Doc::new().unwrap();
+        let keep = doc.add_item(LIST_INBOX, "moving").unwrap();
+        let gone = doc.add_item(LIST_INBOX, "binned").unwrap();
+        let (one, two) = (file_id(1), file_id(2));
+        doc.attach_file(&keep, &one, "one.pdf", "", 1, &[1; 32])
+            .unwrap();
+        doc.attach_file(&gone, &two, "two.pdf", "", 2, &[2; 32])
+            .unwrap();
+
+        // The giving half of a cross-doc move: tombstone only, and undo
+        // brings the files back.
+        doc.release_items(&[&keep]).unwrap();
+        assert_eq!(doc.files_to_purge(), vec![one.clone()]);
+        assert!(doc.files_to_destroy().is_empty());
+        assert!(doc.undo().unwrap());
+        assert_eq!(doc.file_key(&one), Some([1; 32]));
+
+        // A hard delete is permanent.
+        doc.set_item_binned(&gone, true).unwrap();
+        doc.delete_binned(&gone).unwrap();
+        assert_eq!(doc.files_to_destroy(), vec![two.clone()]);
     }
 
     fn file_names_sorted(names: &[&str]) -> Vec<String> {

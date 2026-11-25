@@ -84,7 +84,11 @@ pub fn router(state: AppState) -> Router {
             "/api/docs/{doc_id}/files/{file_id}",
             put(file_routes::upload)
                 .get(file_routes::download)
-                .delete(file_routes::tombstone),
+                .delete(file_routes::delete),
+        )
+        .route(
+            "/api/docs/{doc_id}/files/{file_id}/tombstone",
+            post(file_routes::tombstone),
         )
         .route(
             "/api/docs/{doc_id}/files/{file_id}/restore",

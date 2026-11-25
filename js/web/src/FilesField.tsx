@@ -2,8 +2,9 @@
 // files by name and size, over a trailing "Attach file" row. The bytes
 // are on the server: a click on a name fetches the file and saves it,
 // and nothing is fetched before that. Each row's menu downloads or
-// deletes; a delete is undone like any other edit. A file keeps the
-// name it was attached under.
+// deletes; a delete is permanent (the server destroys the bytes, undo
+// does not bring it back), so it asks first. A file keeps the name it
+// was attached under.
 //
 // A file being uploaded shows as a row of its own under the list until
 // its entry lands in the doc (upload first, reference second), and
@@ -15,6 +16,7 @@
 
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { createSignal, For, Show } from "solid-js";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { useAppI18n, type Messages } from "./i18n.tsx";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
@@ -45,6 +47,8 @@ export function FilesField(props: {
   // failed.
   const [busy, setBusy] = createSignal<ReadonlySet<string>>(new Set());
   const [failed, setFailed] = createSignal<Readonly<Record<string, FileErrorKind>>>({});
+  // The file whose delete is waiting on the confirmation.
+  const [removing, setRemoving] = createSignal<ItemFile | null>(null);
 
   const errorKind = (e: unknown): FileErrorKind => (e instanceof FileError ? e.kind : "failed");
 
@@ -127,7 +131,7 @@ export function FilesField(props: {
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     class="dropdown-menu-item"
-                    onSelect={() => props.onRemove(file.id)}
+                    onSelect={() => setRemoving(file)}
                   >
                     {m().common.delete}
                   </DropdownMenu.Item>
@@ -183,6 +187,19 @@ export function FilesField(props: {
           }}
         />
       </Show>
+      <ConfirmDialog
+        open={removing() !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+        title={m().workspace.fileDeleteTitle}
+        message={m().workspace.fileDeleteConfirm(removing()?.name ?? "")}
+        confirmLabel={m().common.delete}
+        onConfirm={() => {
+          const file = removing();
+          if (file) props.onRemove(file.id);
+        }}
+      />
     </div>
   );
 }

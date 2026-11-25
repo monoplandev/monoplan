@@ -245,6 +245,16 @@ async fn get(server: &TestServer, token: &str, doc: Uuid, id: &str) -> (StatusCo
     (status, resp.bytes().await.unwrap().to_vec())
 }
 
+async fn tombstone(server: &TestServer, token: &str, doc: Uuid, id: &str) -> StatusCode {
+    http()
+        .post(format!("{}/tombstone", server.file_url(doc, id)))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
 async fn delete(server: &TestServer, token: &str, doc: Uuid, id: &str) -> StatusCode {
     http()
         .delete(server.file_url(doc, id))
@@ -379,7 +389,7 @@ async fn every_route_is_404_to_a_non_member_and_401_unauthenticated() {
         StatusCode::NOT_FOUND
     );
     assert_eq!(get(&server, t, doc, &id).await.0, StatusCode::NOT_FOUND);
-    assert_eq!(delete(&server, t, doc, &id).await, StatusCode::NOT_FOUND);
+    assert_eq!(tombstone(&server, t, doc, &id).await, StatusCode::NOT_FOUND);
     assert_eq!(restore(&server, t, doc, &id).await, StatusCode::NOT_FOUND);
     assert_eq!(
         copy(&server, t, doc, &id, outsider.home).await,
@@ -468,7 +478,7 @@ async fn quota_counts_live_rows_and_restore_respects_it() {
 
     // A tombstoned file stops counting, so the second upload now fits.
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &a).await,
+        tombstone(&server, &acc.token, acc.home, &a).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -582,6 +592,57 @@ async fn a_members_upload_counts_against_the_owner() {
 }
 
 #[tokio::test]
+async fn delete_removes_the_row_and_the_bytes_at_once() {
+    let server = TestServer::start().await;
+    let acc = signup(&server).await;
+    let (live, tombstoned) = (new_file_id(), new_file_id());
+    for id in [&live, &tombstoned] {
+        assert_eq!(
+            put(&server, &acc.token, acc.home, id, body_of(80, 4)).await,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        tombstone(&server, &acc.token, acc.home, &tombstoned).await,
+        StatusCode::OK
+    );
+
+    // Live or already tombstoned, nothing is left behind.
+    for id in [&live, &tombstoned] {
+        assert_eq!(delete(&server, &acc.token, acc.home, id).await, StatusCode::OK);
+        assert!(!server.stored_path(acc.home, id).exists());
+        assert_eq!(
+            get(&server, &acc.token, acc.home, id).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            restore(&server, &acc.token, acc.home, id).await,
+            StatusCode::NOT_FOUND
+        );
+    }
+    let listing = list(&server, &acc.token, acc.home).await;
+    assert!(listing.files.is_empty());
+    assert_eq!(listing.used_bytes, Some(0));
+
+    // Gone is 404 the second time, and to a non-member always.
+    assert_eq!(
+        delete(&server, &acc.token, acc.home, &live).await,
+        StatusCode::NOT_FOUND
+    );
+    let other = signup(&server).await;
+    let theirs = new_file_id();
+    assert_eq!(
+        put(&server, &other.token, other.home, &theirs, body_of(80, 4)).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        delete(&server, &acc.token, other.home, &theirs).await,
+        StatusCode::NOT_FOUND
+    );
+    assert!(server.stored_path(other.home, &theirs).exists());
+}
+
+#[tokio::test]
 async fn tombstone_then_restore() {
     let server = TestServer::start().await;
     let acc = signup(&server).await;
@@ -593,7 +654,7 @@ async fn tombstone_then_restore() {
     );
 
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &id).await,
+        tombstone(&server, &acc.token, acc.home, &id).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -613,7 +674,7 @@ async fn tombstone_then_restore() {
     // be used to extend the grace period.
     server.clock.0.fetch_add(5_000, Ordering::SeqCst);
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &id).await,
+        tombstone(&server, &acc.token, acc.home, &id).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -642,7 +703,7 @@ async fn tombstone_then_restore() {
 
     let unknown = new_file_id();
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &unknown).await,
+        tombstone(&server, &acc.token, acc.home, &unknown).await,
         StatusCode::NOT_FOUND
     );
     assert_eq!(
@@ -684,7 +745,7 @@ async fn copy_duplicates_into_a_doc_the_caller_belongs_to() {
     // The copies are independent: tombstoning the source leaves the
     // target readable, and a tombstoned source cannot be copied.
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &id).await,
+        tombstone(&server, &acc.token, acc.home, &id).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -743,7 +804,7 @@ async fn copy_counts_against_the_target_owners_quota() {
     );
     let second = new_file_id();
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &id).await,
+        tombstone(&server, &acc.token, acc.home, &id).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -770,11 +831,11 @@ async fn purge_removes_only_tombstones_past_the_grace_period() {
         );
     }
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &old).await,
+        tombstone(&server, &acc.token, acc.home, &old).await,
         StatusCode::OK
     );
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &restored).await,
+        tombstone(&server, &acc.token, acc.home, &restored).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -789,7 +850,7 @@ async fn purge_removes_only_tombstones_past_the_grace_period() {
         .fetch_add(TOMBSTONE_GRACE_MILLIS - 1, Ordering::SeqCst);
     assert_eq!(purge_expired(&server.state).await.unwrap(), 0);
     assert_eq!(
-        delete(&server, &acc.token, acc.home, &recent).await,
+        tombstone(&server, &acc.token, acc.home, &recent).await,
         StatusCode::OK
     );
 

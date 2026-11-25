@@ -82,6 +82,10 @@ function fakeServer(opts: { owner?: boolean; now?: () => number } = {}) {
       },
       async deleteFile(docId: string, fileId: string) {
         guard(`delete ${fileId}`);
+        if (!doc(docId).delete(fileId)) fail(404);
+      },
+      async tombstoneFile(docId: string, fileId: string) {
+        guard(`tombstone ${fileId}`);
         const row = doc(docId).get(fileId) ?? fail(404);
         row.deleted_at ??= now();
       },
@@ -162,18 +166,24 @@ describe("attachments in the store", () => {
       expect(ticket).toMatchObject({ mime: "application/pdf", size: 1234 });
       expect(app.fileKey(fid(1))).toEqual(key);
 
-      // A removal hides the file and leaves its entry as the purge mark.
+      // A removal hides the file and leaves its entry as the purge
+      // mark, to be destroyed.
       app.removeFile(fid(2));
       expect(names()).toEqual(["ticket.pdf"]);
       expect(app.filesToPurge()).toEqual([fid(2)]);
+      expect(app.filesToDestroy()).toEqual([fid(2)]);
       expect(app.fileKey(fid(2))).toBeUndefined();
+
+      // It is permanent: undo reverses the edit before it (attaching
+      // the map, whose entry stays marked or goes, never live again).
       app.undo();
-      expect(names().sort()).toEqual(["map.png", "ticket.pdf"]);
-      expect(app.filesToPurge()).toEqual([]);
+      expect(names()).toEqual(["ticket.pdf"]);
+      expect(app.fileKey(fid(2))).toBeUndefined();
+      app.redo();
+      expect(names()).toEqual(["ticket.pdf"]);
 
       // Forgetting a purged entry is not an undo step.
-      app.removeFile(fid(2));
-      expect(app.forgetFiles([fid(2)])).toBe(1);
+      expect(app.forgetFiles(app.filesToPurge())).toBeLessThanOrEqual(1);
       expect(app.storedFileIds()).toEqual([fid(1)]);
       dispose();
     });
@@ -275,10 +285,11 @@ describe("files host", () => {
     await host.settle(DOC_A);
     expect(server.calls.filter((c) => c.startsWith("delete"))).toEqual([]);
 
+    // Both removals are deliberate: the server destroys the blobs.
     unsynced.clear();
     await host.settle(DOC_A);
-    expect(server.rows(DOC_A).get(removed)!.deleted_at).not.toBeNull();
-    expect(server.rows(DOC_A).get(lost)!.deleted_at).not.toBeNull();
+    expect(server.rows(DOC_A).has(removed)).toBe(false);
+    expect(server.rows(DOC_A).has(lost)).toBe(false);
     expect(server.rows(DOC_A).get(kept)!.deleted_at).toBeUndefined();
     expect(app.filesToPurge()).toEqual([]);
     expect(app.storedFileIds()).toEqual([kept]);
@@ -294,6 +305,46 @@ describe("files host", () => {
     server.rows(DOC_A).delete(second);
     await host.settle(DOC_A);
     expect(app.filesToPurge()).toEqual([]);
+  });
+
+  test("a pulse purges at once when the mark is synced, and waits otherwise", async () => {
+    const app = createRoot(() => appOver(DOC_A));
+    const { host, server, stamps, unsynced } = setup([app]);
+    stamps.set(DOC_A, 1_000_000_000_000); // swept today: purge only
+    const item = app.addItem("inbox", "item");
+    const first = await host.attach(app, item, source("first.txt", "1"));
+    const second = await host.attach(app, item, source("second.txt", "2"));
+    const deletes = () => server.calls.filter((c) => c.startsWith("delete")).length;
+    const turn = () => new Promise((r) => setTimeout(r, 0));
+
+    // The mark is still local: the pulse only arms the settle timer.
+    app.removeFile(first);
+    unsynced.add(DOC_A);
+    host.pulse(DOC_A);
+    await turn();
+    expect(deletes()).toBe(0);
+
+    // The ack's pulse: sent without waiting out the delay.
+    unsynced.clear();
+    host.pulse(DOC_A);
+    await turn();
+    expect(server.rows(DOC_A).has(first)).toBe(false);
+    expect(app.filesToPurge()).toEqual([]);
+
+    // After a failed request the next pulse goes back to the delay.
+    app.removeFile(second);
+    server.setDown(true);
+    host.pulse(DOC_A);
+    await turn();
+    server.setDown(false);
+    const before = deletes();
+    host.pulse(DOC_A);
+    await turn();
+    expect(deletes()).toBe(before);
+    expect(app.filesToPurge()).toEqual([second]);
+    await host.settle(DOC_A);
+    expect(app.filesToPurge()).toEqual([]);
+    host.dispose();
   });
 
   test("the owner's sweep tombstones day-old blobs no entry names, once a day", async () => {
@@ -322,8 +373,9 @@ describe("files host", () => {
     await host.settle(DOC_A);
     expect(deleted(undone)).toBe(true);
     expect(deleted(named)).toBe(false);
-    // The marked one went by the purge, in the first settle.
-    expect(deleted(marked)).toBe(true);
+    // The marked one went by the purge, in the first settle: a
+    // deliberate removal, so the server destroyed it.
+    expect(server.rows(DOC_A).has(marked)).toBe(false);
     expect(app.storedFileIds()).toEqual([named]);
   });
 

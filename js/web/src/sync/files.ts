@@ -9,16 +9,19 @@
 //     still names is restored and fetched again,
 //   - copy for a cross-doc move: the server duplicates each blob into
 //     the target doc before the entries move,
-//   - purge: tombstone the blobs of the entries marked for purge, then
+//   - purge: remove the blobs of the entries marked for purge (destroyed
+//     at once for a deliberate removal, tombstoned for the rest), then
 //     delete those entries,
 //   - sweep (the doc owner's clients, once a day per doc): mark entries
 //     whose item is gone, tombstone blobs no entry names.
 //
 // Purge and sweep are housekeeping. The runtime pulses a doc after each
-// round-trip with the server and when the socket comes up; a pulse
-// settles a few seconds after the last one, and only acts once the
-// doc's own changes have reached the server, so a removal is never
-// acted on while the mark that explains it is still local.
+// round-trip with the server and when the socket comes up. A pulse that
+// finds entries marked for purge and nothing unsent settles at once, so
+// a removal reaches the server as soon as its mark has; any other pulse
+// settles a few seconds after the last one. Nothing acts while the
+// doc's own changes are still local, so a removal is never acted on
+// before the mark that explains it is on the server.
 //
 // Anonymous sessions have no server, so nothing here runs for them and
 // attaching is refused.
@@ -32,7 +35,8 @@ import type { DocApp } from "./store.ts";
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** How long after the last pulse a doc's housekeeping runs. */
+/** How long after the last pulse a doc's housekeeping runs, when there
+ *  is no synced purge mark to act on at once. */
 const SETTLE_MS = 3000;
 const FILE_NAME_MAX_BYTES = 255;
 
@@ -77,7 +81,13 @@ export interface SweepStamps {
 
 type FilesApi = Pick<
   typeof httpApi,
-  "putFile" | "getFile" | "deleteFile" | "restoreFile" | "copyFile" | "listFiles"
+  | "putFile"
+  | "getFile"
+  | "deleteFile"
+  | "tombstoneFile"
+  | "restoreFile"
+  | "copyFile"
+  | "listFiles"
 >;
 
 export interface FilesHost {
@@ -286,27 +296,35 @@ export function createFilesHost(opts: {
     }
   };
 
-  // Tombstone the blob of every entry marked for purge, then delete the
-  // entries the server answered for. Stops at the first request that
-  // fails for another reason; the next pulse tries again.
-  const purge = async (app: DocApp): Promise<void> => {
+  // Remove the blob of every entry marked for purge, then delete the
+  // entries the server answered for. A deliberate removal (the file's
+  // own delete, a hard-deleted item) has the server destroy the bytes
+  // now; a released or ownerless entry is only tombstoned. Stops at the first request that
+  // fails for another reason; the next pulse tries again. False when
+  // it stopped that way.
+  const purge = async (app: DocApp): Promise<boolean> => {
     const marked = app.filesToPurge();
-    if (marked.length === 0) return;
+    if (marked.length === 0) return true;
+    const destroy = new Set(app.filesToDestroy());
     const gone: string[] = [];
+    let complete = true;
     for (const fileId of marked) {
       try {
-        await api.deleteFile(app.docId, fileId);
+        if (destroy.has(fileId)) await api.deleteFile(app.docId, fileId);
+        else await api.tombstoneFile(app.docId, fileId);
         gone.push(fileId);
       } catch (e) {
         const status = statusOf(e);
         if (status !== 404 && status !== 410) {
           if (status !== null) console.warn("files: purge stopped:", e);
+          complete = false;
           break;
         }
         gone.push(fileId);
       }
     }
     if (gone.length > 0 && isOpen(app)) app.forgetFiles(gone);
+    return complete;
   };
 
   // Orphans (`spec/attachments.md` "Garbage"). Only the doc owner's
@@ -337,7 +355,7 @@ export function createFilesHost(opts: {
     for (const row of list.files) {
       if (row.deleted_at != null || row.created_at >= cutoff || named.has(row.id)) continue;
       try {
-        await api.deleteFile(app.docId, row.id);
+        await api.tombstoneFile(app.docId, row.id);
       } catch (e) {
         if (statusOf(e) === null) return;
       }
@@ -346,6 +364,10 @@ export function createFilesHost(opts: {
 
   const running = new Set<string>();
   const again = new Set<string>();
+  // Docs whose last purge stopped on a failed request: their pulses
+  // wait out the settle delay again, so a server that keeps failing is
+  // not asked once per frame.
+  const stalled = new Set<string>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const settle = async (docId: string): Promise<void> => {
@@ -360,7 +382,8 @@ export function createFilesHost(opts: {
     if (!app || app.hasUnsyncedOps()) return;
     running.add(docId);
     try {
-      await purge(app);
+      if (await purge(app)) stalled.delete(docId);
+      else stalled.add(docId);
       if (isOpen(app)) await sweep(app);
     } catch (e) {
       console.warn("files: housekeeping failed:", e);
@@ -373,6 +396,18 @@ export function createFilesHost(opts: {
   const pulse = (docId: string): void => {
     if (!enabled) return;
     clearTimeout(timers.get(docId));
+    timers.delete(docId);
+    // A purge mark the server already has: act on it now.
+    const app = opts.appOf(docId);
+    if (
+      app &&
+      !stalled.has(docId) &&
+      !app.hasUnsyncedOps() &&
+      app.filesToPurge().length > 0
+    ) {
+      void settle(docId);
+      return;
+    }
     timers.set(
       docId,
       setTimeout(() => {
@@ -386,6 +421,7 @@ export function createFilesHost(opts: {
     clearTimeout(timers.get(docId));
     timers.delete(docId);
     again.delete(docId);
+    stalled.delete(docId);
   };
 
   return {
@@ -400,6 +436,7 @@ export function createFilesHost(opts: {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       again.clear();
+      stalled.clear();
     },
   };
 }

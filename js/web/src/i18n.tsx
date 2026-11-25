@@ -273,6 +273,8 @@ export type Messages = {
     /** Accessible name of a file row's menu. */
     fileActions: (name: string) => string;
     fileDownload: string;
+    fileDeleteTitle: string;
+    fileDeleteConfirm: (name: string) => string;
     fileUploading: string;
     fileTooLarge: string;
     fileQuota: string;
@@ -824,6 +826,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       fileSave: (name) => `Descargar ${name}`,
       fileActions: (name) => `Acciones de ${name}`,
       fileDownload: "Descargar",
+      fileDeleteTitle: "Eliminar archivo",
+      fileDeleteConfirm: (name) =>
+        `¿Seguro que quieres eliminar ${name} permanentemente? No se puede deshacer.`,
       fileUploading: "Subiendo…",
       fileTooLarge: "Supera los 25 MB",
       fileQuota: "Almacenamiento lleno",
@@ -1244,6 +1249,9 @@ const messagesByLanguage: Record<AppLanguage, Messages> = {
       fileSave: (name) => `Download ${name}`,
       fileActions: (name) => `Actions for ${name}`,
       fileDownload: "Download",
+      fileDeleteTitle: "Delete file",
+      fileDeleteConfirm: (name) =>
+        `Are you sure you want to permanently delete ${name}? This cannot be undone.`,
       fileUploading: "Uploading…",
       fileTooLarge: "Over 25 MB",
       fileQuota: "Storage is full",

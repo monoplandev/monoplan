@@ -3,9 +3,10 @@
 //! anyone else, so a non-member cannot tell a doc or a file exists.
 //!
 //! The server sees opaque sealed bodies: no names, no types, no owning
-//! item. It enforces the size cap and the quota of the doc's owner, keeps the
-//! `doc_files` record, and never destroys bytes on a client's say-so:
-//! `DELETE` only tombstones, and the purge task removes what stays
+//! item. It enforces the size cap and the quota of the doc's owner and keeps the
+//! `doc_files` record. `DELETE` is a member's deliberate, permanent
+//! removal and takes the row and the bytes at once. `POST .../tombstone`
+//! only stamps the row, and the purge task removes what stays
 //! tombstoned past the grace period.
 
 use axum::body::Body;
@@ -21,8 +22,8 @@ use crate::auth::DeviceAuth;
 use crate::auth::queries::is_member;
 use crate::error::{ApiError, ApiResult};
 use crate::files::queries::{
-    InsertFile, RestoreFile, find_file, insert_file, list_files, owner_used_bytes, restore_file,
-    tombstone_file,
+    InsertFile, RestoreFile, delete_file_row, find_file, insert_file, list_files,
+    owner_used_bytes, restore_file, tombstone_file,
 };
 use crate::files::{FileId, MAX_FILE_BODY_BYTES, SEAL_OVERHEAD_BYTES};
 use crate::state::AppState;
@@ -185,7 +186,28 @@ pub async fn download(
         .into_response())
 }
 
-/// `DELETE`: tombstone, by any member. Idempotent.
+/// `DELETE`: remove the file for good, by any member, tombstoned or
+/// not. The bytes first, then the row, so a request that fails
+/// between the two can be repeated (a row without bytes is already a
+/// 404 to `GET`). 404 when there is no such file.
+pub async fn delete(
+    State(state): State<AppState>,
+    auth: DeviceAuth,
+    Path((doc_id, file_id)): Path<(String, String)>,
+) -> ApiResult<()> {
+    let doc_id = member_doc(&state, &auth, &doc_id).await?;
+    let file_id = parse_file_id(&file_id)?;
+    if find_file(&state.db, doc_id, file_id).await?.is_none() {
+        return Err(ApiError::NotFound);
+    }
+    state.blobs.delete(doc_id, file_id).await?;
+    delete_file_row(&state.db, doc_id, file_id).await?;
+    Ok(())
+}
+
+/// `POST .../tombstone`: stamp the file as deleted without destroying
+/// it, by any member. Idempotent. For a removal that may yet be taken
+/// back (the release half of a cross-doc move, the sweep).
 pub async fn tombstone(
     State(state): State<AppState>,
     auth: DeviceAuth,

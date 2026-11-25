@@ -2090,7 +2090,8 @@ impl Replica {
         self.doc().rename_file(file_id, name).map_err(js_err)
     }
 
-    /// See [`Doc::remove_file`]: marks the entry for purge.
+    /// See [`Doc::remove_file`]: marks the entry for purge, to be
+    /// destroyed. Not an undo step.
     #[wasm_bindgen(js_name = removeFile)]
     pub fn remove_file(&self, file_id: &str) -> Result<(), JsError> {
         self.doc().remove_file(file_id).map_err(js_err)
@@ -2106,6 +2107,12 @@ impl Replica {
     #[wasm_bindgen(js_name = filesToPurge)]
     pub fn files_to_purge(&self) -> Vec<String> {
         self.doc().files_to_purge()
+    }
+
+    /// See [`Doc::files_to_destroy`].
+    #[wasm_bindgen(js_name = filesToDestroy)]
+    pub fn files_to_destroy(&self) -> Vec<String> {
+        self.doc().files_to_destroy()
     }
 
     /// See [`Doc::forget_files`]. Returns how many entries went.
