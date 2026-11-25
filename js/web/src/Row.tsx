@@ -114,8 +114,9 @@ export function Row(props: {
   /** Board cards pin the badges to a footer at the bottom of the card;
    *  list rows show them inline after the title instead. */
   badgesInFooter?: boolean;
-  /** Done / Bin / Focus views: when true, badge the row with its origin
-   *  list name. Resolved via `listLabel` so `main` shows the Home label. */
+  /** Done / Bin / Focus / Assigned views and the combined Inbox: when
+   *  true, badge the row with what `listLabel` resolves (its origin list;
+   *  in the Inbox its shared workspace). An empty label shows no badge. */
   showList?: () => boolean;
   /** Resolves a list id (in the item's doc) to its display label (see
    *  Workspace `listLabel`). */
@@ -142,16 +143,15 @@ export function Row(props: {
   onMoveToList?: (ids: readonly string[]) => void;
 }) {
   const { m, locale } = useAppI18n();
-  // Origin-list badge text for the flat cross-list views (Focus,
-  // Assigned, Done and Bin). Null otherwise, or when no label resolves.
-  const originList = createMemo(() => {
-    const k = props.viewKind;
-    return (k === "focus" || k === "assigned" || k === "done" || k === "bin") &&
-      props.showList?.()
+  // Origin badge text for the flat cross-list views (Focus, Assigned,
+  // Done, Bin and the combined Inbox; the caller's `showList` says
+  // which). Null otherwise, or when no label resolves.
+  const originList = createMemo(() =>
+    props.showList?.()
       ? (props.listLabel?.(props.item().listId, props.item().docId, !!props.item().when) ||
         null)
-      : null;
-  });
+      : null,
+  );
   // Lifecycle-state badge text for the flat list view, when the list's
   // "show state" option is on. Open items only: done rows already read
   // as done (strike-through + timestamp) and a lingering done row would

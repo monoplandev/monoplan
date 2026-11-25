@@ -1597,10 +1597,10 @@ final class MainWindowModel: ObservableObject {
         return shown[0].target
     }
 
-    /// The name at an Inbox row's far edge: its workspace's, while the
-    /// rows are of more than one.
+    /// The name at an Inbox row's far edge: its workspace's when that
+    /// is a shared one, nothing on a Personal row.
     func inboxNote(_ row: InboxRow) -> String? {
-        guard inboxShown.count > 1 else { return nil }
+        guard let found = section(row.workspace)?.workspace, !found.home else { return nil }
         return workspaceLabel(row.workspace)
     }
 
@@ -2498,9 +2498,8 @@ struct MainWindowView: View {
     /// (`Engine.inbox`), narrowed by the filter (`InboxFilter.swift`).
     /// A queue in arrival order: shown newest first when this Mac says
     /// so, and never reordered by hand (its rows only drag out, to the
-    /// sidebar). A row's workspace is at its far edge while there are
-    /// several to tell apart; each row's tick, panel and menu act in
-    /// its own workspace. The row after the last makes an item in the
+    /// sidebar). A shared workspace's row names it at its far edge;
+    /// each row's tick, panel and menu act in its own workspace. The row after the last makes an item in the
     /// filtered workspace's Inbox, Home's unfiltered.
     private var inbox: some View {
         let rows = model.inbox

@@ -10,8 +10,8 @@
 // workspaces checked at once (a device preference, `inboxFilterKey`;
 // one no longer open is ignored). The engine applies it
 // (`Engine.inbox(filter:)`), so a change reads the rows again. The
-// title never names a workspace: it is one Inbox. While rows of more
-// than one workspace show, each names its workspace. The bottom bar's
+// title never names a workspace: it is one Inbox. A row of a
+// shared workspace names it at its trailing edge. The bottom bar's
 // add button captures into Personal's Inbox while Personal is shown,
 // else the first shown workspace's (`HomeView`). A row's checkbox ticks the item
 // (which drops it from the page); the row opens its sheet.
@@ -56,16 +56,10 @@ struct InboxView: View {
         inboxNewestFirst ? Array(model.inbox.reversed()) : model.inbox
     }
 
-    /// Each row names its workspace only while rows of several can
-    /// be on the page.
-    private var namesWorkspaces: Bool {
-        model.inboxShown(storedFilter).count > 1
-    }
-
+    /// A row names its workspace when that is a shared one; a
+    /// Personal row names nothing.
     private func workspaceName(_ entry: InboxEntry) -> String? {
-        guard namesWorkspaces else { return nil }
-        let docId = model.docId(of: entry)
-        return model.doneWorkspaceOptions.first(where: { $0.docId == docId })?.name
+        model.sharedWorkspaceName(model.docId(of: entry))
     }
 
     /// The picked rows, in the order shown.

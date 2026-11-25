@@ -175,8 +175,9 @@ into one queue. No sidebar row, view, URL or title names one workspace's
 Inbox.
 
 - **Rows.** What each doc's Inbox shows (Open, not binned, no date),
-  merged oldest first on the queue key, then doc id and item id. Each row
-  names its workspace while rows of more than one are shown.
+  merged oldest first on the queue key, then doc id and item id. A row of a
+  shared workspace names it at its far (right) edge, whatever the
+  filter; a Personal row names nothing.
 - **Shared workspaces contribute everything** in their Inbox, other
   members' captures and a deleted shared list's closed items included:
   triage is everyone's job in a small team. Narrowing to one's own

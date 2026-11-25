@@ -1045,9 +1045,10 @@ export function Workspace(props: {
     return docs.listView(docId, listId);
   };
   // The combined Inbox's rows name their workspace (the list is Inbox
-  // for all of them), once there is more than one shown to tell apart.
+  // for all of them) when it is a shared one; a Personal row names
+  // nothing (the empty label shows no badge).
   const combinedInboxLabel = (_listId: string, docId?: string): string =>
-    docLabel(docId ?? docs.homeDocId);
+    docId && docId !== docs.homeDocId ? docLabel(docId) : "";
 
   const items = createMemo((): ItemView[] => {
     const v = view();
@@ -4438,7 +4439,7 @@ export function Workspace(props: {
                           const k = view().kind;
                           return (
                             k === "focus" || k === "assigned" || k === "done" || k === "bin" ||
-                            (isCombinedInbox() && inboxShown().length > 1)
+                            isCombinedInbox()
                           );
                         }}
                         listLabel={
