@@ -524,7 +524,7 @@ Personal first), each with its active lists
 (the typed `Engine.lists(workspace:filter: .all)`,
 one read per doc, refetched with the session on every `Changed`;
 `userLists` in `TypedRows.swift` drops archived and reserved rows). A list shows its
-emoji (`ListIcon`: the `icon` the list JSON carries, a folder without
+emoji (`ListIcon`: the `icon` the list JSON carries, the web's file glyph without
 one) on its Home row, in its page's title and on the item sheet. A list pushes its Open
 items (the typed `Engine.items`), refetched on `Changed` while
 shown; a long press and drag reorders a row (2026-11-14: `onMove`,

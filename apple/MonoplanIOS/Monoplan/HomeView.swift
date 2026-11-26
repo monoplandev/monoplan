@@ -5,8 +5,8 @@
 // (Inbox, Starred and Assigned with their counts). Then a section per open workspace (Personal first, as
 // `Engine.workspaces` orders them; Personal's only while it has a
 // list), each with its
-// active lists in the doc's order, each led by its emoji (a folder
-// when it has none); a list opens its Open items.
+// active lists in the doc's order, each led by its emoji (the file
+// glyph when it has none); a list opens its Open items.
 // The gear at the top right opens Settings (account and sync, with
 // Debug a level under it). With an account, the avatar at the top left
 // is the account's menu: its email, New Workspace (named in an
@@ -83,8 +83,8 @@ struct ListRef: Hashable {
 }
 
 /// A list's icon: its emoji when the user picked one, else the built-in
-/// glyph (the web's inbox tray for the Inbox, a folder for any other
-/// list).
+/// glyph (the web's inbox tray for the Inbox, its `file.svg`, `List` in
+/// the asset catalog, for any other list).
 struct ListIcon: View {
     let listId: String
     let emoji: String?
@@ -98,14 +98,14 @@ struct ListIcon: View {
             if listId == "inbox" {
                 CatalogIcon(name: calendar ? "Calendar" : "Inbox")
             } else {
-                Image(systemName: "folder")
+                CatalogIcon(name: "List")
             }
         }
     }
 }
 
 /// One of the web's glyphs from the asset catalog (`Inbox` is
-/// `js/web/src/icons/archive.svg`, `Calendar` is `calendar.svg`, `Done` is `check-circled.svg`),
+/// `js/web/src/icons/archive.svg`, `Calendar` is `calendar.svg`, `Done` is `check-circled.svg`, `List` is `file.svg`),
 /// standing where a symbol would as a label's icon: about a symbol's
 /// side beside body text, growing with Dynamic Type. Takes the
 /// foreground style around it.
@@ -1187,7 +1187,7 @@ struct ListItemsView: View {
             } else {
                 ContentUnavailableView(
                     "Nothing open",
-                    systemImage: "folder",
+                    image: "List",
                     description: Text("Open items in \(current.name) show here.")
                 )
             }

@@ -435,12 +435,12 @@ struct ItemPanel: View {
 
     /// A list's glyph when it has no emoji: the sidebar's for the
     /// Inbox (the Calendar's when the item has a date and so lives
-    /// there), a bullet list for any other.
+    /// there), the file glyph for any other.
     @ViewBuilder
     static func listIcon(_ listId: String, dated: Bool) -> some View {
         switch listId {
         case MainWindowModel.inbox: PanelGlyph(image: dated ? NavArt.calendar : NavArt.inbox)
-        default: Image(systemName: "list.bullet")
+        default: PanelGlyph(image: NavArt.list)
         }
     }
 
