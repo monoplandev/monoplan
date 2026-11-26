@@ -296,16 +296,6 @@
         }
       }
     },
-    "Attach file" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjuntar archivo"
-          }
-        }
-      }
-    },
     "Back" : {
       "localizations" : {
         "es" : {
@@ -2162,16 +2152,6 @@
         }
       }
     },
-    "Quick Look" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vista rápida"
-          }
-        }
-      }
-    },
     "Quit Monoplan" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2449,6 +2429,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Guardar"
+          }
+        }
+      }
+    },
+    "Save to Downloads" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar en Descargas"
           }
         }
       }
@@ -3142,6 +3132,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enlaces sin usar"
+          }
+        }
+      }
+    },
+    "Upload file" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subir archivo"
           }
         }
       }

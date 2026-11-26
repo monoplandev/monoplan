@@ -84,7 +84,7 @@ struct ItemPanel: View {
     let removeSubtask: (ItemInfo, String) -> Void
     /// The item's attachments (spec/attachments.md, `FilesField.swift`):
     /// the attaches under way for it, whether there is an account to
-    /// hold a file, files picked for it, one fetched into a temp file,
+    /// hold a file, files picked for it, one fetched into Downloads,
     /// one removed for good, a failed attach dismissed.
     let uploads: [FileUpload]
     let canAttach: Bool

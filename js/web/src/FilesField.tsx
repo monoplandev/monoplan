@@ -20,8 +20,8 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { useAppI18n, type Messages } from "./i18n.tsx";
 import dotsHorizontalSvg from "./icons/dots-horizontal.svg?raw";
 import fileSvg from "./icons/file.svg?raw";
-import link2Svg from "./icons/link-2.svg?raw";
 import spinnerSvg from "./icons/spinner.svg?raw";
+import uploadSvg from "./icons/upload.svg?raw";
 import { formatFileSize } from "./fileFormat.ts";
 import { FileError, MAX_FILE_BYTES, type FileErrorKind } from "./sync/files.ts";
 import type { ItemFile } from "./sync/store.ts";
@@ -169,7 +169,7 @@ export function FilesField(props: {
       <Show when={props.canAttach}>
         <button type="button" class="file-row file-add" onClick={() => pickRef?.click()}>
           <span class="file-lead" aria-hidden="true">
-            <span class="file-icon" innerHTML={link2Svg} />
+            <span class="file-icon" innerHTML={uploadSvg} />
           </span>
           {m().workspace.attachFile}
         </button>

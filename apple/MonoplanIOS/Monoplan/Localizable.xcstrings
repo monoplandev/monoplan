@@ -444,16 +444,6 @@
         }
       }
     },
-    "Attach file" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Adjuntar archivo"
-          }
-        }
-      }
-    },
     "Backlog" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2740,17 +2730,6 @@
         }
       }
     },
-    "Quick Look" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vista rápida"
-          }
-        }
-      }
-    },
     "Recent" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2944,6 +2923,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Revocar"
+          }
+        }
+      }
+    },
+    "Save to Files" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guardar en Archivos"
           }
         }
       }
@@ -3743,6 +3733,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enlaces sin usar"
+          }
+        }
+      }
+    },
+    "Upload file" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subir archivo"
           }
         }
       }

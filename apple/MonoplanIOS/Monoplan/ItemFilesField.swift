@@ -2,19 +2,20 @@
 // item, under its subtasks. The Mac panel's field
 // (`MonoplanMac/FilesField.swift`) for touch: a column of rows, each a
 // file's glyph, name and size, over the uploads still on their way and
-// a trailing "Attach file" row that offers the photo library or the
+// a trailing "Upload file" row that offers the photo library or the
 // Files picker.
 //
 // The bytes are online-only: a tap has the engine fetch and decrypt the
-// file into a temp file, shown in Quick Look (which shares and saves
-// from there, and never runs what it shows). The temp file goes when
-// the preview closes. Removing a file is permanent, so it asks first,
-// from the "…" at a row's end. A binned item's files are shown and
-// open, and nothing is added or removed.
+// file into a temp file, and the system's save sheet moves it to the
+// place picked in Files (an app cannot write to Downloads on its own).
+// It is never opened from here: the name and type are whatever a member
+// of the workspace wrote. The temp file goes if the save is cancelled.
+// Removing a file is permanent, so it asks first, from the "…" at a
+// row's end. A binned item's files are shown and saved, and nothing is
+// added or removed.
 
 import MonoplanCore
 import PhotosUI
-import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -45,8 +46,8 @@ struct ItemFilesField: View {
     @State private var photos: [PhotosPickerItem] = []
     /// The file being fetched, by id.
     @State private var opening: String?
-    /// The fetched file Quick Look is showing.
-    @State private var preview: URL?
+    /// The fetched file waiting to be saved somewhere.
+    @State private var fetched: URL?
     @State private var removing: ItemFile?
     /// The last open, or the last read of a picked photo, that failed.
     @State private var failure: String?
@@ -74,12 +75,13 @@ struct ItemFilesField: View {
             photos = []
             Task { await attachPhotos(picked) }
         }
-        .quickLookPreview($preview)
-        .onChange(of: preview) { old, new in
-            if let old, old != new { AttachmentFiles.discard(old) }
-        }
-        .onDisappear {
-            if let preview { AttachmentFiles.discard(preview) }
+        .fileMover(
+            isPresented: Binding(get: { fetched != nil }, set: { if !$0 { leave() } }),
+            file: fetched
+        ) { _ in
+            leave()
+        } onCancellation: {
+            leave()
         }
         .confirmationDialog(
             "Delete this file for good?",
@@ -130,7 +132,7 @@ struct ItemFilesField: View {
             .buttonStyle(.plain)
             if !locked {
                 Menu {
-                    Button("Quick Look", systemImage: "eye") { show(file) }
+                    Button("Save to Files", systemImage: "square.and.arrow.down") { show(file) }
                     Button("Delete…", systemImage: "trash", role: .destructive) { removing = file }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -188,9 +190,11 @@ struct ItemFilesField: View {
             Button("Choose File", systemImage: "folder") { importing = true }
         } label: {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "plus")
+                Image("Upload")
+                    .resizable()
+                    .frame(width: 18, height: 18)
                     .frame(width: 24)
-                Text("Attach file")
+                Text("Upload file")
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -200,13 +204,20 @@ struct ItemFilesField: View {
         }
     }
 
+    /// The save sheet is done with the fetched file: moved, failed or
+    /// cancelled. Whatever is still in the temp directory goes.
+    private func leave() {
+        if let fetched { AttachmentFiles.discard(fetched) }
+        fetched = nil
+    }
+
     private func show(_ file: ItemFile) {
         guard opening == nil else { return }
         opening = file.id
         open(file) { result in
             opening = nil
             switch result {
-            case .success(let url): preview = url
+            case .success(let url): fetched = url
             case .failure(let error): failure = engineErrorMessage(error)
             }
         }

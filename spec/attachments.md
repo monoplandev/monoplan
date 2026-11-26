@@ -445,6 +445,8 @@ the core and wasm additions it needed.
   (no number since 2026-11-26; the count is the glyph's tooltip). The
   task surface shows the section only once the item
   exists, and not at all to a signed-out session with no files.
+- **The attach row** reads "Upload file" under `upload.svg` (2026-11-26;
+  it was "Attach file" under the rows' `link-2.svg`).
 - **No rename on the web** (cut 2026-11-24): a file keeps the name it was
   attached under. `Doc::rename_file` and the wasm `renameFile` stay; the
   store and the surface do not call them.
@@ -496,14 +498,20 @@ daemon gets the housekeeping too.
   doc in `files-sweep.json` in the profile dir.
 - **The apps** (not yet run). A files section in the item surface under
   the subtasks: name and size per file, a row per upload under way (it
-  stays with the reason when it fails, until dismissed), and an "Attach
-  file" row that opens the system file picker (on iOS a menu of the photo
-  library, images only, or Files). A click or tap fetches into a temp file
-  and shows it in Quick Look, which never runs what it shows; the temp file
-  goes when the preview closes, and whatever a run left is removed at the
-  next launch (`AttachmentFiles` in MonoplanCore). Removal asks first. A
-  binned item's files are shown and open, with nothing added or removed. No
-  attach row without an account.
+  stays with the reason when it fails, until dismissed), and an "Upload
+  file" row under the web's `upload.svg` that opens the system file picker
+  (on iOS a menu of the photo library, images only, or Files). A file is
+  saved, never opened from the app, as on the web (2026-11-26, replacing a
+  Quick Look preview): on the Mac a click fetches it straight into
+  Downloads under its own name or the next free one ("name 2.ext") and
+  Finder shows it, which takes the
+  `com.apple.security.files.downloads.read-write` entitlement; on iOS,
+  where an app cannot write to Downloads itself, a tap fetches into a temp
+  file and the system's save sheet moves it to the place picked
+  (`AttachmentFiles` in MonoplanCore; a temp file a run left is removed at
+  the next launch). Removal asks first. A binned item's files are shown
+  and saved, with nothing added or removed. No upload row without an
+  account.
 - **Not built:** the CLI commands, a row glyph in the Apple lists, the
   Settings storage row, drop or paste to attach, upload progress, a retry
   on a failed upload, image previews, anything on macOS or iOS for a

@@ -721,9 +721,9 @@ final class AppModel: ObservableObject {
         fileUploads.removeAll { $0.id == id }
     }
 
-    /// Fetch an attachment into a temp file for Quick Look
-    /// (`Engine.fetchFile`); the caller discards it when the preview
-    /// closes (`AttachmentFiles.discard`).
+    /// Fetch an attachment into a temp file for the save sheet
+    /// (`Engine.fetchFile`); the caller discards it once the sheet is
+    /// done (`AttachmentFiles.discard`).
     func openFile(_ ref: ItemRef, file: ItemFile, done: @escaping (Result<URL, Error>) -> Void) {
         let workspace = selector(ref.docId)
         sharing({ engine in

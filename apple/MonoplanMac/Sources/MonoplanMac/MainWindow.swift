@@ -1224,18 +1224,13 @@ final class MainWindowModel: ObservableObject {
         fileUploads.removeAll { $0.id == id }
     }
 
-    /// Fetch an attachment into a temp file for Quick Look
-    /// (`Engine.fetchFile`); the caller discards it when the preview
-    /// closes (`AttachmentFiles.discard`).
+    /// Fetch an attachment into the Downloads folder
+    /// (`Engine.fetchFile`), under its own name or the next free one;
+    /// where it landed.
     func openFile(workspace: String?, file: ItemFile, done: @escaping (Result<URL, Error>) -> Void) {
         sharing({ engine in
-            let url = try AttachmentFiles.tempURL(name: file.name)
-            do {
-                try engine.fetchFile(workspace: workspace, fileId: file.id, dest: url.path)
-            } catch {
-                AttachmentFiles.discard(url)
-                throw error
-            }
+            let url = try AttachmentFiles.downloadURL(name: file.name)
+            try engine.fetchFile(workspace: workspace, fileId: file.id, dest: url.path)
             return url
         }, done: done)
     }

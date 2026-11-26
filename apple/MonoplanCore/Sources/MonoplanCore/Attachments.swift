@@ -1,12 +1,14 @@
-// What both apps' attachment rows share (spec/attachments.md): where an
-// opened file's decrypted bytes go, and how a file is described.
+// What both apps' attachment rows share (spec/attachments.md): where a
+// fetched file's decrypted bytes go, and how a file is described.
 //
 // The bytes are online-only. Opening one has the engine fetch and
-// decrypt it into a temp file (`Engine.fetchFile`), which Quick Look
-// then shows; nothing decrypted is kept in the profile. Each open gets
+// decrypt it (`Engine.fetchFile`) to where the person keeps it: on the
+// Mac straight into Downloads (`downloadURL`), on iOS into a temp file
+// (`tempURL`) that the system's save sheet then moves to the place
+// picked. Nothing decrypted is kept in the profile. Each temp file gets
 // a directory of its own under one root in the system's temp directory,
-// removed when the preview closes, and the root is emptied when the app
-// starts.
+// removed if the save is cancelled, and the root is emptied when the
+// app starts.
 
 import Foundation
 import UniformTypeIdentifiers
@@ -25,6 +27,21 @@ public enum AttachmentFiles {
         let dir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent(safeName(name), isDirectory: false)
+    }
+
+    /// Where a file of this name is saved in the Downloads folder: the
+    /// name as it is when it is free, else "name 2.ext", "name 3.ext".
+    public static func downloadURL(name: String) throws -> URL {
+        let folder = try FileManager.default.url(
+            for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let safe = safeName(name) as NSString
+        let (stem, ext) = (safe.deletingPathExtension, safe.pathExtension)
+        for n in 1...999 {
+            let leaf = n == 1 ? stem : "\(stem) \(n)"
+            let url = folder.appendingPathComponent(ext.isEmpty ? leaf : "\(leaf).\(ext)", isDirectory: false)
+            if !FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return folder.appendingPathComponent("\(stem) \(UUID().uuidString).\(ext)", isDirectory: false)
     }
 
     /// Remove an opened file and the directory made for it.

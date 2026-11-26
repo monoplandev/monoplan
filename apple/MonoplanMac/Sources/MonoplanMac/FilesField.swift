@@ -1,19 +1,19 @@
 // The item panel's attachments (spec/attachments.md): the files on the
 // item, under its subtasks. A column of rows, each a file's glyph, name
-// and size, over the uploads still on their way and a trailing "Attach
+// and size, over the uploads still on their way and a trailing "Upload
 // file" row that opens the system's file picker. The web's
 // `FilesField.tsx`.
 //
 // The bytes are online-only: a click has the engine fetch and decrypt
-// the file into a temp file, shown in Quick Look, which never runs what
-// it shows (the name and type are whatever a member of the workspace
-// wrote). The temp file goes when the preview closes. Removing a file
+// the file into the Downloads folder, as the web downloads it, and
+// Finder shows it there. It is never opened from here: the name and
+// type are whatever a member of the workspace wrote. Removing a file
 // is permanent, so it asks first; the cross under the pointer and the
-// row's menu both offer it. A binned item's files are shown and open,
+// row's menu both offer it. A binned item's files are shown and saved,
 // and nothing is added or removed.
 
+import AppKit
 import MonoplanCore
-import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -27,8 +27,8 @@ struct FilesField: View {
     var canAttach = true
     /// Files were picked for the item.
     let attach: ([URL]) -> Void
-    /// Fetch a file into a temp file; the result arrives on the main
-    /// queue.
+    /// Fetch a file into Downloads; where it landed arrives on the
+    /// main queue.
     let open: (ItemFile, @escaping (Result<URL, Error>) -> Void) -> Void
     let remove: (ItemFile) -> Void
     let dismissUpload: (UUID) -> Void
@@ -37,10 +37,9 @@ struct FilesField: View {
     static let rowHeight: CGFloat = 28
 
     @State private var importing = false
+    @State private var attachHovered = false
     /// The file being fetched, by id.
     @State private var opening: String?
-    /// The fetched file Quick Look is showing.
-    @State private var preview: URL?
     @State private var removing: ItemFile?
     /// The last open that failed: the file's id and why.
     @State private var failure: (id: String, message: String)?
@@ -68,13 +67,6 @@ struct FilesField: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) {
             if case .success(let urls) = $0, !urls.isEmpty { attach(urls) }
         }
-        .quickLookPreview($preview)
-        .onChange(of: preview) { old, new in
-            if let old, old != new { AttachmentFiles.discard(old) }
-        }
-        .onDisappear {
-            if let preview { AttachmentFiles.discard(preview) }
-        }
         .confirmationDialog(
             "Delete this file for good?",
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -88,21 +80,29 @@ struct FilesField: View {
     }
 
     private var attachRow: some View {
-        Button {
+        // Filled under the pointer, as the panel's date and place rows
+        // (`panelBox`): the fill reaches past the row on each side, so
+        // the glyph stays in the files' leading column.
+        let shape = RoundedRectangle(cornerRadius: PanelBox.radius, style: .continuous)
+        return Button {
             importing = true
         } label: {
             HStack(alignment: .center, spacing: 5) {
-                Image(systemName: "plus")
+                PanelGlyph(image: NavArt.upload)
                     .frame(width: 20)
-                Text("Attach file")
+                Text("Upload file")
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.tertiary)
             .frame(minHeight: Self.rowHeight)
-            .contentShape(Rectangle())
+            .padding(.horizontal, PanelBox.inset)
+            .background(.quaternary.opacity(attachHovered ? 0.5 : 0), in: shape)
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
+        .onHover { attachHovered = $0 }
+        .padding(.horizontal, -PanelBox.inset)
     }
 
     private func show(_ file: ItemFile) {
@@ -112,7 +112,7 @@ struct FilesField: View {
         open(file) { result in
             opening = nil
             switch result {
-            case .success(let url): preview = url
+            case .success(let url): NSWorkspace.shared.activateFileViewerSelecting([url])
             case .failure(let error): failure = (file.id, engineErrorMessage(error))
             }
         }
@@ -171,7 +171,7 @@ private struct FileRow: View {
         .onTapGesture(perform: open)
         .onHover { hovered = $0 }
         .contextMenu {
-            Button("Quick Look", action: open)
+            Button("Save to Downloads", action: open)
             if !locked {
                 Button("Delete…", role: .destructive, action: remove)
             }
