@@ -773,7 +773,15 @@ struct ItemPanelPane: View {
                     moveSubtask: {
                         model.moveSubtask(workspace: workspace, id: $0.item.id, subtask: $1, index: $2)
                     },
-                    removeSubtask: { model.removeSubtask(workspace: workspace, id: $0.item.id, subtask: $1) })
+                    removeSubtask: { model.removeSubtask(workspace: workspace, id: $0.item.id, subtask: $1) },
+                    uploads: model.fileUploads.filter {
+                        $0.workspace == workspace && $0.item == (capture == nil ? shown?.id : nil)
+                    },
+                    canAttach: model.accountId?.isEmpty == false,
+                    attachFiles: { model.attachFiles(workspace: workspace, id: $0.item.id, urls: $1) },
+                    openFile: { model.openFile(workspace: workspace, file: $0, done: $1) },
+                    removeFile: { model.removeFile(workspace: workspace, fileId: $0.id) },
+                    dismissUpload: { model.dismissUpload($0) })
             } else if model.selectedCount > 1 {
                 Text("\(model.selectedCount) items selected")
                     .foregroundStyle(.secondary)

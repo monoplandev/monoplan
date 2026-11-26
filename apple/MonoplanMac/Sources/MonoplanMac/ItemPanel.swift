@@ -1,7 +1,8 @@
 // The item panel: the selected row's item, at the right of the window.
 // The iOS item page (apple/MonoplanIOS/Monoplan/ItemView.swift) laid
 // out the same way, top to bottom: status, title, list, planned date,
-// place, subtasks (`SubtasksField.swift`), notes, then the activity
+// place, subtasks (`SubtasksField.swift`), files (`FilesField.swift`),
+// notes, then the activity
 // log. Read from
 // `Engine.item` in the window's snapshot, so it is reread on every doc
 // change like the rest.
@@ -81,6 +82,16 @@ struct ItemPanel: View {
     let setSubtaskDone: (ItemInfo, String, Bool) -> Void
     let moveSubtask: (ItemInfo, String, Int) -> Void
     let removeSubtask: (ItemInfo, String) -> Void
+    /// The item's attachments (spec/attachments.md, `FilesField.swift`):
+    /// the attaches under way for it, whether there is an account to
+    /// hold a file, files picked for it, one fetched into a temp file,
+    /// one removed for good, a failed attach dismissed.
+    let uploads: [FileUpload]
+    let canAttach: Bool
+    let attachFiles: (ItemInfo, [URL]) -> Void
+    let openFile: (ItemFile, @escaping (Result<URL, Error>) -> Void) -> Void
+    let removeFile: (ItemFile) -> Void
+    let dismissUpload: (UUID) -> Void
 
     var body: some View {
         Group {
@@ -122,6 +133,22 @@ struct ItemPanel: View {
                             // last sit 16 pt from the rules, as the
                             // date and place rows do from theirs.
                             .padding(.vertical, -(SubtasksField.rowHeight - 16) / 2)
+                            PanelRule()
+                        }
+                        // The files, under the subtasks. A binned
+                        // item's are shown and open; without an account
+                        // there is nowhere to put one.
+                        let locked = item.item.binnedAt != nil
+                        if !isNew, !item.files.isEmpty || !uploads.isEmpty || (canAttach && !locked) {
+                            FilesField(
+                                files: item.files, uploads: uploads, locked: locked, canAttach: canAttach,
+                                attach: { attachFiles(item, $0) },
+                                open: openFile,
+                                remove: removeFile,
+                                dismissUpload: dismissUpload
+                            )
+                            .id(identity)
+                            .padding(.vertical, -(FilesField.rowHeight - 16) / 2)
                             PanelRule()
                         }
                         if !isNew {

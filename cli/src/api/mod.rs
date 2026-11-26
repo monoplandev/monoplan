@@ -80,6 +80,15 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The id of the doc the call runs against, when the caller knows
+    /// its workspaces.
+    pub(crate) fn doc_id(&self) -> Option<DocId> {
+        self.workspaces
+            .iter()
+            .find(|(_, d)| std::ptr::eq(*d, self.doc))
+            .map(|(c, _)| c.doc_id)
+    }
+
     /// The Home doc among the workspaces.
     pub(crate) fn home_doc(&self) -> anyhow::Result<&'a Doc> {
         self.home

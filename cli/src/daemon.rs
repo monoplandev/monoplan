@@ -462,6 +462,27 @@ impl LocalClient {
         rx.blocking_recv().map_err(|_| ApiError::Stopped)?
     }
 
+    /// [`call_blocking`](Self::call_blocking) for a caller on a runtime
+    /// (the attachment flows of `crate::files`, which wait on the
+    /// server between two calls).
+    pub async fn call<T, F>(&self, workspace: Option<String>, f: F) -> Result<T, ApiError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let run: CallFn = Box::new(move |cx| {
+            let result = cx.and_then(|cx| f(cx).map_err(ApiError::from));
+            Box::new(move || {
+                let _ = tx.send(result);
+            })
+        });
+        self.requests
+            .send(HostCmd::Call { workspace, run })
+            .map_err(|_| ApiError::Stopped)?;
+        rx.await.map_err(|_| ApiError::Stopped)?
+    }
+
     /// Undo (or with `redo`, redo) the newest action across every open
     /// doc, for a thread that is not on the runtime. `Ok(false)` when
     /// there was nothing to take back. What it changed is durable when
@@ -926,6 +947,9 @@ struct Host {
     /// One undo history over every open doc (`crate::undo`): each call
     /// or doc command is one entry.
     history: crate::undo::History,
+    /// Attachment housekeeping (`crate::files`): the purge of entries
+    /// marked for it and the owner's daily sweep, run beside the loop.
+    files: crate::files::Housekeeping,
 }
 
 impl Host {
@@ -958,6 +982,7 @@ impl Host {
             offline_reason: None,
             local_only,
             history: crate::undo::History::default(),
+            files: crate::files::Housekeeping::new(&dir),
         }
     }
 
@@ -992,6 +1017,17 @@ impl Host {
 
                 msg = async { self.ws.as_mut().expect("guarded").next().await }, if self.ws.is_some() => {
                     self.on_ws_message(msg).await;
+                }
+
+                _ = async { tokio::time::sleep_until(self.files.due.expect("guarded")).await },
+                    if self.files.due.is_some() && self.files.running.is_none() =>
+                {
+                    self.start_files();
+                }
+
+                res = async { self.files.running.as_mut().expect("guarded").await }, if self.files.running.is_some() => {
+                    self.files.running = None;
+                    self.on_files_result(res).await?;
                 }
 
                 Some(cmd) = self.requests.recv() => {
@@ -1357,6 +1393,7 @@ impl Host {
                 self.status.send_modify(|s| s.connects += 1);
                 crate::note!("monoplan daemon: connected");
                 self.pump().await;
+                self.pulse_files();
                 // Whatever the account joined or created while this
                 // device was away (or never heard a nudge for).
                 self.start_relist();
@@ -1436,6 +1473,140 @@ impl Host {
         let _ = self.watchers.send(WatchEvent::Changed);
     }
 
+    /// A doc the housekeeping may act on: past its initial pull, with
+    /// nothing of this device's the server has not acknowledged.
+    fn files_ready(&self, doc_id: DocId) -> bool {
+        self.engine.replica_idle(doc_id) && !self.engine.unsynced_ops(doc_id)
+    }
+
+    /// A round trip with the server, or the socket coming up: the
+    /// attachment housekeeping runs once things go quiet, or now when a
+    /// purge mark the server already has is waiting
+    /// (`spec/attachments.md` "Purge").
+    fn pulse_files(&mut self) {
+        if self.local_only {
+            return;
+        }
+        let at_once = self.engine.doc_ids().into_iter().any(|id| {
+            !self.files.stalled.contains(&id)
+                && self.files_ready(id)
+                && self
+                    .engine
+                    .doc_for(id)
+                    .is_some_and(|d| !d.files_to_purge().is_empty())
+        });
+        self.files.pulse(at_once);
+    }
+
+    /// Start a housekeeping run for every doc that has something for
+    /// it: entries marked for purge, or a daily sweep due.
+    fn start_files(&mut self) {
+        self.files.due = None;
+        if self.ws.is_none() {
+            return;
+        }
+        let now = crate::sync::now_millis();
+        let jobs: Vec<crate::files::Job> = self
+            .engine
+            .doc_ids()
+            .into_iter()
+            .filter(|id| self.files_ready(*id))
+            .filter_map(|id| {
+                let doc = self.engine.doc_for(id)?;
+                let marked = doc.files_to_purge();
+                let list = self.files.sweep_due(id, now);
+                (!marked.is_empty() || list).then(|| crate::files::Job {
+                    doc: id,
+                    marked,
+                    destroy: doc.files_to_destroy().into_iter().collect(),
+                    list,
+                })
+            })
+            .collect();
+        if jobs.is_empty() {
+            return;
+        }
+        let Some((profile, _)) = self.engine.connect_params() else {
+            return;
+        };
+        match crate::files::Conn::open(profile) {
+            Ok(conn) => {
+                self.files.running = Some(tokio::spawn(crate::files::run_jobs(conn, jobs)));
+            }
+            Err(e) => tracing::warn!("files: housekeeping skipped: {e:#}"),
+        }
+    }
+
+    /// What the server answered: forget the entries whose blobs it has
+    /// dealt with, and finish the sweep of the docs whose list came
+    /// back (`spec/attachments.md` "Garbage"). Only the doc owner's
+    /// clients sweep, which the list tells: the pooled quota figures
+    /// come to the owner alone.
+    async fn on_files_result(
+        &mut self,
+        res: Result<Vec<crate::files::Outcome>, tokio::task::JoinError>,
+    ) -> Result<(), SyncError> {
+        let outcomes = match res {
+            Ok(outcomes) => outcomes,
+            Err(e) => {
+                tracing::warn!("files: housekeeping task failed: {e}");
+                return Ok(());
+            }
+        };
+        let now = crate::sync::now_millis();
+        let mut orphaned: Vec<(DocId, Vec<String>)> = Vec::new();
+        let mut retry = false;
+        for outcome in outcomes {
+            let Some(doc) = self.engine.doc_for(outcome.doc) else {
+                continue;
+            };
+            // Read before the entries are forgotten, which is itself a
+            // change the server has not seen. An edit of this device's
+            // made while the list was in flight postpones the sweep.
+            let unsent = self.engine.unsynced_ops(outcome.doc);
+            if !outcome.gone.is_empty() {
+                let ids: Vec<&str> = outcome.gone.iter().map(String::as_str).collect();
+                if let Err(e) = doc.forget_files(&ids) {
+                    tracing::warn!("files: forget: {e}");
+                }
+            }
+            if outcome.complete {
+                self.files.stalled.remove(&outcome.doc);
+            } else {
+                self.files.stalled.insert(outcome.doc);
+                retry = true;
+            }
+            let Some(list) = outcome.list else { continue };
+            let owner = list.used_bytes.is_some();
+            if owner && unsent {
+                continue;
+            }
+            self.files.stamp_sweep(outcome.doc, now);
+            if !owner {
+                continue;
+            }
+            let cutoff = now - crate::files::SWEEP_AGE_MS;
+            if let Err(e) = doc.mark_ownerless_files(cutoff) {
+                tracing::warn!("files: sweep: {e}");
+            }
+            let ids = crate::files::orphans(&list, &doc.stored_file_ids(), cutoff);
+            if !ids.is_empty() {
+                orphaned.push((outcome.doc, ids));
+            }
+        }
+        if let Some((profile, _)) = self.engine.connect_params() {
+            for (doc, ids) in orphaned {
+                if let Ok(conn) = crate::files::Conn::open(profile) {
+                    tokio::spawn(crate::files::tombstone_orphans(conn, doc, ids));
+                }
+            }
+        }
+        if retry {
+            self.files.retry();
+        }
+        self.after_doc_work().await
+    }
+
     fn resolve_pending_syncs(&mut self, online: bool) {
         let sync = SyncStatus {
             online,
@@ -1493,6 +1664,7 @@ impl Host {
                 }
                 self.pump().await;
                 self.notify_if_changed();
+                self.pulse_files();
             }
             Some(Ok(Message::Pong(_))) => self.awaiting_pong = false,
             // tungstenite queues the Pong reply itself; it leaves on the
@@ -1626,6 +1798,7 @@ impl Host {
             if let Err(e) = self.engine.forget_doc(doc_id) {
                 tracing::warn!("forget doc {}: {e}", doc_id.0);
             }
+            self.files.forget(doc_id);
             // A list fetched before the close still names it.
             self.relist_stale = self.relisting.is_some();
             let _ = self.watchers.send(WatchEvent::Changed);

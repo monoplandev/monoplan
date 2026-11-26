@@ -117,6 +117,49 @@ impl Client {
         Ok(())
     }
 
+    /// `PUT` a raw body (an attachment's sealed blob,
+    /// `spec/attachments.md` §Routes).
+    pub async fn put_bytes(&self, path: &str, token: &str, body: Vec<u8>) -> Result<(), NetError> {
+        let resp = self
+            .inner
+            .put(format!("{}{}", self.base, path))
+            .bearer_auth(token)
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .body(body)
+            .send()
+            .await?;
+        Self::raw(resp).await.map(|_| ())
+    }
+
+    /// `GET` a raw body.
+    pub async fn get_bytes(&self, path: &str, token: &str) -> Result<Vec<u8>, NetError> {
+        let resp = self
+            .inner
+            .get(format!("{}{}", self.base, path))
+            .bearer_auth(token)
+            .send()
+            .await?;
+        Self::raw(resp).await
+    }
+
+    /// The body of a response that is not JSON, or the server's error.
+    async fn raw(resp: reqwest::Response) -> Result<Vec<u8>, NetError> {
+        let status = resp.status();
+        let bytes = resp.bytes().await?;
+        if !status.is_success() {
+            let err: ErrorBody = serde_json::from_slice(&bytes).unwrap_or(ErrorBody {
+                code: "unknown".into(),
+                message: String::from_utf8_lossy(&bytes).into_owned(),
+            });
+            return Err(NetError::Api {
+                status,
+                code: err.code,
+                message: err.message,
+            });
+        }
+        Ok(bytes.to_vec())
+    }
+
     async fn send<Req, Resp>(
         &self,
         method: Method,

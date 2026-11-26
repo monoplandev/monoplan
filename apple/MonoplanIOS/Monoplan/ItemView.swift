@@ -302,6 +302,23 @@ struct ItemView: View {
                         .padding(.vertical, -10)
                         Divider()
                     }
+                    // The files, under the subtasks. A binned item's
+                    // are shown and open; without an account there is
+                    // nowhere to put one.
+                    let uploads = model.fileUploads.filter { $0.workspace == ref.docId && $0.item == ref.itemId }
+                    if !item.files.isEmpty || !uploads.isEmpty || (model.canAttachFiles && item.binnedAt == nil) {
+                        ItemFilesField(
+                            files: item.files, uploads: uploads, locked: item.binnedAt != nil,
+                            canAttach: model.canAttachFiles,
+                            attach: { model.attachFiles(ref, urls: $0) },
+                            open: { model.openFile(ref, file: $0, done: $1) },
+                            remove: { model.removeFile(ref, fileId: $0.id) },
+                            dismissUpload: { model.dismissUpload($0) }
+                        )
+                        .id(ref.key)
+                        .padding(.vertical, -10)
+                        Divider()
+                    }
                     notes(item)
                     Divider()
                     activity(item)

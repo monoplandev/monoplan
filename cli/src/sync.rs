@@ -394,6 +394,14 @@ impl Engine {
         self.docs.values().any(|d| d.replica.has_unsynced_ops())
     }
 
+    /// [`any_unsynced_ops`](Self::any_unsynced_ops) for one doc; false
+    /// for a doc this engine does not hold.
+    pub(crate) fn unsynced_ops(&self, doc_id: DocId) -> bool {
+        self.docs
+            .get(&doc_id)
+            .is_some_and(|d| d.replica.has_unsynced_ops())
+    }
+
     /// Hand a post-handshake server frame to the replica it is about.
     /// A frame for a doc this engine does not hold is dropped (the
     /// server only sends frames for docs we opened, so this is a race

@@ -366,6 +366,43 @@ pub fn move_item_across(
     Ok(())
 }
 
+/// The attachments a cross-doc move would carry (`spec/attachments.md`
+/// "Cross-doc move"): the doc `to` names, and each live file of the
+/// `items` that live in another doc, with the doc it is stored under.
+/// What `crate::files::copy_for_move` has the server copy before the
+/// entries move. Rows already in the target, and rows their workspace
+/// no longer has, carry nothing.
+pub struct FilesCrossing {
+    pub to: DocId,
+    /// `(source doc, file id)`.
+    pub files: Vec<(DocId, String)>,
+}
+
+/// [`FilesCrossing`] for a move of `items` to the workspace `to` names
+/// (`None`: Home). `None` in a bare context, which has one doc.
+pub fn files_crossing(
+    cx: &Ctx,
+    items: &[ItemRef],
+    to: Option<&str>,
+) -> anyhow::Result<Option<FilesCrossing>> {
+    let (_, Some(dst_id)) = resolve(cx, to)? else {
+        return Ok(None);
+    };
+    let mut files = Vec::new();
+    for r in items {
+        let (src, Some(src_id)) = resolve(cx, r.workspace.as_deref())? else {
+            continue;
+        };
+        if src_id == dst_id {
+            continue;
+        }
+        if let Some(item) = src.get_item(&r.id) {
+            files.extend(item.files.into_iter().map(|f| (src_id, f.id)));
+        }
+    }
+    Ok(Some(FilesCrossing { to: dst_id, files }))
+}
+
 /// The doc `selector` names among the call's workspaces, with its id.
 /// A bare context (no workspaces, tests) has only its own doc, named by
 /// `None`.

@@ -23,6 +23,7 @@ pub mod client;
 pub mod commands;
 pub mod config;
 pub mod daemon;
+pub mod files;
 pub mod ipc;
 #[cfg(target_vendor = "apple")]
 pub mod keychain;

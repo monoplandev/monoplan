@@ -502,6 +502,9 @@ final class MainWindowModel: ObservableObject {
     @Published private(set) var error: String?
     /// The account's id; nil while the profile has none (local only).
     @Published private(set) var accountId: String?
+    /// Attaches under way, and failed ones not yet dismissed
+    /// (`attachFiles`): the item panel shows its item's.
+    @Published private(set) var fileUploads: [FileUpload] = []
     /// Whether the account owns each shared workspace, by doc id, from
     /// its member list (`Engine.workspaceMembers`): a workspace row's
     /// "…" menu offers Delete to an owner and Leave to anyone else, and
@@ -1182,6 +1185,65 @@ final class MainWindowModel: ObservableObject {
 
     func removeSubtask(workspace: String?, id: String, subtask: String) {
         write { try $0.removeSubtask(workspace: workspace, id: id, subtask: subtask) }
+    }
+
+    /// The item panel's attachments (spec/attachments.md). The bytes
+    /// are the server's, so attaching and opening are round trips to
+    /// it, off the doc calls' queue like the sharing calls.
+    ///
+    /// Attach each picked file to the item (`Engine.attachFile`): a
+    /// row in `fileUploads` stands for it until its entry is in the
+    /// doc, and stays with the reason if it fails.
+    func attachFiles(workspace: String?, id: String, urls: [URL]) {
+        for url in urls {
+            let upload = FileUpload(workspace: workspace, item: id, name: url.lastPathComponent)
+            fileUploads.append(upload)
+            sharing({ engine in
+                // The picker's grant on a file outside the sandbox.
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                return try engine.attachFile(
+                    workspace: workspace, id: id, path: url.path, name: url.lastPathComponent,
+                    mime: AttachmentFiles.mime(of: url))
+            }) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    fileUploads.removeAll { $0.id == upload.id }
+                    reload()
+                case .failure(let error):
+                    if let at = fileUploads.firstIndex(where: { $0.id == upload.id }) {
+                        fileUploads[at].error = engineErrorMessage(error)
+                    }
+                }
+            }
+        }
+    }
+
+    func dismissUpload(_ id: UUID) {
+        fileUploads.removeAll { $0.id == id }
+    }
+
+    /// Fetch an attachment into a temp file for Quick Look
+    /// (`Engine.fetchFile`); the caller discards it when the preview
+    /// closes (`AttachmentFiles.discard`).
+    func openFile(workspace: String?, file: ItemFile, done: @escaping (Result<URL, Error>) -> Void) {
+        sharing({ engine in
+            let url = try AttachmentFiles.tempURL(name: file.name)
+            do {
+                try engine.fetchFile(workspace: workspace, fileId: file.id, dest: url.path)
+            } catch {
+                AttachmentFiles.discard(url)
+                throw error
+            }
+            return url
+        }, done: done)
+    }
+
+    /// Remove an attachment for good (`Engine.removeFile`): no undo
+    /// step, so the panel asks first.
+    func removeFile(workspace: String?, fileId: String) {
+        write { try $0.removeFile(workspace: workspace, fileId: fileId) }
     }
 
     /// What the item panel's assignee row offers for an item of
@@ -1887,7 +1949,7 @@ final class MainWindowModel: ObservableObject {
             when: capture.when, whenZone: capture.zone, whenSuggested: nil, event: capture.event,
             duration: capture.duration.map(UInt32.init), place: capture.place)
         return ItemInfo(
-            item: item, notes: "", subtasks: [],
+            item: item, notes: "", subtasks: [], files: [],
             listName: capture.list == Self.inbox ? nil : list?.name, listIcon: list?.icon, starred: false)
     }
 

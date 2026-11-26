@@ -608,6 +608,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tray: TrayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Attachments opened by a run that did not close their previews.
+        AttachmentFiles.discardAll()
         let tray = TrayController()
         self.tray = tray
         NSApp.mainMenu = MainMenu.build(

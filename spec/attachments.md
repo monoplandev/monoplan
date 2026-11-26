@@ -1,9 +1,11 @@
 # Attachments
 
 Status: **decided 2026-11-24. Phases 1 (server), 2 (core) and 3 (web) built
-the same day; the rest is plan.** What they do that this text did not first
+the same day; phase 4's engine, FFI and Apple halves built 2026-11-26 (no
+CLI commands); the rest is plan.** What they do that this text did not first
 say is under "As built". The web surface is covered by unit tests and has
-not been run in a browser.
+not been run in a browser; the iOS and macOS surfaces compile and have not
+been run in either app.
 
 Files attached to items. The bytes are online-only: they live on the server as
 encrypted blobs and are fetched on demand. The doc carries only the metadata
@@ -311,7 +313,7 @@ server's purge does, after the window.
 | 1 | **Built 2026-11-24.** Server: table, blob store interface with the directory backend, the six routes, quota, purge task, doc / account delete cascade; integration tests |
 | 2 | **Built 2026-11-24.** Core: `files` container, mutations, `ItemView.files`, events, hard-delete cleanup, export form, cross-doc adopt / release |
 | 3 | **Built 2026-11-24.** Web: attach, list, open, remove in the task surface (no rename: cut the same day); the row count; the purge loop and the owner's sweep; the blob copy before a cross-doc move |
-| 4 | CLI (`item attach` / `item files`), then the typed api / FFI and the iOS and macOS item surfaces |
+| 4 | **Built 2026-11-26, but for the CLI commands.** The host half on the engine loop (attach, open, the blob copy before a cross-doc move, the purge and the owner's sweep), the typed api / FFI, and the iOS and macOS item surfaces. Not built: CLI `item attach` / `item files` |
 | 5 | Notes images on top (`notes-plan.md` phase 4) |
 
 ## As built
@@ -453,6 +455,59 @@ the core and wasm additions it needed.
   lands, and while offline.
 - **Not built:** drop or paste to attach, upload progress, a retry on a
   failed upload row (dismiss and pick again), image previews.
+
+Phase 4, the engine and the Apple apps (`cli/src/files.rs` the host half,
+`core/ffi` the calls, `apple/MonoplanMac/.../FilesField.swift` and
+`apple/MonoplanIOS/Monoplan/ItemFilesField.swift` the surfaces, tests in
+`cli/tests/files.rs`). The web's phase 3 on the engine loop, so the headless
+daemon gets the housekeeping too.
+
+- **Rows.** `api::items::ItemFile` (`id`, `name`, `mime`, `size`,
+  `created_at`) and `ItemInfo.files`, oldest first; `item show --json`
+  carries them when there are any. List rows carry no count and the Apple
+  lists show no glyph.
+- **Calls.** `Engine.attach_file(workspace, id, path, name, mime)`,
+  `Engine.fetch_file(workspace, file_id, dest)` and
+  `Engine.remove_file(workspace, file_id)`. The first two wait on the
+  server, so the apps run them off the doc calls' queue, as the sharing
+  calls. Each is a doc call, the request, and a second doc call
+  (`LocalClient::call`), so the loop never waits on the network. Both are
+  refused on a local-only profile.
+- **Attach** takes a path, not bytes: the engine reads the file (refusing
+  over 25 MiB before and after reading), cleans the name as the web does
+  (`files::clean_file_name`), seals, `PUT`s (409 is success) and writes the
+  entry. The id and key come from the core's `random_bytes`.
+- **Open** writes the plaintext to the path the app gives, a temp file. 410
+  restores and fetches again. Nothing is cached.
+- **Cross-doc move.** `Engine.move_item_across` and `move_items_across`
+  copy first (`files::copy_for_move` over `api::moves::files_crossing`),
+  with the web's handling of 409, 410 and 404. A move that carries no file
+  asks the server nothing, so it still works offline; one that carries a
+  file fails offline and moves nothing.
+- **Housekeeping is the loop's** (`files::Housekeeping` on the host,
+  `files::run_jobs` beside it, one run at a time): pulsed by every server
+  frame and by the socket coming up, at once when a doc that is idle with
+  nothing unsent holds a purge mark, else 3 seconds after the last pulse. A
+  run purges every such doc and fetches the list of each whose sweep is
+  due; the loop then forgets the answered entries and, for a doc it owns
+  (the quota figures are in the list), marks ownerless entries and has
+  the unnamed rows tombstoned. A purge that stopped on a failed request is
+  tried again a minute later if nothing pulses first. The day is kept per
+  doc in `files-sweep.json` in the profile dir.
+- **The apps** (not yet run). A files section in the item surface under
+  the subtasks: name and size per file, a row per upload under way (it
+  stays with the reason when it fails, until dismissed), and an "Attach
+  file" row that opens the system file picker (on iOS a menu of the photo
+  library, images only, or Files). A click or tap fetches into a temp file
+  and shows it in Quick Look, which never runs what it shows; the temp file
+  goes when the preview closes, and whatever a run left is removed at the
+  next launch (`AttachmentFiles` in MonoplanCore). Removal asks first. A
+  binned item's files are shown and open, with nothing added or removed. No
+  attach row without an account.
+- **Not built:** the CLI commands, a row glyph in the Apple lists, the
+  Settings storage row, drop or paste to attach, upload progress, a retry
+  on a failed upload, image previews, anything on macOS or iOS for a
+  capture that is not an item yet.
 
 ## Open
 

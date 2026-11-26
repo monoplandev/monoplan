@@ -296,6 +296,16 @@
         }
       }
     },
+    "Attach file" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adjuntar archivo"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "es" : {
@@ -752,6 +762,26 @@
         }
       }
     },
+    "Delete file" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar archivo"
+          }
+        }
+      }
+    },
+    "Delete this file for good?" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Eliminar este archivo para siempre?"
+          }
+        }
+      }
+    },
     "Delete “%@”?" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -839,12 +869,42 @@
         }
       }
     },
+    "Delete…" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar…"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar"
+          }
+        }
+      }
+    },
     "Events" : {
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Eventos"
+          }
+        }
+      }
+    },
+    "Files" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Archivos"
           }
         }
       }
@@ -2102,6 +2162,16 @@
         }
       }
     },
+    "Quick Look" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vista rápida"
+          }
+        }
+      }
+    },
     "Quit Monoplan" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3292,6 +3362,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Se quitarán de %@ para todas las personas de ese espacio."
+          }
+        }
+      }
+    },
+    "“%@” is removed from every device and cannot be restored." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» se elimina de todos los dispositivos y no se puede restaurar."
           }
         }
       }

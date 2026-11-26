@@ -126,6 +126,37 @@ impl From<&monoplan_core::Subtask> for Subtask {
     }
 }
 
+/// One attachment of an item (`monoplan_core::ItemFile`,
+/// `spec/attachments.md`), copied at this boundary like [`Place`]: what
+/// the doc says of it. The bytes are the server's, fetched when the
+/// file is opened (`crate::files`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ItemFile {
+    pub id: String,
+    /// As the attaching client wrote it: shown, never trusted as a
+    /// path.
+    pub name: String,
+    /// Media type as that client saw it; empty when unknown.
+    pub mime: String,
+    /// Plaintext bytes.
+    pub size: u64,
+    /// Unix millis.
+    pub created_at: i64,
+}
+
+impl From<&monoplan_core::ItemFile> for ItemFile {
+    fn from(f: &monoplan_core::ItemFile) -> Self {
+        ItemFile {
+            id: f.id.clone(),
+            name: f.name.clone(),
+            mime: f.mime.clone(),
+            size: f.size,
+            created_at: f.created_at,
+        }
+    }
+}
+
 /// One item as a list shows it; the `item ls --json` row.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -304,6 +335,10 @@ pub struct ItemInfo {
     /// the JSON when the item has none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subtasks: Vec<Subtask>,
+    /// Attachments, oldest first (`spec/attachments.md`); absent from
+    /// the JSON when the item has none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ItemFile>,
     /// The item's list's name; absent for the reserved lists, which
     /// have no `ListMeta` row (clients label those).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -335,10 +370,20 @@ pub fn item_info(cx: &Ctx, item: &ItemView) -> ItemInfo {
         item: Item::from(item),
         notes: item.notes.clone(),
         subtasks: item.subtasks.iter().map(Subtask::from).collect(),
+        files: item.files.iter().map(ItemFile::from).collect(),
         list_icon: list.as_ref().and_then(|l| l.icon.clone()),
         list_name: list.map(|l| l.name),
         starred: cx.lens.has(item),
     }
+}
+
+/// Remove an attachment (`spec/attachments.md` "Mutations"). Permanent:
+/// not an undo step, and the engine's housekeeping has the server
+/// destroy the bytes once the removal has synced. The client asks
+/// first.
+pub fn remove_file(cx: &Ctx, file_id: &str) -> anyhow::Result<()> {
+    cx.doc.remove_file(file_id)?;
+    Ok(())
 }
 
 /// Move the item to any of the six workflow states.

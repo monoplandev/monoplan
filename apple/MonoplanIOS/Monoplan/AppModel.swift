@@ -150,6 +150,10 @@ final class AppModel: ObservableObject {
     static let searchLimit: UInt32 = 50
     private var refreshQueued = false
     @Published var lastError: String?
+    /// Attaches under way, and failed ones not yet dismissed
+    /// (`attachFiles`): the item page shows its item's. `workspace` is
+    /// the item's doc id (nil: Personal).
+    @Published private(set) var fileUploads: [FileUpload] = []
     @Published var signingIn = false
     @Published var signInError: String?
     @Published var deletingAccount = false
@@ -172,6 +176,8 @@ final class AppModel: ObservableObject {
     private let engineController: EngineController
 
     init() {
+        // Attachments opened by a run that did not close their previews.
+        AttachmentFiles.discardAll()
         location = ProfileLocation.resolve()
         // Application Support does not exist in a fresh iOS container;
         // the Rust side creates the profile dir itself but not its
@@ -672,6 +678,76 @@ final class AppModel: ObservableObject {
         let (workspace, id) = (selector(ref.docId), ref.itemId)
         write({ try $0.removeSubtask(workspace: workspace, id: id, subtask: subtask) }, to: ref)
     }
+
+    /// The item page's attachments (spec/attachments.md). The bytes
+    /// are the server's, so attaching and opening are round trips to
+    /// it, off the doc calls' queue like the sharing calls.
+    ///
+    /// Attach each picked file to the item (`Engine.attachFile`): a
+    /// row in `fileUploads` stands for it until its entry is in the
+    /// doc, and stays with the reason if it fails.
+    func attachFiles(_ ref: ItemRef, urls: [URL]) {
+        let (workspace, id) = (selector(ref.docId), ref.itemId)
+        for url in urls {
+            let upload = FileUpload(workspace: ref.docId, item: id, name: url.lastPathComponent)
+            fileUploads.append(upload)
+            sharing({ engine in
+                // The picker's grant on a file outside the sandbox.
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer {
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    // A photo copied out of the library for this.
+                    AttachmentFiles.discard(url)
+                }
+                return try engine.attachFile(
+                    workspace: workspace, id: id, path: url.path, name: url.lastPathComponent,
+                    mime: AttachmentFiles.mime(of: url))
+            }) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    fileUploads.removeAll { $0.id == upload.id }
+                    wrote(to: ref)
+                case .failure(let error):
+                    if let at = fileUploads.firstIndex(where: { $0.id == upload.id }) {
+                        fileUploads[at].error = engineErrorMessage(error)
+                    }
+                }
+            }
+        }
+    }
+
+    func dismissUpload(_ id: UUID) {
+        fileUploads.removeAll { $0.id == id }
+    }
+
+    /// Fetch an attachment into a temp file for Quick Look
+    /// (`Engine.fetchFile`); the caller discards it when the preview
+    /// closes (`AttachmentFiles.discard`).
+    func openFile(_ ref: ItemRef, file: ItemFile, done: @escaping (Result<URL, Error>) -> Void) {
+        let workspace = selector(ref.docId)
+        sharing({ engine in
+            let url = try AttachmentFiles.tempURL(name: file.name)
+            do {
+                try engine.fetchFile(workspace: workspace, fileId: file.id, dest: url.path)
+            } catch {
+                AttachmentFiles.discard(url)
+                throw error
+            }
+            return url
+        }, done: done)
+    }
+
+    /// Remove an attachment for good (`Engine.removeFile`): no undo
+    /// step, so the page asks first.
+    func removeFile(_ ref: ItemRef, fileId: String) {
+        let workspace = selector(ref.docId)
+        write({ try $0.removeFile(workspace: workspace, fileId: fileId) }, to: ref)
+    }
+
+    /// Whether a file can be attached: there is an account, so a
+    /// server to hold the bytes.
+    var canAttachFiles: Bool { session?.localOnly == false }
 
     /// Set or clear (nil) an item's duration in minutes.
     func setDuration(_ ref: ItemRef, minutes: Int?) {

@@ -558,6 +558,29 @@ impl Engine {
         Ok((profile, doc))
     }
 
+    /// The profile, for the calls that reach the server themselves.
+    fn profile(&self) -> Result<monoplan_cli::config::Profile, EngineError> {
+        monoplan_cli::config::Profile::active_at(self.profile_dir.clone())
+            .ok_or(EngineError::NotLoggedIn)
+    }
+
+    /// Before a cross-doc move: the server copies the crossing items'
+    /// attachments into the target workspace (`spec/attachments.md`
+    /// "Cross-doc move"). Nothing is asked of it when they have none.
+    fn copy_files_for_move(
+        &self,
+        items: Vec<ItemRef>,
+        to: Option<String>,
+    ) -> Result<(), EngineError> {
+        let profile = self.profile()?;
+        block(monoplan_cli::files::copy_for_move(
+            &self.client,
+            &profile,
+            items,
+            to,
+        ))
+    }
+
     fn synced(&self, req: monoplan_cli::ipc::Request) -> Result<SyncState, EngineError> {
         match self.reply(req)? {
             monoplan_cli::ipc::Reply::Synced { sync } => Ok(sync.into()),
@@ -1217,13 +1240,16 @@ impl Engine {
     /// Home), at the end of its open items: the id is kept, a star
     /// follows it, and Undo takes the whole move back
     /// (spec/sharing-plan.md "Cross-doc move"). The caller confirms
-    /// first when the audience changes.
+    /// first when the audience changes. An item with attachments needs
+    /// the server, which copies them across first; if that fails
+    /// nothing moves.
     pub fn move_item_across(
         &self,
         item: ItemRef,
         to: Option<String>,
         list: String,
     ) -> Result<(), EngineError> {
+        self.copy_files_for_move(vec![item.clone()], to.clone())?;
         Ok(self.client.call_blocking(None, move |cx| {
             api::moves::move_item_across(cx, &item, to.as_deref(), &list)
         })?)
@@ -1234,7 +1260,8 @@ impl Engine {
     /// land from the 0-based `index` of `list` in the workspace `to`
     /// names (nil is Home). Rows of other workspaces cross over with
     /// their ids and stars. One undo step. Whether the audience changes
-    /// is the caller's to ask first.
+    /// is the caller's to ask first. Attachments cross as in
+    /// [`move_item_across`](Self::move_item_across).
     pub fn move_items_across(
         &self,
         items: Vec<ItemRef>,
@@ -1242,6 +1269,7 @@ impl Engine {
         list: String,
         index: u32,
     ) -> Result<(), EngineError> {
+        self.copy_files_for_move(items.clone(), to.clone())?;
         Ok(self.client.call_blocking(None, move |cx| {
             api::moves::move_items_across(cx, &items, to.as_deref(), &list, index as usize)
         })?)
@@ -1510,6 +1538,67 @@ impl Engine {
     /// Hard-delete every binned item of the workspace; how many went.
     pub fn empty_bin(&self, workspace: Option<String>) -> Result<u32, EngineError> {
         Ok(self.client.call_blocking(workspace, api::bin::empty_bin)?)
+    }
+
+    // ----- attachments (`monoplan_cli::files`, spec/attachments.md) -----
+    //
+    // The bytes are the server's: attaching and opening wait on it, so
+    // call them off the main thread and off the queue the doc calls
+    // are made on. Both need an account and a connection. The engine
+    // purges removed files on its own.
+
+    /// Upload the file at `path` and attach it to an item, under
+    /// `name` (cleaned of what the doc refuses) and `mime` (empty when
+    /// unknown); the new file's id. At most 25 MiB.
+    /// `EngineObserver::changed` follows once the entry is in the doc.
+    pub fn attach_file(
+        &self,
+        workspace: Option<String>,
+        id: String,
+        path: String,
+        name: String,
+        mime: String,
+    ) -> Result<String, EngineError> {
+        let profile = self.profile()?;
+        block(monoplan_cli::files::attach(
+            &self.client,
+            &profile,
+            workspace,
+            id,
+            std::path::Path::new(&path),
+            &name,
+            &mime,
+        ))
+    }
+
+    /// Fetch an attachment and write its decrypted bytes to `dest`, a
+    /// temp file of the app's. Nothing is cached: every call fetches.
+    pub fn fetch_file(
+        &self,
+        workspace: Option<String>,
+        file_id: String,
+        dest: String,
+    ) -> Result<(), EngineError> {
+        let profile = self.profile()?;
+        block(monoplan_cli::files::fetch(
+            &self.client,
+            &profile,
+            workspace,
+            file_id,
+            std::path::Path::new(&dest),
+        ))
+    }
+
+    /// Remove an attachment for good: not an undo step, and the server
+    /// destroys the bytes once the removal has synced. Ask first.
+    pub fn remove_file(
+        &self,
+        workspace: Option<String>,
+        file_id: String,
+    ) -> Result<(), EngineError> {
+        Ok(self
+            .client
+            .call_blocking(workspace, move |cx| api::items::remove_file(cx, &file_id))?)
     }
 
     // ----- undo / redo (`monoplan_cli::undo`) -----
