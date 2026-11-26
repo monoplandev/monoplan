@@ -911,10 +911,11 @@ export function Workspace(props: {
       floor,
       (it) => lingering.has(it.id),
     );
-    // "Hide past days": the days gone by are left out, all but one the
-    // mini calendar jumped to. Overdue is not one of them.
+    // "Hide past days": the days gone by are left out. Overdue is not
+    // one of them. A past day picked on the mini calendar unchecks it
+    // (`showAgendaDay`), so no picked day is ever hidden here.
     const groups = hidePastDays()
-      ? all.filter((g) => g.urgency !== "past" || g.key === picked)
+      ? all.filter((g) => g.urgency !== "past")
       : all;
     const days = hideEmptyDays()
       ? groups
@@ -3492,6 +3493,13 @@ export function Workspace(props: {
     // and its header can sit at the top.
     const reach = addDaysToStamp(day, 2 * (AGENDA_ALL_DAYS_AHEAD + 1));
     batch(() => {
+      // A past day while "Hide past days" is checked: the pick unchecks
+      // it, as the user would have to, so the day shows among the other
+      // past days and the filter menu says what is on screen.
+      if (hidePastDays() && day < todayStamp(nowMs())) {
+        setHidePastDays(false);
+        saveHidePastDays(false);
+      }
       setAgendaPicked(day);
       setAgendaReach((r) => (r !== null && r > reach ? r : reach));
     });
@@ -4275,6 +4283,12 @@ export function Workspace(props: {
                     label: m().upcoming.hidePastDays,
                     checked: hidePastDays(),
                     onChange: (hide) => {
+                      // Checked with a past day picked: the pick goes,
+                      // or `withDay` would keep that one day.
+                      const picked = agendaPicked();
+                      if (hide && picked !== null && picked < todayStamp(nowMs())) {
+                        setAgendaPicked(null);
+                      }
                       setHidePastDays(hide);
                       saveHidePastDays(hide);
                     },

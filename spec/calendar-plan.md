@@ -439,7 +439,9 @@ for the month grid). `groupByDeadline` became `groupByDay` over the
   preference, unchecked by default, not counted and not cleared, as
   that one) leaves out the days gone by, so the agenda starts at
   Overdue / Today. Overdue stays. A past day picked on the mini
-  calendar still shows, alone, until the agenda is left. The Mac and
+  calendar unchecks the tick (2026-11-26, the preference written as if
+  by hand; the day showed alone before, cut off from Today), and
+  checking it again drops such a pick. The Mac and
   iOS Calendars have the same tick (2026-11-25, `agendaHidePastDays`
   device preference, `CalendarOptions.hide_past_days`; no mini
   calendar there). iOS's filter menu also has the workspace checks
