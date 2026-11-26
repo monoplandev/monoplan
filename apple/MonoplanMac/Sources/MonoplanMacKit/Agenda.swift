@@ -40,6 +40,11 @@ public struct AgendaRow: Decodable, Equatable {
     /// The item's place, when it has one.
     public let place: PlaceInfo?
     public let tone: String
+    /// The item's event flag (spec/events-plan.md).
+    public let event: Bool?
+    /// False on an event's row with no checkbox: an open event's,
+    /// whether by its flag or by a span past one day.
+    public let showsCheck: Bool?
     /// `--all` only: the row's workspace. `docName` is nil for Home
     /// ("Personal") and for an unnamed doc.
     public let docId: String?
@@ -48,6 +53,8 @@ public struct AgendaRow: Decodable, Equatable {
     public var isDone: Bool { state == "done" }
     /// The row shows a clock time: its `when` carries one.
     public var isTimed: Bool { (when?.count ?? 0) >= 16 }
+    /// The row is an event's: flagged, or a span the core takes for one.
+    public var isEvent: Bool { event == true || showsCheck == false }
 }
 
 public enum Agenda {

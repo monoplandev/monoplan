@@ -149,7 +149,8 @@ struct AgendaWidgetView: View {
     }
 }
 
-/// One row: a dot in the tone's colour (red overdue),
+/// One row: a dot in the tone's colour (red overdue), or for an event
+/// the Calendar's event pill (the grey upright bar, as tall as the row),
 /// the text, and the time when timed (under the text where the widget
 /// is narrow, beside it otherwise).
 struct AgendaWidgetRow: View {
@@ -165,10 +166,15 @@ struct AgendaWidgetRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Circle()
-                .fill(tone)
-                .frame(width: 6, height: 6)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
+            if row.event {
+                // The dot's place; the pill is drawn over the row.
+                Color.clear.frame(width: 6, height: 1)
+            } else {
+                Circle()
+                    .fill(tone)
+                    .frame(width: 6, height: 6)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3 }
+            }
             if compact, let time = row.time {
                 Text("\(Text(time).foregroundStyle(.secondary).monospacedDigit()) \(row.text)")
                     .font(.subheadline)
@@ -183,6 +189,15 @@ struct AgendaWidgetRow: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+        .overlay(alignment: .leading) {
+            if row.event {
+                Capsule()
+                    .fill(.tertiary)
+                    .frame(width: 3)
+                    .padding(.vertical, 1)
+                    .frame(width: 6)
             }
         }
         // Item text is the user's: redacted where the system hides

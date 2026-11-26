@@ -28,6 +28,9 @@ final class AgendaSnapshotTests: XCTestCase {
         XCTAssertEqual(out.todayCount, 2)
         guard case .row(let standup) = out.lines[1] else { return XCTFail("not a row") }
         XCTAssertEqual(standup.time, "09:00")
+        XCTAssertTrue(standup.event)
+        guard case .row(let report) = out.lines[0] else { return XCTFail("not a row") }
+        XCTAssertFalse(report.event)
     }
 
     func testLimitNeverEndsOnAHeading() throws {

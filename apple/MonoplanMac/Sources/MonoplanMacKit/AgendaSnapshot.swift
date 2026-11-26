@@ -76,6 +76,8 @@ public struct WidgetRow: Equatable {
     public let time: String?
     /// The projection's tone: `overdue` or `neutral`.
     public let tone: String
+    /// An event's row: it leads with the event pill, not a dot.
+    public let event: Bool
 }
 
 public enum WidgetAgenda {
@@ -121,7 +123,7 @@ public enum WidgetAgenda {
 
     static func widgetRow(_ row: AgendaRow, key: String) -> WidgetRow {
         let time = row.isTimed ? row.when.map { String($0.dropFirst(11).prefix(5)) } : nil
-        return WidgetRow(id: key, text: row.text, time: time, tone: row.tone)
+        return WidgetRow(id: key, text: row.text, time: time, tone: row.tone, event: row.isEvent)
     }
 
     /// `YYYY-MM-DD` of `date` in the local calendar: the form the

@@ -3799,14 +3799,6 @@ button.file-name:hover {
   outline-offset: 2px;
 }
 
-/* A row's attachment count: the file glyph and a number, plain like
-   the subtask count. */
-.row-files {
-  background: none;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-}
-
 /* A row's subtask count: plain text like the stamp, no pill. */
 .row-subtasks {
   background: none;

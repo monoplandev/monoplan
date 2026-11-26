@@ -11,7 +11,7 @@ import {
 } from "./ItemContextMenu.tsx";
 import { subtaskCount } from "./SubtasksField.tsx";
 import { fileCount } from "./fileFormat.ts";
-import fileSvg from "./icons/file.svg?raw";
+import link2Svg from "./icons/link-2.svg?raw";
 import { Avatar } from "./Avatar.tsx";
 import { PlaceBadge } from "./PlaceBadge.tsx";
 import { WhenBadge } from "./WhenBadge.tsx";
@@ -204,12 +204,12 @@ export function Row(props: {
   // The subtask count (`spec/subtasks.md`): all a row shows of an
   // item's subtasks. Open items only, as the dates.
   const subtasks = () => (isOpen(props.item()) ? subtaskCount(props.item().subtasks) : null);
-  // The attachment count (`spec/attachments.md`), under the same rule.
+  // The attachment mark (`spec/attachments.md`), under the same rule:
+  // the attach glyph alone, the count in its tooltip.
   const files = () => (isOpen(props.item()) ? fileCount(props.item().files) : null);
   const filesBadge = (n: number) => (
-    <span class="badge row-files" title={m().workspace.filesCount(n)}>
-      <span class="badge-icon" innerHTML={fileSvg} />
-      {n}
+    <span class="badge" title={m().workspace.filesCount(n)}>
+      <span class="badge-icon" innerHTML={link2Svg} />
     </span>
   );
   const assigneeTitle = (a: { email: string | null }): string =>

@@ -107,7 +107,7 @@ Each is one commit, and one undo step unless it says otherwise.
   never loses a file.
 - **Duplicate** does not copy attachments (first pass).
 
-`ItemView` gains `files` (the entries without their keys); rows show a count.
+`ItemView` gains `files` (the entries without their keys); rows show a glyph.
 An `AppEvent::ItemFilesChanged` fires on local writes, imports and undo.
 
 ### Export / import
@@ -439,8 +439,9 @@ the core and wasm additions it needed.
   (the file was already unavailable) is passed over. Any other failure, or
   being offline, moves nothing and says so in an alert. Blobs copied
   before a later copy failed are orphans for the target owner's sweep.
-- **Rows** show a file glyph and the count on Open items, beside the
-  subtask count. The task surface shows the section only once the item
+- **Rows** show the attach glyph (`link-2.svg`) on Open items, beside the subtask count
+  (no number since 2026-11-26; the count is the glyph's tooltip). The
+  task surface shows the section only once the item
   exists, and not at all to a signed-out session with no files.
 - **No rename on the web** (cut 2026-11-24): a file keeps the name it was
   attached under. `Doc::rename_file` and the wasm `renameFile` stay; the
