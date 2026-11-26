@@ -1314,6 +1314,13 @@ body {
   cursor: pointer;
 }
 
+/* The file glyph's wrapper: as an inline box it would sit the svg on the
+   text baseline, a couple of pixels above where the created row's icon
+   (a direct flex child) lands. */
+.nav-new-list-icon > span {
+  display: flex;
+}
+
 .nav-new-list-icon:hover,
 .nav-new-list-icon[data-expanded] {
   background: var(--bg-active);
@@ -2195,6 +2202,14 @@ input.task-check:hover {
 .list-icon-emoji {
   font-size: 18px;
   line-height: 1;
+}
+
+/* No icon set: the file glyph stands in at the emoji's 18px. */
+.list-icon-placeholder svg {
+  position: relative;
+  top: 3px;
+  width: 18px;
+  height: 18px;
 }
 
 /* Static counterpart to the list-icon trigger for reserved views whose

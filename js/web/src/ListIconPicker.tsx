@@ -25,7 +25,7 @@ export function ListIconPicker(props: {
         tabIndex={-1}
         aria-label={m().workspace.listIcon}
       >
-        <Show when={props.icon} fallback={<span innerHTML={fileSvg} />}>
+        <Show when={props.icon} fallback={<span class="list-icon-placeholder" innerHTML={fileSvg} />}>
           {(icon) => <span class="list-icon-emoji">{icon()}</span>}
         </Show>
       </Popover.Trigger>
